@@ -12,7 +12,9 @@
       "Bash(MERGE_CHECK=1 bash scripts/pre-merge-check.sh)",
       "Bash(go test *)",
       "Bash(go tool *)",
-      "Bash(go vet *)"
+      "Bash(go vet *)",
+      "WebSearch",
+      "WebFetch(domain:kiro.dev)"
     ]
   },
   "hooks": {
