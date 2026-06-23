@@ -62,27 +62,32 @@ Every exported function, method, and type in `.go` source files SHALL have a god
 
 ### Requirement: Minor or major version bump before merge
 
-The repository SHALL contain an incremented minor or major version relative to the `main` branch before a merge is permitted. A patch-only increment SHALL NOT satisfy this requirement.
+The branch SHALL carry a Git semver tag (`v{major}.{minor}.{patch}`) whose major or minor segment is higher than the latest tag reachable from `main`. A patch-only increment SHALL NOT satisfy this requirement. For a major version bump, `go.mod` MUST also reflect the updated module path (e.g., `module dreamland/v2`).
 
-#### Scenario: VERSION file major segment is incremented
+#### Scenario: Tag major segment is incremented
 
-- **WHEN** the `VERSION` file at the repo root has a higher major segment than the same file on `main`
-- **THEN** the gate proceeds
+- **WHEN** `git describe --tags --abbrev=0` on the current branch resolves a tag with a higher major segment than `git describe --tags --abbrev=0 main`
+- **THEN** the gate verifies `go.mod` contains the updated major module path; if so, the gate proceeds
 
-#### Scenario: VERSION file minor segment is incremented
+#### Scenario: Tag major segment is incremented but go.mod not updated
 
-- **WHEN** the major segment is unchanged but the minor segment is higher than the same file on `main`
+- **WHEN** the tag's major segment is higher than main's but the `module` line in `go.mod` still uses the old major path
+- **THEN** the gate MUST abort with a message instructing the developer to update the module path in `go.mod`
+
+#### Scenario: Tag minor segment is incremented
+
+- **WHEN** the major segment matches `main` but the minor segment is higher
 - **THEN** the gate proceeds
 
 #### Scenario: Only patch segment is incremented
 
-- **WHEN** the major and minor segments match `main` but the patch segment is higher
-- **THEN** the gate MUST abort with a message explaining that a patch-only bump is not sufficient and exit non-zero
+- **WHEN** the major and minor segments match `main`'s latest tag but the patch segment is higher
+- **THEN** the gate MUST abort with a message explaining that a patch-only tag is not sufficient and exit non-zero
 
-#### Scenario: VERSION file is unchanged or missing
+#### Scenario: No new tag exists on the branch
 
-- **WHEN** the `VERSION` file is absent or all segments match `main`
-- **THEN** the gate MUST abort with a message explaining that the minor or major version must be bumped and exit non-zero
+- **WHEN** `git describe --tags --abbrev=0` resolves the same tag as `main`, or no tag exists on the current branch
+- **THEN** the gate MUST abort with a message instructing the developer to create a `v{major}.{minor}.{patch}` tag before merging
 
 ---
 

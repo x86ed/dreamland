@@ -46,13 +46,13 @@ The goal is to wire shell-based checks into Claude Code's `Stop` hook (fires whe
 
 **Alternative considered:** `golint` or `staticcheck` — valid but adds a tool dependency; can be upgraded later.
 
-### 4. Version bump check via `git diff main -- go.mod`
+### 4. Version bump check via Git semver tags
 
-**Decision:** Check a `VERSION` file at the repo root against `git show main:VERSION`. Pass if the major or minor segment has increased. Fail if only the patch segment changed or if no version was bumped at all.
+**Decision:** Resolve the latest `v{major}.{minor}.{patch}` tag reachable from `HEAD` (`git describe --tags --abbrev=0`) and the latest tag reachable from `main` (`git describe --tags --abbrev=0 main`). Pass if the current tag's major or minor segment is higher. Reject if only the patch segment changed or no new tag exists.
 
-**Rationale:** Go module paths encode major versions; minor/patch are tracked separately. A `VERSION` file is the simplest convention for semver tracking in a single-module repo.
+**Rationale:** Git tags are the idiomatic Go release mechanism — `go get`, `go install`, proxy.golang.org, and `pkg.go.dev` all resolve versions from tags. A `VERSION` file is a redundant side-channel that can drift out of sync. The developer tags the branch before running the gate (consistent with normal Go module release flow). Major version bumps in Go also require updating the module path in `go.mod` (e.g., `module dreamland/v2`); the gate should flag if a major tag bump is present but `go.mod` hasn't been updated.
 
-**Alternative considered:** Git tags — requires the tag to already exist before the merge gate runs, which is backwards.
+**Alternative considered:** `VERSION` file — simpler but non-idiomatic and ignored by the Go toolchain. Rejected in favour of the canonical approach.
 
 ### 5. Auto-remediation: generate test stubs, then re-run
 

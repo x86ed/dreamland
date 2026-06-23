@@ -22,4 +22,4 @@ Merging untested, undocumented, or incorrectly versioned code to main introduces
 
 - `.claude/settings.json` — new hook entries wired to the merge/task-stop lifecycle
 - Go source files in `cmd/` — may receive generated `_test.go` files if coverage is below threshold
-- `VERSION` file — minor or major version bump enforced before merge; patch-only bump rejected
+- Git semver tags (`v{major}.{minor}.{patch}`) — gate resolves the latest tag on the branch vs. `main`; minor or major bump required, patch-only rejected; major bump also requires `go.mod` module path update
