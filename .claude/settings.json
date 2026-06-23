@@ -8,7 +8,10 @@
       "Bash(openspec new *)",
       "Bash(openspec status *)",
       "Bash(openspec instructions *)",
-      "Bash(bash scripts/pre-merge-check.sh*)"
+      "Bash(bash scripts/pre-merge-check.sh*)",
+      "Bash(MERGE_CHECK=1 bash scripts/pre-merge-check.sh)",
+      "Bash(go test *)",
+      "Bash(go tool *)"
     ]
   },
   "hooks": {

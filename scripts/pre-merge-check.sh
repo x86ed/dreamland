@@ -47,12 +47,23 @@ run_tests() {
 check_coverage() {
   echo "==> Checking test coverage..."
 
+  # Measure coverage only for non-main packages; entry-point main() is not
+  # unit-testable by convention and would otherwise drag the aggregate down.
+  local coverpkgs
+  coverpkgs=$(go list -f '{{if ne .Name "main"}}{{.ImportPath}}{{end}}' ./... \
+    2>/dev/null | tr '\n' ',')
+  coverpkgs="${coverpkgs%,}"
+
+  if [[ -z "$coverpkgs" ]]; then
+    warn "No non-main packages found; skipping coverage check."
+    return
+  fi
+
   local coverfile
-  coverfile=$(mktemp /tmp/coverage.XXXXXX.out)
+  coverfile=$(mktemp /tmp/dreamland-cov.XXXXXX)
   trap 'rm -f "$coverfile"' RETURN
 
-  # Run with coverage; suppress test output already shown by run_tests.
-  go test -coverprofile="$coverfile" ./... > /dev/null 2>&1 || true
+  go test -coverprofile="$coverfile" -coverpkg="$coverpkgs" ./... > /dev/null 2>&1 || true
 
   # --- Aggregate coverage ---
   local total_line
@@ -61,24 +72,19 @@ check_coverage() {
     fail "Could not determine total coverage — no coverage data produced."
   fi
   local total
-  total=$(echo "$total_line" | awk '{print $3}' | tr -d '%')
+  total=$(echo "$total_line" | awk '{print $NF}' | tr -d '%')
 
-  # Use awk for float comparison (bash can't do floats natively)
   local below90 below95
   below90=$(awk "BEGIN { print ($total < 90) ? 1 : 0 }")
   below95=$(awk "BEGIN { print ($total < 95) ? 1 : 0 }")
 
   if [[ "$below90" == "1" ]]; then
     echo "  Aggregate coverage: ${total}%"
-    # List under-covered packages before auto-remediation step
-    echo "  Under-covered packages:"
-    go tool cover -func="$coverfile" \
-      | grep -v '^total:' \
-      | awk -F'\t' '{
-          split($3, a, "%"); cov=a[1]+0;
-          split($1, f, ":");
-          if (cov < 90) printf "    %s (%.1f%%)\n", f[1], cov
-        }' | sort -u || true
+    echo "  Under-covered functions:"
+    go tool cover -func="$coverfile" | grep -v '^total:' | awk '{
+      pct = $NF; gsub(/%/, "", pct); pct += 0
+      if (pct < 90) printf "    %s %s (%s)\n", $1, $2, $NF
+    }' || true
     fail "Aggregate coverage is ${total}% — must be ≥ 90% before merging."
   fi
 
@@ -88,21 +94,31 @@ check_coverage() {
     pass "Coverage: ${total}%"
   fi
 
-  # --- Per-package floor (80%) ---
+  # --- Per-package floor (80%) —
+  # Compute per-package coverage by grouping function entries by package.
   local pkg_failures=0
-  while IFS= read -r line; do
-    [[ "$line" == total:* ]] && continue
-    local pct
-    pct=$(echo "$line" | awk '{print $3}' | tr -d '%')
-    local pkg
-    pkg=$(echo "$line" | awk '{print $1}')
+  while IFS= read -r pkg_line; do
+    local pkg pct
+    pkg=$(echo "$pkg_line" | awk '{print $1}')
+    pct=$(echo "$pkg_line" | awk '{print $2}')
     local below80
     below80=$(awk "BEGIN { print ($pct < 80) ? 1 : 0 }")
     if [[ "$below80" == "1" ]]; then
       echo -e "  ${RED}LOW:${NC} $pkg — ${pct}% (minimum 80%)" >&2
       pkg_failures=1
     fi
-  done < <(go tool cover -func="$coverfile" | grep -v '^total:')
+  done < <(go tool cover -func="$coverfile" | grep -v '^total:' | awk '{
+      # $1 is "pkg/sub/file.go:line:" — strip ":line:" then get dirname
+      ref = $1; sub(/:[0-9]+:$/, "", ref)
+      n = split(ref, parts, "/")
+      pkg = ""; for (i=1; i<n; i++) pkg = (i==1) ? parts[i] : pkg "/" parts[i]
+      if (pkg == "") pkg = ref
+      pct = $NF; gsub(/%/, "", pct); pct += 0
+      sum[pkg] += pct; count[pkg]++
+    }
+    END {
+      for (p in sum) if (p != "") printf "%s %.1f\n", p, sum[p]/count[p]
+    }' | sort)
 
   if [[ "$pkg_failures" == "1" ]]; then
     fail "One or more packages are below the 80% per-package floor."
@@ -165,37 +181,32 @@ find_untested_packages() {
 check_godoc() {
   echo "==> Checking godoc on exported symbols..."
 
-  local failures=0
-  while IFS= read -r gofile; do
-    # Read file into array for look-behind check
-    mapfile -t lines < "$gofile"
-    local n=${#lines[@]}
-    for (( i=0; i<n; i++ )); do
-      local line="${lines[$i]}"
-      # Match exported func/type/var at the start of a line
-      if [[ "$line" =~ ^(func|type|var)\ [A-Z] ]]; then
-        # Check preceding 3 lines for a // comment
-        local found_comment=0
-        for (( j=i-1; j>=0 && j>=i-3; j-- )); do
-          if [[ "${lines[$j]}" =~ ^[[:space:]]*//(.*) ]]; then
-            found_comment=1
-            break
-          fi
-          # Blank lines between comment and declaration are ok; non-blank non-comment stops search
-          if [[ -n "${lines[$j]}" && ! "${lines[$j]}" =~ ^[[:space:]]*$ ]]; then
-            break
-          fi
-        done
-        if [[ "$found_comment" == "0" ]]; then
-          echo -e "  ${RED}MISSING godoc:${NC} ${gofile}:$((i+1)): ${line}" >&2
-          failures=1
-        fi
-      fi
-    done
-  done < <(find . -name '*.go' ! -name '*_test.go' \
-              ! -path '*/vendor/*' ! -path '*/testdata/*')
+  # Use awk to do look-behind without bash arrays (portable; no mapfile needed).
+  local issues
+  issues=$(find . -name '*.go' ! -name '*_test.go' \
+      ! -path '*/vendor/*' ! -path '*/testdata/*' | sort | while IFS= read -r gofile; do
+    awk '
+      { lines[FNR] = $0 }
+      END {
+        for (i = 1; i <= FNR; i++) {
+          if (lines[i] ~ /^(func|type|var) [A-Z]/) {
+            found = 0
+            for (j = i-1; j >= 1 && j >= i-3; j--) {
+              if (lines[j] ~ /^[[:space:]]*\/\//) { found = 1; break }
+              # Non-blank, non-comment line above stops the look-behind
+              if (lines[j] !~ /^[[:space:]]*$/) break
+            }
+            if (!found) printf "%s:%d: %s\n", FILENAME, i, lines[i]
+          }
+        }
+      }
+    ' "$gofile"
+  done)
 
-  if [[ "$failures" == "1" ]]; then
+  if [[ -n "$issues" ]]; then
+    while IFS= read -r line; do
+      echo -e "  ${RED}MISSING godoc:${NC} $line" >&2
+    done <<< "$issues"
     fail "Exported symbols above are missing godoc comments."
   fi
   pass "All exported symbols have godoc."

@@ -44,6 +44,6 @@
 
 ## 9. Existing Code Compliance
 
-- [ ] 9.1 Run the gate script against the current codebase; add missing `_test.go` files for any packages below threshold
-- [ ] 9.2 Add godoc comments to any exported symbols in `cmd/` that are currently undocumented
-- [ ] 9.3 Verify baseline `v0.1.0` tag exists and gate passes end-to-end with `MERGE_CHECK=1`
+- [x] 9.1 Run the gate script against the current codebase; add missing `_test.go` files for any packages below threshold
+- [x] 9.2 Add godoc comments to any exported symbols in `cmd/` that are currently undocumented
+- [x] 9.3 Verify baseline `v0.1.0` tag exists and gate passes end-to-end with `MERGE_CHECK=1`

@@ -26,6 +26,15 @@ type helloOutput struct {
 	Message string `json:"message"`
 }
 
+// helloHandler responds to hello tool requests.
+func helloHandler(_ context.Context, _ *mcp.CallToolRequest, input helloInput) (*mcp.CallToolResult, helloOutput, error) {
+	msg := fmt.Sprintf("Hello, %s!", input.Name)
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: msg}},
+	}, helloOutput{Message: msg}, nil
+}
+
+// runServe starts the MCP server over stdio.
 func runServe(cmd *cobra.Command, args []string) error {
 	s := mcp.NewServer(&mcp.Implementation{
 		Name:    "dreamland",
@@ -35,12 +44,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "hello",
 		Description: "Say hello",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, input helloInput) (*mcp.CallToolResult, helloOutput, error) {
-		msg := fmt.Sprintf("Hello, %s!", input.Name)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: msg}},
-		}, helloOutput{Message: msg}, nil
-	})
+	}, helloHandler)
 
 	fmt.Fprintln(cmd.ErrOrStderr(), "Starting MCP server (stdio)...")
 	return s.Run(context.Background(), &mcp.StdioTransport{})
