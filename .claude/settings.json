@@ -11,7 +11,8 @@
       "Bash(bash scripts/pre-merge-check.sh*)",
       "Bash(MERGE_CHECK=1 bash scripts/pre-merge-check.sh)",
       "Bash(go test *)",
-      "Bash(go tool *)"
+      "Bash(go tool *)",
+      "Bash(go vet *)"
     ]
   },
   "hooks": {
