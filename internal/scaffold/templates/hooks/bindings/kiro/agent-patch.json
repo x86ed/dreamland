@@ -1,0 +1,14 @@
+{
+  "name": "dreamland",
+  "hooks": {
+    "agentSpawn": [
+      {"command": "dreamland version-bump"},
+      {"command": "dreamland coauthor"}
+    ],
+    "stop": [
+      {"command": "dreamland version-bump --patch"},
+      {"command": "dreamland transition-log"},
+      {"command": "dreamland test"}
+    ]
+  }
+}

@@ -35,13 +35,13 @@ The five agents are:
 #### Scenario: Antigravity agents installed
 
 - **WHEN** the selected coding tool is "Antigravity" and `dreamland init` completes successfully
-- **THEN** a plugin directory is created at `~/.gemini/antigravity-cli/plugins/dreamland/`, a `plugin.json` manifest is written there, and five `.md` agent files are written to `~/.gemini/antigravity-cli/plugins/dreamland/agents/`
-- **AND** stdout includes a post-install instruction telling the user to run `antigravity plugin install ~/.gemini/antigravity-cli/plugins/dreamland`
+- **THEN** five skill directories are created at `.agents/skills/<name>/` in the repo root (one per agent: `orchestrator`, `spec-writer`, `implementer`, `tester`, `pr-closer`), each containing a `SKILL.md` file with YAML frontmatter (`name`, `description`) and a markdown body of agent instructions
+- **AND** the `SKILL.md` files are auto-discovered by Antigravity via the project-scoped `.agents/skills/` convention (no plugin install step required)
 
 #### Scenario: GitHub Copilot agents installed
 
 - **WHEN** the selected coding tool is "GitHub Copilot" and `dreamland init` completes successfully
-- **THEN** five `.instructions.md` files are written to `.github/copilot-agents/` (`orchestrator.instructions.md`, `spec-writer.instructions.md`, `implementer.instructions.md`, `tester.instructions.md`, `pr-closer.instructions.md`)
+- **THEN** five `.agent.md` files are written to `.github/agents/` (`orchestrator.agent.md`, `spec-writer.agent.md`, `implementer.agent.md`, `tester.agent.md`, `pr-closer.agent.md`), each with YAML frontmatter (`name`, `description`, `tools`)
 
 ### Requirement: Agent templates are embedded in the binary
 

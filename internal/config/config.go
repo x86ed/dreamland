@@ -5,18 +5,35 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 const filename = ".dreamland.json"
 
-
 // Config holds the project-level settings persisted by `dreamland init`.
 type Config struct {
-	CodingTool     string `json:"coding_tool"`
-	Language       string `json:"language"`
-	TestCommand    string `json:"test_command"`
-	DocCommand     string `json:"doc_command"`
-	VersionCommand string `json:"version_command"`
+	CodingTool         string `json:"coding_tool"`
+	Language           string `json:"language"`
+	TestCommand        string `json:"test_command"`
+	DocCommand         string `json:"doc_command"`
+	VersionCommand     string `json:"version_command"`
+	RepoRoot           string `json:"repo_root,omitempty"`
+	VersionBumpCommand string `json:"version_bump_command,omitempty"`
+	ModelID            string `json:"model_id,omitempty"`
+	EmailSuffix        string `json:"email_suffix,omitempty"`
+}
+
+var reNotAllowed = regexp.MustCompile(`[^a-z0-9.\-]`)
+
+// EmailClean produces a valid email local-part from s:
+// lowercase → spaces/underscores → '-' → strip disallowed chars → trim leading/trailing '-' and '.'.
+func EmailClean(s string) string {
+	s = strings.ToLower(s)
+	s = strings.NewReplacer(" ", "-", "_", "-").Replace(s)
+	s = reNotAllowed.ReplaceAllString(s, "")
+	s = strings.Trim(s, "-.")
+	return s
 }
 
 // FindRepoRoot walks from dir toward the filesystem root, returning the first

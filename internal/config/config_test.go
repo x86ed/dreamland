@@ -7,6 +7,56 @@ import (
 	"testing"
 )
 
+func TestLoad_BackwardCompat_NewFieldsZero(t *testing.T) {
+	root := makeGitRepo(t)
+	// Write a config that does NOT include the new fields (simulates an existing project).
+	old := []byte(`{"coding_tool":"claude-code","language":"go","test_command":"go test ./...","doc_command":"","version_command":"go version"}`)
+	if err := os.WriteFile(filepath.Join(root, filename), old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RepoRoot != "" {
+		t.Errorf("RepoRoot should be zero, got %q", cfg.RepoRoot)
+	}
+	if cfg.VersionBumpCommand != "" {
+		t.Errorf("VersionBumpCommand should be zero, got %q", cfg.VersionBumpCommand)
+	}
+	if cfg.ModelID != "" {
+		t.Errorf("ModelID should be zero, got %q", cfg.ModelID)
+	}
+	if cfg.EmailSuffix != "" {
+		t.Errorf("EmailSuffix should be zero, got %q", cfg.EmailSuffix)
+	}
+}
+
+func TestEmailClean(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"Claude Code", "claude-code"},
+		{"spec_writer", "spec-writer"},
+		{"Spec Writer", "spec-writer"},
+		{"UPPERCASE", "uppercase"},
+		{"---leading", "leading"},
+		{"trailing---", "trailing"},
+		{".dot.pad.", "dot.pad"},
+		{"abc!@#def", "abcdef"},
+		{"hello world", "hello-world"},
+		{"claude-sonnet-4-6", "claude-sonnet-4-6"},
+		{"Ünïcödé", "ncd"},
+	}
+	for _, tc := range cases {
+		got := EmailClean(tc.input)
+		if got != tc.want {
+			t.Errorf("EmailClean(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
 // makeGitRepo creates a temp dir with a .git subdirectory and returns the path.
 func makeGitRepo(t *testing.T) string {
 	t.Helper()

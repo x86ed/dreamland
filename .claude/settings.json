@@ -18,7 +18,11 @@
       "WebFetch(domain:developers.openai.com)",
       "WebFetch(domain:cursor.com)",
       "WebFetch(domain:antigravity.google)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:code.visualstudio.com)",
+      "WebFetch(domain:docs.github.com)",
+      "WebFetch(domain:codelabs.developers.google.com)",
+      "WebFetch(domain:www.cursor.com)"
     ]
   },
   "hooks": {

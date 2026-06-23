@@ -1,0 +1,18 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dreamland: session start",
+      "type": "shell",
+      "command": "dreamland version-bump && dreamland coauthor",
+      "runOptions": {"runOn": "folderOpen"},
+      "presentation": {"reveal": "silent"}
+    },
+    {
+      "label": "dreamland: end of turn",
+      "type": "shell",
+      "command": "dreamland version-bump --patch && dreamland transition-log && dreamland test",
+      "presentation": {"reveal": "silent"}
+    }
+  ]
+}

@@ -129,7 +129,7 @@ func TestInitVersionCommandOverride(t *testing.T) {
 
 	orig := wizardRunner
 	wizardRunner = stubWizard(&wizardResult{
-		tool:           "Antigravity",
+		tool:           "Cursor",
 		language:       "Python",
 		testCommand:    "pytest",
 		docCommand:     "sphinx-build",
@@ -349,13 +349,13 @@ func TestDefaultWizardRunner_ConfirmFormError(t *testing.T) {
 	}
 }
 
-func TestDefaultWizardRunner_Step12Error(t *testing.T) {
+func TestDefaultWizardRunner_Step1Error(t *testing.T) {
 	calls := 0
 	orig := huhFormRunner
 	huhFormRunner = func(_ *huh.Form) error {
 		calls++
 		if calls == 1 {
-			return errors.New("step 1-2 error")
+			return errors.New("step 1 error")
 		}
 		return nil
 	}
@@ -364,17 +364,17 @@ func TestDefaultWizardRunner_Step12Error(t *testing.T) {
 	var buf bytes.Buffer
 	_, err := defaultWizardRunner(nil, &buf)
 	if err == nil {
-		t.Fatal("expected error from step 1-2 form, got nil")
+		t.Fatal("expected error from step 1 form, got nil")
 	}
 }
 
-func TestDefaultWizardRunner_Step34Error(t *testing.T) {
+func TestDefaultWizardRunner_Step23Error(t *testing.T) {
 	calls := 0
 	orig := huhFormRunner
 	huhFormRunner = func(_ *huh.Form) error {
 		calls++
 		if calls == 2 {
-			return errors.New("step 3-4 error")
+			return errors.New("step 2-3 error")
 		}
 		return nil
 	}
@@ -383,17 +383,17 @@ func TestDefaultWizardRunner_Step34Error(t *testing.T) {
 	var buf bytes.Buffer
 	_, err := defaultWizardRunner(nil, &buf)
 	if err == nil {
-		t.Fatal("expected error from step 3-4 form, got nil")
+		t.Fatal("expected error from step 2-3 form, got nil")
 	}
 }
 
-func TestDefaultWizardRunner_Step5Error(t *testing.T) {
+func TestDefaultWizardRunner_Step45Error(t *testing.T) {
 	calls := 0
 	orig := huhFormRunner
 	huhFormRunner = func(_ *huh.Form) error {
 		calls++
 		if calls == 3 {
-			return errors.New("step 5 error")
+			return errors.New("step 4-5 error")
 		}
 		return nil
 	}
@@ -402,7 +402,26 @@ func TestDefaultWizardRunner_Step5Error(t *testing.T) {
 	var buf bytes.Buffer
 	_, err := defaultWizardRunner(nil, &buf)
 	if err == nil {
-		t.Fatal("expected error from step 5 form, got nil")
+		t.Fatal("expected error from step 4-5 form, got nil")
+	}
+}
+
+func TestDefaultWizardRunner_Step6Error(t *testing.T) {
+	calls := 0
+	orig := huhFormRunner
+	huhFormRunner = func(_ *huh.Form) error {
+		calls++
+		if calls == 4 {
+			return errors.New("step 6 error")
+		}
+		return nil
+	}
+	defer func() { huhFormRunner = orig }()
+
+	var buf bytes.Buffer
+	_, err := defaultWizardRunner(nil, &buf)
+	if err == nil {
+		t.Fatal("expected error from step 6 form, got nil")
 	}
 }
 
@@ -438,5 +457,131 @@ func TestIsNoGitErr(t *testing.T) {
 	}
 	if isNoGitErr(nil) {
 		t.Error("expected false for nil error")
+	}
+}
+
+func TestInitScaffoldOutput(t *testing.T) {
+	root := makeGitRepo(t)
+
+	orig := wizardRunner
+	wizardRunner = stubWizard(&wizardResult{
+		repoRoot:       root,
+		tool:           "Claude Code",
+		language:       "Go",
+		testCommand:    "go test ./...",
+		versionCommand: "go version",
+	}, nil)
+	t.Cleanup(func() { wizardRunner = orig })
+
+	out, err := runInitWithBuf(t)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "installed") {
+		t.Errorf("expected scaffold 'installed' lines in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "PATH") {
+		t.Errorf("expected PATH reminder in output, got:\n%s", out)
+	}
+}
+
+func TestInitForceFlag(t *testing.T) {
+	root := makeGitRepo(t)
+
+	// Pre-create an agent file.
+	agentDir := filepath.Join(root, ".claude", "agents")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "orchestrator.md"), []byte("old content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := wizardRunner
+	wizardRunner = stubWizard(&wizardResult{
+		repoRoot:       root,
+		tool:           "Claude Code",
+		language:       "Go",
+		testCommand:    "go test ./...",
+		versionCommand: "go version",
+	}, nil)
+	t.Cleanup(func() { wizardRunner = orig })
+
+	origForce := forceFlag
+	forceFlag = true
+	t.Cleanup(func() { forceFlag = origForce })
+
+	out, err := runInitWithBuf(t)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "installed (forced)") {
+		t.Errorf("expected 'installed (forced)' in output, got:\n%s", out)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(agentDir, "orchestrator.md"))
+	if string(data) == "old content" {
+		t.Error("orchestrator.md was not overwritten with --force")
+	}
+}
+
+func TestInitEmailSuffix(t *testing.T) {
+	root := makeGitRepo(t)
+
+	orig := wizardRunner
+	wizardRunner = stubWizard(&wizardResult{
+		repoRoot:       root,
+		tool:           "Kiro",
+		language:       "Go",
+		testCommand:    "go test ./...",
+		versionCommand: "go version",
+	}, nil)
+	t.Cleanup(func() { wizardRunner = orig })
+
+	origSuffix := emailSuffixFlag
+	emailSuffixFlag = "@myorg.com"
+	t.Cleanup(func() { emailSuffixFlag = origSuffix })
+
+	if _, err := runInitWithBuf(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cwd, _ := os.Getwd()
+	cfg, _ := config.Load(cwd)
+	if cfg == nil {
+		t.Fatal("expected config")
+	}
+	if cfg.EmailSuffix != "@myorg.com" {
+		t.Errorf("EmailSuffix = %q, want @myorg.com", cfg.EmailSuffix)
+	}
+}
+
+func TestInitVersionBumpCommandSet(t *testing.T) {
+	root := makeGitRepo(t)
+
+	orig := wizardRunner
+	wizardRunner = stubWizard(&wizardResult{
+		repoRoot:       root,
+		tool:           "Codex CLI",
+		language:       "Node/TypeScript",
+		testCommand:    "npm test",
+		versionCommand: "node --version",
+	}, nil)
+	t.Cleanup(func() { wizardRunner = orig })
+
+	if _, err := runInitWithBuf(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cwd, _ := os.Getwd()
+	cfg, _ := config.Load(cwd)
+	if cfg == nil {
+		t.Fatal("expected config")
+	}
+	if cfg.VersionBumpCommand != "npm version" {
+		t.Errorf("VersionBumpCommand = %q, want npm version", cfg.VersionBumpCommand)
+	}
+	if cfg.ModelID != "codex-1" {
+		t.Errorf("ModelID = %q, want codex-1", cfg.ModelID)
 	}
 }

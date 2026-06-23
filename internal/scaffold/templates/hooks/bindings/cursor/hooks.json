@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {"type": "command", "command": "dreamland version-bump"},
+      {"type": "command", "command": "dreamland coauthor"}
+    ],
+    "stop": [
+      {"type": "command", "command": "dreamland version-bump --patch"},
+      {"type": "command", "command": "dreamland transition-log"},
+      {"type": "command", "command": "dreamland test"}
+    ]
+  }
+}
