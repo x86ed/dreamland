@@ -33,6 +33,20 @@ After successfully writing `.dreamland.json`, the `init` command SHALL invoke th
 - **WHEN** the config file is written successfully but scaffolding encounters a filesystem error
 - **THEN** the config file is preserved and the error is reported to stderr with a non-zero exit code
 
+### Requirement: Init accepts --email-suffix flag for agent/model email domain
+
+The `init` command SHALL accept an `--email-suffix` string flag (default `@github.com`). The value is stored in `.dreamland.json` as `email_suffix` and used by `dreamland coauthor` to construct AgentEmail and ModelEmail at runtime.
+
+#### Scenario: Default suffix stored when flag absent
+
+- **WHEN** `dreamland init` completes without `--email-suffix`
+- **THEN** `.dreamland.json` contains `"email_suffix": "@github.com"`
+
+#### Scenario: Custom suffix stored when flag provided
+
+- **WHEN** `dreamland init --email-suffix @myorg.com` completes
+- **THEN** `.dreamland.json` contains `"email_suffix": "@myorg.com"`
+
 ### Requirement: Init accepts --force flag to overwrite scaffold files
 
 The `init` command SHALL accept a `--force` boolean flag. When set, the scaffold installer overwrites existing agent and hook files rather than skipping them.

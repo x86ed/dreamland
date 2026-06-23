@@ -14,7 +14,11 @@
       "Bash(go tool *)",
       "Bash(go vet *)",
       "WebSearch",
-      "WebFetch(domain:kiro.dev)"
+      "WebFetch(domain:kiro.dev)",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:cursor.com)",
+      "WebFetch(domain:antigravity.google)",
+      "WebFetch(domain:github.com)"
     ]
   },
   "hooks": {

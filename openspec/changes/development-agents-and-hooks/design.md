@@ -2,194 +2,284 @@
 
 Dreamland is a Go CLI (`cobra` + `huh`) that scaffolds and drives a spec-driven AI development workflow. The `init` wizard today collects tool/language/command settings and writes `.dreamland.json`. Once initialized, there is no automation: no agents to execute workflow steps, no hooks to enforce lifecycle events. Developers who want agents or hooks must configure them manually and differently per platform.
 
-All six supported coding tools have native agent and hook conventions. A key finding from documentation research: all platforms share an equivalent "end of agent turn" event (referred to as `Stop`, `stop`, or `Agent Stop` depending on platform). This is the event that fires once the AI finishes generating its response and all tool calls in that turn complete — analogous to a function returning. **All four dreamland hooks bind exclusively to this event**, with conditional logic inside each script determining whether to act. This keeps platform bindings trivially consistent: one event per platform, no per-hook event variation.
+All six supported coding tools share the concept of an end-of-turn lifecycle event — the moment when the AI finishes its response and all tool calls for that turn complete. Platform names for this event:
 
-| Platform | Agent path & format | Hook config path | End-of-turn event name |
-| --- | --- | --- | --- |
-| Claude Code | `.claude/agents/*.md` (YAML frontmatter + prompt) | `.claude/settings.json` → `hooks.Stop` | `Stop` |
-| Codex CLI | `.codex/agents/*.toml` (`name`, `description`, `developer_instructions`) | `.codex/hooks.json` → `stop` | `Stop` |
-| Cursor | `.cursor/rules/*.mdc` (YAML frontmatter: `alwaysApply`, `description`, `globs`) | `.cursor/hooks.json` → `stop` | `stop` |
-| Kiro | `.kiro/steering/*.md` (markdown with optional `inclusion` frontmatter) | `.kiro/agent.json` → `hooks.stop` (CLI agent config) | `stop` |
-| Antigravity | `agents/*.md` inside plugin bundle `~/.gemini/antigravity-cli/plugins/dreamland/` | `hooks.json` inside plugin bundle → `Stop` | `Stop` |
-| GitHub Copilot | `.github/copilot-agents/*.instructions.md` | `.github/copilot-hooks/hooks-manifest.json` (stub — schema not public) | unknown |
-
-**Kiro note**: Kiro has two hook systems — the IDE visual hooks (`.kiro/hooks/` YAML with `trigger`/`instructions` fields, designed for agent-prompt actions) and the CLI agent config hooks (JSON with `agentSpawn`/`userPromptSubmit`/`preToolUse`/`postToolUse`/`stop` events, designed for shell commands). Dreamland uses the CLI config approach since our hooks are shell scripts, not natural-language agent prompts. The CLI hook schema matches Claude Code's event model closely; the tool matcher for bash is `execute_bash` rather than `Bash`.
-
-## Goals / Non-Goals
-
-**Goals:**
-
-- Embed all agent and hook templates in the binary (zero disk reads at install time)
-- Install five agent definition files per coding tool after `dreamland init`, in the platform's native format
-- Install four hook scripts that all bind to the platform's end-of-turn event; conditional logic lives inside the scripts
-- Add a repo-root step to the `init` wizard (new step 1, defaults to detected git root)
-- Expand coding tool list to include Codex CLI and Cursor
-- Keep hook business logic and platform bindings structurally identical; only event name strings differ
-
-**Non-Goals:**
-
-- Runtime execution of agents or hooks (dreamland only scaffolds them)
-- Updating existing agent/hook files when `dreamland init` is re-run without `--force`
-- Generating agent prompts dynamically from project state
-- Full Antigravity plugin lifecycle management (dreamland writes the files; the user registers the plugin separately)
-- Supporting Kiro IDE visual hooks (`.kiro/hooks/` YAML) — those are agent-prompt hooks, not shell-command hooks
-
-## Decisions
-
-### 1. Go `embed` FS for all templates
-
-All templates live under `internal/scaffold/templates/` and are embedded with `//go:embed all:templates`. The scaffold package exposes a single `fs.FS` reference; nothing is read from disk at install time.
-
-**Note**: `//go:embed all:templates` is used rather than `templates/**` because Go's `**` glob does not recurse into subdirectories by default in all cases; `all:` handles nested directories and dotfiles correctly.
-
-**Alternative considered**: Download templates from a remote URL at install time. Rejected — requires network access, complicates air-gapped use, and makes the binary non-self-contained.
-
-### 2. Template layout mirrors output layout, one directory per platform
-
-```text
-internal/scaffold/templates/
-  agents/
-    claude-code/
-      orchestrator.md
-      spec-writer.md
-      implementer.md
-      tester.md
-      pr-closer.md
-    codex/
-      orchestrator.toml
-      spec-writer.toml
-      implementer.toml
-      tester.toml
-      pr-closer.toml
-    cursor/
-      orchestrator.mdc
-      spec-writer.mdc
-      implementer.mdc
-      tester.mdc
-      pr-closer.mdc
-    kiro/
-      orchestrator.md       ← goes to .kiro/steering/; uses inclusion frontmatter
-      spec-writer.md
-      implementer.md
-      tester.md
-      pr-closer.md
-    antigravity/
-      orchestrator.md       ← goes to plugin bundle agents/
-      spec-writer.md
-      implementer.md
-      tester.md
-      pr-closer.md
-      plugin.json           ← plugin manifest template
-    github-copilot/
-      orchestrator.instructions.md
-      spec-writer.instructions.md
-      implementer.instructions.md
-      tester.instructions.md
-      pr-closer.instructions.md
-  hooks/
-    scripts/
-      version-bump.sh
-      transition-log.sh
-      run-tests.sh
-      coauthor.sh
-    bindings/
-      claude-code/settings-patch.json   ← merged into .claude/settings.json
-      codex/hooks.json                  ← written to .codex/hooks.json
-      cursor/hooks.json                 ← written to .cursor/hooks.json
-      kiro/agent-patch.json             ← merged into .kiro/agent.json
-      antigravity/hooks.json            ← written into plugin bundle
-      github-copilot/hooks-manifest.json  ← stub
-```
-
-**Alternative considered**: A single template tree with `{{.Platform}}` substitution. Rejected — agent formats differ substantially between platforms (TOML vs frontmatter MD vs plain MD); separate files are easier to read, test, and maintain.
-
-### 3. All four hooks bind to the end-of-turn event; scripts contain conditional logic
-
-The end-of-turn event (variously named `Stop`, `stop`, or `Agent Stop`) fires once per agent turn after all tool calls complete. Binding all four hooks to this single event per platform gives consistent, deterministic behavior: hooks run predictably at turn boundaries, not mid-work.
-
-Each script decides at runtime whether to act:
-
-| Hook script | Acts when… |
-| --- | --- |
-| `version-bump.sh` | `git diff HEAD` shows changes since the last commit |
-| `transition-log.sh` | Always — appends a timestamped turn summary to `.dreamland/transition.log` |
-| `run-tests.sh` | Executable code files changed during this turn (checks `git diff --name-only HEAD` against source file extensions) |
-| `coauthor.sh` | A commit was made during this turn (checks `git log` since session start timestamp); otherwise updates `git config user.name/user.email` locally |
-
-End-of-turn event names by platform:
-
-| Platform | Event name in binding config |
+| Platform | End-of-turn event name |
 | --- | --- |
 | Claude Code | `Stop` |
 | Codex CLI | `Stop` |
 | Cursor | `stop` |
 | Kiro CLI | `stop` |
 | Antigravity | `Stop` |
-| GitHub Copilot | stub |
+| GitHub Copilot | not publicly documented |
 
-**Alternative considered**: Map each hook to the most semantically precise event (e.g., `PreToolUse(Bash)` for run-tests, `PostToolUse` for transition-log). Rejected — different events per hook creates inconsistent bindings across platforms and makes the binding files diverge. Conditional logic in scripts is more portable and easier to reason about.
+All four dreamland lifecycle commands bind to this single event per platform. Conditional logic (should this command act?) lives inside the Go command, not in platform-specific configuration.
 
-### 4. `scaffold.Install` is the public API
+**Kiro note**: Kiro has two hook systems. The IDE visual hook system (`.kiro/hooks/` YAML with `trigger`/`instructions`) targets agent-prompt automation. The CLI agent config hook system (JSON with `agentSpawn`/`userPromptSubmit`/`preToolUse`/`postToolUse`/`stop` events) targets shell commands and is what dreamland uses. The CLI schema is very close to Claude Code's.
 
-```go
-package scaffold
+## Goals / Non-Goals
 
-type Config struct {
-    RepoRoot   string // absolute path
-    CodingTool string // matches coding_tool values from init wizard
-    Force      bool
+**Goals:**
+
+- Embed all agent templates in the binary (zero disk reads at install time)
+- Install five agent definition files per coding tool after `dreamland init`, in the platform's native format
+- Add four lifecycle subcommands to the `dreamland` binary; platform hook bindings invoke these commands directly — no OS-dependent shell scripts
+- Add a repo-root step to the `init` wizard (new step 1, defaults to detected git root)
+- Expand coding tool list to include Codex CLI and Cursor
+- `init` writes language-appropriate defaults for version-bump dispatch into `.dreamland.json`
+
+**Non-Goals:**
+
+- Runtime execution of agents (dreamland only scaffolds them)
+- Updating existing agent files when `dreamland init` is re-run without `--force`
+- Generating agent prompts dynamically from project state
+- Full Antigravity plugin lifecycle management
+- Supporting Kiro IDE visual hooks (`.kiro/hooks/` YAML) — those are agent-prompt hooks, not shell-command hooks
+
+## Decisions
+
+### 1. Hook logic lives in Go; bindings call `dreamland <command>`
+
+Rather than scaffolding shell scripts (which are OS-dependent and hard to test), the four lifecycle operations are implemented as cobra subcommands inside the `dreamland` binary. Platform hook binding files register these commands as the shell command to invoke at the end-of-turn event.
+
+Example Claude Code binding entry:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {"command": "dreamland version-bump"},
+      {"command": "dreamland coauthor"}
+    ],
+    "Stop": [
+      {"command": "dreamland version-bump --patch"},
+      {"command": "dreamland transition-log"},
+      {"command": "dreamland test"}
+    ]
+  }
 }
-
-// Install writes agent and hook files for the given config.
-// Existing files are not overwritten unless Force is true.
-// Returns one Result per file attempted.
-func Install(cfg Config) ([]Result, error)
 ```
 
-JSON config files (settings.json, hooks.json) that already exist are merged atomically: read → merge in memory → write. If the write fails, the original is untouched. No backup files are created.
+Because all platforms invoke a shell command at the end-of-turn event, the binding files differ only in the event key name — not in the command strings. This gives maximum consistency across platforms.
 
-### 5. JSON config merge is atomic, no backups needed
+**Alternative considered**: Shell scripts in `.dreamland/hooks/`. Rejected — OS-dependent, harder to test in Go, require chmod handling, and create a second codebase to maintain alongside the Go binary.
 
-For platforms that write to an existing JSON config (Claude Code's `settings.json`, Codex's `hooks.json`, Cursor's `hooks.json`, Kiro's `agent.json`): the installer reads the file, merges the `hooks` key in memory, and writes the result. Because the merge happens before any write, a failed write leaves the original intact. Backup files add complexity without meaningful safety benefit given this approach.
+### 2. Go `embed` FS for agent templates only
 
-### 6. Platform-specific hook registration strategies
+Agent templates live under `internal/scaffold/templates/agents/` and are embedded with `//go:embed all:templates`. Hook binding files are small JSON/YAML snippets also embedded under `internal/scaffold/templates/hooks/bindings/`. No hook scripts are embedded or written to disk.
 
-- **Claude Code**: Merge `hooks.Stop` array into `.claude/settings.json` (create if absent)
-- **Codex CLI**: Merge `hooks.Stop` array into `.codex/hooks.json` (create if absent)
-- **Cursor**: Merge `hooks.stop` array into `.cursor/hooks.json` with `version: 1` envelope (create if absent)
-- **Kiro**: Merge `hooks.stop` array into `.kiro/agent.json` using `execute_bash` tool matcher convention (create if absent)
-- **Antigravity**: Write `hooks.json` into plugin bundle `~/.gemini/antigravity-cli/plugins/dreamland/`; write `plugin.json` manifest; also write agent files under `agents/`
-- **GitHub Copilot**: Write `.github/copilot-hooks/hooks-manifest.json` stub with explanatory note
+```text
+internal/scaffold/templates/
+  agents/
+    claude-code/       orchestrator.md, spec-writer.md, implementer.md, tester.md, pr-closer.md
+    codex/             orchestrator.toml, spec-writer.toml, implementer.toml, tester.toml, pr-closer.toml
+    cursor/            orchestrator.mdc, spec-writer.mdc, implementer.mdc, tester.mdc, pr-closer.mdc
+    kiro/              orchestrator.md, spec-writer.md, implementer.md, tester.md, pr-closer.md
+    antigravity/       orchestrator.md, spec-writer.md, implementer.md, tester.md, pr-closer.md, plugin.json
+    github-copilot/    orchestrator.instructions.md … pr-closer.instructions.md
+  hooks/
+    bindings/
+      claude-code/settings-patch.json
+      codex/hooks.json
+      cursor/hooks.json
+      kiro/agent-patch.json
+      antigravity/hooks.json
+      github-copilot/hooks-manifest.json
+```
 
-### 7. Kiro agent files use `inclusion: always` frontmatter
+### 3. No-tag baseline: treat absent semver tags as v0.0.0
 
-Kiro steering documents support optional YAML frontmatter controlling when the file is loaded. For dreamland's five role agents, all should be `inclusion: always` so the agent context is present in every session. Without frontmatter, Kiro defaults to `auto` (model-decided inclusion), which is non-deterministic for role-defining instructions.
+When `git describe --tags --abbrev=0 --match "v[0-9]*"` exits non-zero (no semver tags exist in the repo), `dreamland version-bump` treats the current state as `v0.0.0`:
 
-### 8. Antigravity uses a plugin bundle, not a repo-local directory
+- Minor bump → creates `v0.1.0`
+- Major bump → creates `v1.0.0`
+- Patch bump → creates `v0.0.1`
 
-Antigravity's config lives in a user-level plugin directory. The installer creates `~/.gemini/antigravity-cli/plugins/dreamland/` with `plugin.json`, five agent files under `agents/`, and `hooks.json`. Repo-local files are not discovered by the Antigravity CLI.
+For Go, this creates the first annotated tag. For Node/Rust/Python, it passes the resolved target version string to the tool (e.g., `npm version v0.1.0`). This ensures `version-bump` is safe to run on a fresh repo.
 
-### 9. Repo root step is step 1 in the wizard
+### 4. Branch-bumps file format
 
-The `init` wizard gains a new step (displayed as "Step 1 of 6") that presents an editable text input pre-filled with the **detected git root** (not the current working directory). All subsequent step numbers increment by one. `wizardResult` gains a `repoRoot string` field; `config.Config` gains `"repo_root"` JSON field.
+`.dreamland/branch-bumps` is a JSON object keyed by branch name:
+
+```json
+{
+  "feature-xyz": {
+    "version": "v1.2.0",
+    "initialized_at": "2026-06-23T12:00:00Z"
+  }
+}
+```
+
+Each entry records the version assigned when the branch was first initialized and the timestamp. The object is extensible — future fields (`tokens`, `model`, agent config) will be added to each entry value without a schema change. Reads and writes use the atomic temp-file rename strategy.
+
+### 5. Four new cobra subcommands
+
+```text
+dreamland version-bump [--major | --minor | --patch] [--version <semver>] [--breaking]
+dreamland coauthor
+dreamland transition-log
+dreamland test
+```
+
+`version-bump` and `coauthor` fire at **session start** (`SessionStart` / `agentSpawn`). `transition-log` and `test` fire at **session end** (`Stop` / `stop`).
+
+Each reads `.dreamland.json` for context (language, test command, model info, etc.) and exits 0 on success, non-zero on failure.
+
+### 4. `version-bump` has two modes: per-branch (minor/major) and per-change (patch)
+
+Minor and major version bumps are a **per-branch** operation — they happen exactly once when a branch is first initialized, not on every session start. Patch bumps are **per-code-change**, triggered at the end of every turn.
+
+**Binding layout:**
+
+| Event | Command | Behavior |
+| --- | --- | --- |
+| `SessionStart` | `dreamland version-bump` | Checks branch marker; bumps minor/major on first session of new branch; skips on subsequent sessions |
+| `Stop` | `dreamland version-bump --patch` | Bumps patch only if code changed since last tag; skips otherwise |
+
+**Branch marker (idempotency for minor/major):**
+When `dreamland version-bump` performs a minor or major bump, it writes an entry to `.dreamland/branch-bumps` in the format `<branch-name>=<new-version>`. On subsequent `SessionStart` calls, if the current branch already has an entry in this file, the minor/major bump is skipped. This ensures exactly one minor/major bump per branch regardless of how many sessions are opened.
+
+**Bump level selection at `SessionStart`:**
+
+- If current branch is NOT in `.dreamland/branch-bumps`: bump `--minor` by default, `--major` if `--breaking` is passed.
+- If current branch IS already in `.dreamland/branch-bumps`: exit 0 silently.
+- `--version v1.2.3`, `--major`, `--minor`, `--patch` flags override auto-detection entirely.
+
+**No-upstream fallback:**
+If the current branch has no remote upstream (`@{u}` is unset), treat the branch as new (not yet pushed). After bumping, push the branch with `git push --set-upstream origin <branch>`. The marker file prevents re-triggering on the next session.
+
+**Language dispatch** (`version_bump_command` from `.dreamland.json`):
+
+| Language | Default `version_bump_command` | How level is passed |
+| --- | --- | --- |
+| Go | _(empty)_ | dreamland creates annotated git tag directly |
+| Node/TypeScript | `npm version` | `npm version patch\|minor\|major` |
+| Rust | `cargo bump` | `cargo bump patch\|minor\|major` |
+| Python | `bump-my-version bump` | `bump-my-version bump patch\|minor\|major` |
+
+For the `--patch` mode at `Stop`: check `git diff <last-tag>..HEAD` first; if empty, exit 0 silently.
+
+If `cargo bump` is not installed, print an install hint and exit non-zero rather than silencing the error.
+
+### 5. `test` checks for source-file changes before running
+
+`dreamland test` reads `test_command` from `.dreamland.json` and the configured language, then inspects `git status --porcelain` for uncommitted changes to source files with extensions matching the language:
+
+| Language | Source extensions checked |
+| --- | --- |
+| Go | `.go` |
+| Node/TypeScript | `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts` |
+| Rust | `.rs` |
+| Python | `.py` |
+
+If matching files have changes, it runs `test_command` and forwards the exit code. If no matching files changed, it exits 0 silently.
+
+### 6. `coauthor` sets agent git identity and wires a prepare-commit-msg hook
+
+`dreamland coauthor` runs at session start and does two things:
+
+**a. Set agent git identity (local scope):**
+
+Agent identity is constructed at runtime:
+
+- **AgentName**: read from the platform's current-agent env var (e.g., `CLAUDE_AGENT_ID` for Claude Code); falls back to the coding tool name from `.dreamland.json`.
+- **AgentEmail**: `<cleaned-agent-name><email-suffix>`. Suffix defaults to `@github.com`, stored in `.dreamland.json` as `email_suffix`, configurable via `dreamland init --email-suffix`. Cleaning: lowercase → spaces and underscores to `-` → strip `[^a-z0-9.\-]` → trim leading/trailing `-` and `.`.
+
+Example: agent `"spec-writer"`, suffix `@github.com` → `spec-writer@github.com`.
+
+`git config --local user.name` = AgentName. `git config --local user.email` = AgentEmail.
+
+**b. Install a `prepare-commit-msg` git hook:**
+
+Writes (or updates) `.git/hooks/prepare-commit-msg` as a minimal shell wrapper:
+
+```sh
+#!/bin/sh
+dreamland coauthor --trailer "$1" "$2" "$3"
+```
+
+The `--trailer` mode reads `$1` (commit message file path), constructs model identity from `.dreamland.json`, and appends to the file if no matching trailer is already present:
+
+```text
+Co-authored-by: <model-name> <model-email>
+```
+
+Where:
+
+- **model-name**: the name portion of `model_id` (text before the first space); e.g., `"claude-sonnet-4-6"` from `"claude-sonnet-4-6 temperature=1.0"`.
+- **model-email**: cleaned model-name + `email_suffix`; e.g., `"claude-sonnet-4-6@github.com"`.
+
+All logic is in Go — no `jq` or other shell tools. The hook is idempotent: if `.git/hooks/prepare-commit-msg` already contains `dreamland coauthor --trailer`, the file is left unchanged.
+
+### 7. `transition-log` appends a simple timestamped line
+
+`dreamland transition-log` appends one line to `.dreamland/transition.log`:
+
+```text
+<ISO-8601 timestamp> [<session-id>] turn complete
+```
+
+`session-id` is sourced from the `SESSION_ID` environment variable if set by the platform (Claude Code, Codex, Cursor all pass session metadata to hook commands via stdin or env); otherwise a random short ID is generated.
+
+### 8. Binding files map two events: session-start and end-of-turn
+
+| Command | Session-start | End-of-turn |
+| --- | --- | --- |
+| `dreamland version-bump` | ✓ (minor/major, once per branch) | ✓ (`--patch`, per code change) |
+| `dreamland coauthor` | ✓ | — |
+| `dreamland transition-log` | — | ✓ |
+| `dreamland test` | — | ✓ |
+
+Platform event name mapping (verified against each platform's docs):
+
+| Platform | Session-start event | End-of-turn event | Notes |
+| --- | --- | --- | --- |
+| Claude Code | `SessionStart` | `Stop` | Fires on session begin/resume; all modes |
+| Codex CLI | `SessionStart` | `Stop` | PascalCase; all interaction modes |
+| Cursor | `sessionStart` | `stop` | camelCase; fires in agent, ask, and edit modes |
+| Kiro CLI | `agentSpawn` | `stop` | Agent mode only by platform design |
+| Antigravity | stub | `PostTurnHook` | Session-start undocumented; end-of-turn confirmed |
+| GitHub Copilot | stub | stub | No public shell-command hook API |
+
+`SessionStart` / `sessionStart` / `agentSpawn` are real, documented events — not per-turn events. Kiro's `agentSpawn` only fires in agent mode (inherent to Kiro's design as an agent-first IDE).
+
+For Antigravity, the session-start hook is not yet publicly documented; the binding file is marked `"_preview": true` and the session-start entry remains a stub. End-of-turn uses `PostTurnHook` (the closest documented equivalent to `Stop`).
+
+GitHub Copilot has no public shell-command hook API for either agent or general session modes. The stub placeholder is the correct posture. Do not use prompt injection as a substitute for a real lifecycle binding.
+
+Command strings (`"command": "dreamland ..."`) are identical across all platforms; only the JSON event key names differ.
+
+### 9. JSON config merges are atomic via temp-file rename
+
+For platforms that require merging into an existing config file (Claude Code's `settings.json`, Codex's `hooks.json`, Cursor's `hooks.json`, Kiro's `agent.json`): read the existing file → merge in memory → write the result to a temp file in the same directory → `os.Rename(tempFile, target)`. On POSIX, `rename(2)` is a single atomic syscall — either the swap completes or the original is untouched. The original file is never modified directly, so a mid-write crash cannot corrupt it.
+
+### 10. Kiro agent files use `inclusion: always` frontmatter
+
+Kiro steering documents with `inclusion: always` are loaded in every session, making the role context deterministic. Without frontmatter, Kiro defaults to `auto` (model-decided), which is non-deterministic for role-defining instructions.
+
+### 11. Repo root step defaults to detected git root
+
+The new step 1 pre-fills the detected git root (result of `config.FindRepoRoot(cwd)`), not `.` (the current directory). These differ when the user runs `dreamland init` from a subdirectory.
 
 ## Risks / Trade-offs
 
-- **Antigravity API in preview** → Hook event schema may change before GA. Mitigation: binding file is a separate embedded asset; update in a patch release without touching hook scripts or agent templates.
-- **Kiro CLI agent config filename** → The exact filename of the Kiro CLI agent config is not confirmed in public docs (referenced as "agent configuration file"). Implementation should verify against the official Kiro CLI reference before writing. Placeholder: `.kiro/agent.json`.
-- **GitHub Copilot hook binding unknown** → Stub file with note; no shell command hooks are wired for Copilot until the schema is published.
-- **Agent prompt quality** → Embedded prompts are starting points; users own the files after install and dreamland does not overwrite them by default.
-- **Antigravity plugin registration** → Dreamland writes the files but cannot run `antigravity plugin install` on the user's behalf. Mitigation: print a post-install instruction to stdout.
-- **`coauthor.sh` detecting commits made during a turn** → The script uses a session-start timestamp written to `.dreamland/session-start` at `agentSpawn`/`SessionStart` time to bound the `git log --since` query. If the session-start file is absent, the script falls back to updating git config only.
+- **`dreamland` must be in PATH when hooks fire** → The binary is typically installed globally. If the user installed it only locally, hooks will fail. Mitigation: print a reminder at the end of `dreamland init` to ensure the binary is on PATH.
+- **Antigravity API in preview** → Hook schema may change. Binding file is a separate embedded asset; update in a patch release.
+- **Kiro CLI agent config filename** → Assumed `.kiro/agent.json`; confirm against official Kiro CLI docs before implementing task 4.4.
+- **GitHub Copilot hook schema unknown** → Stub only; no commands wired until schema is published.
+- **`cargo bump` is a third-party plugin** → Not installed by default with Rust. `dreamland version-bump` should detect absence and print a helpful message rather than erroring silently.
+- **`prepare-commit-msg` hook idempotency** → `dreamland coauthor` must not write a duplicate trailer if the hook already exists. Check for the `Co-authored-by:` line before appending.
+- **Agent email format** → Model email addresses (e.g., `claude-sonnet-4-6@anthropic.com`) may not be real addresses. Use a `noreply` pattern: `<model-id>@noreply.anthropic.com`. This is consistent with GitHub's bot email convention.
 
 ## Migration Plan
 
-1. `internal/config.Config` gains `RepoRoot` field — backward compatible (old `.dreamland.json` files omit the field; callers fall back to git root detection).
-2. `dreamland init` re-run on an existing project: wizard shows new step 1 and expanded tool list; `scaffold.Install` skips files that already exist and reports which were skipped.
-3. JSON config merges are additive — existing hook arrays in settings files are preserved and dreamland entries are appended.
+1. `internal/config.Config` gains `RepoRoot`, `VersionBumpCommand`, `AgentName`, `AgentEmail`, and `ModelID` fields — backward compatible (zero values fall back to defaults).
+2. `dreamland init` re-run on an existing project: wizard shows new step 1 and expanded tool list; `scaffold.Install` skips agent files that already exist; hook binding merge is additive.
+3. The four new subcommands are additive — no existing commands change.
+4. `dreamland coauthor` installs `.git/hooks/prepare-commit-msg` idempotently — checks before writing.
 
 ## Open Questions
 
-- Confirm the exact filename for Kiro CLI agent config (currently assumed `.kiro/agent.json`).
-- Antigravity `hooks.json` event schema: track against GA release notes; binding file may need update.
-- Should `version-bump.sh` bump `patch`, `minor`, or make it configurable? Current assumption: `patch`.
+- Confirm the exact filename for Kiro CLI agent config (assumed `.kiro/agent.json`).
+- Should `dreamland version-bump` default to `--patch` when no level flag is given, or require an explicit flag? Current assumption: `--patch`.
+- Python version bump: `bump-my-version` vs `bumpuv` — both are widely used in 2026. Consider making the default configurable rather than hardcoding one tool.

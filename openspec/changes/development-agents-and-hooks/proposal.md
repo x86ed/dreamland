@@ -13,11 +13,11 @@ Dreamland has no mechanism to scaffold the AI coding agents and lifecycle hooks 
   - Code implementer
   - Test/validation runner
   - PR closer
-- Four **hook scripts** are installed (identical logic, different platform bindings per tool):
-  - Version bump
-  - State transition + log
-  - Run tests
-  - Co-author / git user stamp
+- Four **lifecycle commands** are added to the `dreamland` binary; platform hook bindings invoke these commands directly:
+  - `dreamland version-bump [--major|--minor|--patch|--version <semver>]`
+  - `dreamland transition-log`
+  - `dreamland test`
+  - `dreamland coauthor`
 - All agent and hook template files are **embedded in the binary** (Go `embed`) — nothing is read from disk at install time
 - **BREAKING**: `init` wizard step numbering shifts; "Step 1" is now repository root selection, and step count increases to 6
 
@@ -35,9 +35,9 @@ Dreamland has no mechanism to scaffold the AI coding agents and lifecycle hooks 
 ## Impact
 
 - `cmd/init.go` — add repo-root step, expand tool options, add `--force` flag, call scaffolding after `config.Save`
-- New `internal/scaffold/` package — embed templates, write agent/hook files per platform
+- New `cmd/version_bump.go`, `cmd/coauthor.go`, `cmd/transition_log.go`, `cmd/test.go` — four cobra subcommands for lifecycle logic
+- New `internal/scaffold/` package — embed templates, write agent files and hook binding files per platform
 - Agent templates: `internal/scaffold/templates/agents/<platform>/` (one directory per tool)
-- Hook scripts: `internal/scaffold/templates/hooks/scripts/` (shared across platforms)
-- Hook bindings: `internal/scaffold/templates/hooks/bindings/<platform>/` (one binding file per tool)
-- `internal/config/` — extend `Config` struct with `RepoRoot` field
+- Hook bindings: `internal/scaffold/templates/hooks/bindings/<platform>/` (one JSON binding file per tool; commands call `dreamland <subcommand>` directly)
+- `internal/config/` — extend `Config` struct with `RepoRoot`, `VersionBumpCommand`, `ModelID`, `AgentName`, `AgentEmail` fields
 - No external dependencies added (uses stdlib `embed`, `os`, `path/filepath`)
