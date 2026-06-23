@@ -4,14 +4,23 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-GREEN='\033[0;32m'
-NC='\033[0m'
+# Disable colors when NO_COLOR is set or when running in CI without a terminal.
+if [[ -n "${NO_COLOR:-}" || ( -n "${CI:-}" && ! -t 1 ) ]]; then
+  RED=''; YELLOW=''; GREEN=''; NC=''
+else
+  RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'; NC='\033[0m'
+fi
 
-fail() { echo -e "${RED}FAIL:${NC} $*" >&2; exit 1; }
-warn() { echo -e "${YELLOW}WARN:${NC} $*" >&2; }
-pass() { echo -e "${GREEN}PASS:${NC} $*"; }
+# GitHub Actions workflow commands when running in CI.
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+  fail() { echo "::error::$*" >&2; exit 1; }
+  warn() { echo "::warning::$*" >&2; }
+  pass() { echo "PASS: $*"; }
+else
+  fail() { echo -e "${RED}FAIL:${NC} $*" >&2; exit 1; }
+  warn() { echo -e "${YELLOW}WARN:${NC} $*" >&2; }
+  pass() { echo -e "${GREEN}PASS:${NC} $*"; }
+fi
 
 # ---------------------------------------------------------------------------
 # Branch guard (task 7.1)
@@ -167,9 +176,13 @@ find_untested_packages() {
 
   if [[ "$missing" == "1" ]]; then
     echo ""
-    echo "  Test stubs have been generated for the packages above."
-    echo "  Please implement the TODOs, then re-run MERGE_CHECK=1 bash scripts/pre-merge-check.sh"
-    fail "Coverage check aborted: missing test files were scaffolded — implement the stubs."
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+      fail "Missing test files detected (stubs written locally, not in CI). Add *_test.go files for the packages listed above."
+    else
+      echo "  Test stubs have been generated for the packages above."
+      echo "  Please implement the TODOs, then re-run MERGE_CHECK=1 bash scripts/pre-merge-check.sh"
+      fail "Coverage check aborted: missing test files were scaffolded — implement the stubs."
+    fi
   fi
 
   pass "All packages have test files."
@@ -232,9 +245,11 @@ check_version_bump() {
     fail "No semver tag found on this branch. Create a tag (e.g., git tag v0.2.0) before merging."
   fi
 
-  # Resolve main's latest tag; default to v0.0.0 if main has none
+  # Resolve main's latest tag; try local branch then remote (CI has no local main).
   local main_tag
-  main_tag=$(git describe --tags --abbrev=0 main 2>/dev/null || echo "v0.0.0")
+  main_tag=$(git describe --tags --abbrev=0 main 2>/dev/null \
+    || git describe --tags --abbrev=0 origin/main 2>/dev/null \
+    || echo "v0.0.0")
 
   echo "  Current tag: $current_tag"
   echo "  Main tag:    $main_tag"
