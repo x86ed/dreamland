@@ -9,12 +9,6 @@ import (
 
 const filename = ".dreamland.json"
 
-// Package-level hooks so tests can intercept low-level I/O operations in Save.
-var (
-	renameFunc = os.Rename
-	writeFunc  = func(f *os.File, data []byte) (int, error) { return f.Write(data) }
-	closeFunc  = func(f *os.File) error { return f.Close() }
-)
 
 // Config holds the project-level settings persisted by `dreamland init`.
 type Config struct {
@@ -62,8 +56,7 @@ func Load(dir string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Save writes cfg as JSON to .dreamland.json at the repository root containing
-// dir. The write is atomic: it writes to a temp file first, then renames.
+// Save writes cfg as JSON to .dreamland.json at the repository root containing dir.
 func Save(dir string, cfg *Config) error {
 	root, err := FindRepoRoot(dir)
 	if err != nil {
@@ -73,25 +66,5 @@ func Save(dir string, cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
-
-	dest := filepath.Join(root, filename)
-	tmp, err := os.CreateTemp(root, ".dreamland-*.json.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() {
-		// best-effort cleanup of temp file on any failure path
-		_ = os.Remove(tmpName)
-	}()
-
-	if _, err := writeFunc(tmp, data); err != nil {
-		_ = closeFunc(tmp)
-		return err
-	}
-	if err := closeFunc(tmp); err != nil {
-		return err
-	}
-	return renameFunc(tmpName, dest)
+	return os.WriteFile(filepath.Join(root, filename), append(data, '\n'), 0o644)
 }

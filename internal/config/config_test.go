@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -111,6 +110,19 @@ func TestLoad_NoGit(t *testing.T) {
 	}
 }
 
+// TestLoad_UnreadableFile returns an error when the config file exists but
+// cannot be read (simulated by placing a directory at the config path).
+func TestLoad_UnreadableFile(t *testing.T) {
+	root := makeGitRepo(t)
+	if err := os.Mkdir(filepath.Join(root, filename), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("expected error reading directory as file, got nil")
+	}
+}
+
 // TestSave_Success writes a config and reads it back.
 func TestSave_Success(t *testing.T) {
 	root := makeGitRepo(t)
@@ -162,21 +174,8 @@ func TestSave_NoGit(t *testing.T) {
 	}
 }
 
-// TestLoad_UnreadableFile returns an error when the config file exists but
-// cannot be read (simulated by placing a directory at the config path).
-func TestLoad_UnreadableFile(t *testing.T) {
-	root := makeGitRepo(t)
-	if err := os.Mkdir(filepath.Join(root, filename), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Load(root)
-	if err == nil {
-		t.Fatal("expected error reading directory as file, got nil")
-	}
-}
-
-// TestSave_CreateTempFails returns an error when the repo root is read-only.
-func TestSave_CreateTempFails(t *testing.T) {
+// TestSave_WriteFails returns an error when the destination is not writable.
+func TestSave_WriteFails(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root can write to read-only directories")
 	}
@@ -191,58 +190,7 @@ func TestSave_CreateTempFails(t *testing.T) {
 	}
 }
 
-// TestSave_RenameFails returns an error when os.Rename fails.
-func TestSave_RenameFails(t *testing.T) {
-	root := makeGitRepo(t)
-	orig := renameFunc
-	renameFunc = func(_, _ string) error { return errors.New("rename failed") }
-	t.Cleanup(func() { renameFunc = orig })
-
-	err := Save(root, &Config{VersionCommand: "go version"})
-	if err == nil {
-		t.Fatal("expected error from rename, got nil")
-	}
-}
-
-// TestSave_WriteFails returns an error when the temp file write fails.
-func TestSave_WriteFails(t *testing.T) {
-	root := makeGitRepo(t)
-	orig := writeFunc
-	writeFunc = func(f *os.File, _ []byte) (int, error) {
-		_ = f.Close()
-		return 0, errors.New("write failed")
-	}
-	t.Cleanup(func() { writeFunc = orig })
-
-	err := Save(root, &Config{VersionCommand: "go version"})
-	if err == nil {
-		t.Fatal("expected error from write, got nil")
-	}
-}
-
-// TestSave_CloseFails returns an error when the temp file close fails.
-func TestSave_CloseFails(t *testing.T) {
-	root := makeGitRepo(t)
-	origClose := closeFunc
-	calls := 0
-	closeFunc = func(f *os.File) error {
-		calls++
-		if calls == 1 {
-			_ = f.Close()
-			return errors.New("close failed")
-		}
-		return f.Close()
-	}
-	t.Cleanup(func() { closeFunc = origClose })
-
-	err := Save(root, &Config{VersionCommand: "go version"})
-	if err == nil {
-		t.Fatal("expected error from close, got nil")
-	}
-}
-
-// TestSave_ValidJSON verifies that a successful Save produces a
-// valid file (covers the success path of the atomic write).
+// TestSave_ValidJSON verifies that a successful Save produces valid JSON.
 func TestSave_ValidJSON(t *testing.T) {
 	root := makeGitRepo(t)
 	cfg := &Config{VersionCommand: "go version", Language: "go", TestCommand: "go test ./..."}
