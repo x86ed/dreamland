@@ -4,7 +4,27 @@
       "Bash(go version *)",
       "Bash(go get *)",
       "Bash(go build *)",
-      "Bash(go mod *)"
+      "Bash(go mod *)",
+      "Bash(openspec new *)",
+      "Bash(openspec status *)",
+      "Bash(openspec instructions *)",
+      "Bash(bash scripts/pre-merge-check.sh*)",
+      "Bash(MERGE_CHECK=1 bash scripts/pre-merge-check.sh)",
+      "Bash(go test *)",
+      "Bash(go tool *)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/pre-merge-check.sh"
+          }
+        ]
+      }
     ]
   }
 }
