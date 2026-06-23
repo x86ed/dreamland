@@ -7,7 +7,21 @@
       "Bash(go mod *)",
       "Bash(openspec new *)",
       "Bash(openspec status *)",
-      "Bash(openspec instructions *)"
+      "Bash(openspec instructions *)",
+      "Bash(bash scripts/pre-merge-check.sh*)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/pre-merge-check.sh"
+          }
+        ]
+      }
     ]
   }
 }

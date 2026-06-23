@@ -39,8 +39,8 @@
 ## 8. Hook Wiring
 
 - [x] 8.1 Add execute permission to `scripts/pre-merge-check.sh` (`chmod +x`)
-- [ ] 8.2 Add a `Stop` hook entry to `.claude/settings.json` that invokes `bash scripts/pre-merge-check.sh`
-- [ ] 8.3 Add `Bash(bash scripts/pre-merge-check.sh*)` to the `permissions.allow` list in `.claude/settings.json`
+- [x] 8.2 Add a `Stop` hook entry to `.claude/settings.json` that invokes `bash scripts/pre-merge-check.sh`
+- [x] 8.3 Add `Bash(bash scripts/pre-merge-check.sh*)` to the `permissions.allow` list in `.claude/settings.json`
 
 ## 9. Existing Code Compliance
 
