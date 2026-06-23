@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,5 +78,52 @@ func TestTransitionLog_RandomIDFallback(t *testing.T) {
 	// Two random IDs should almost certainly differ.
 	if id1 == id2 {
 		t.Log("warning: two random IDs collided (extremely unlikely)")
+	}
+}
+
+// --- Additional tests to improve coverage ---
+
+func TestRunTransitionLog_OsGetwdError(t *testing.T) {
+	orig := osGetwd
+	osGetwd = func() (string, error) { return "", errors.New("getwd failed") }
+	t.Cleanup(func() { osGetwd = orig })
+
+	if err := runTransitionLog(nil, nil); err == nil || err.Error() != "getwd failed" {
+		t.Fatalf("expected getwd error, got: %v", err)
+	}
+}
+
+func TestRunTransitionLog_FindRepoRootError(t *testing.T) {
+	// Use a temp dir with no .git so FindRepoRoot returns an error.
+	root := t.TempDir()
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	if err := runTransitionLog(nil, nil); err == nil {
+		t.Fatal("expected error from FindRepoRoot when no .git dir")
+	}
+}
+
+func TestRunTransitionLog_OpenFileError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; skip permission test")
+	}
+
+	root := makeGitRepo(t)
+
+	// Create .dreamland dir but make it unwritable so OpenFile fails.
+	logDir := filepath.Join(root, ".dreamland")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(logDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(logDir, 0o755) })
+
+	// Should return nil — OpenFile error is suppressed.
+	if err := runTransitionLog(nil, nil); err != nil {
+		t.Fatalf("expected nil (OpenFile error suppressed), got: %v", err)
 	}
 }

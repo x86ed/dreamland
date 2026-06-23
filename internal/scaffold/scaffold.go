@@ -250,16 +250,39 @@ func atomicJSONMerge(target string, patch []byte) error {
 	return os.Rename(tmpName, target)
 }
 
-// deepMerge merges src map into dst map recursively. Existing non-map values in dst are replaced.
+// deepMerge merges src into dst recursively.
+// Maps are merged key-by-key. Arrays are unioned (src items not already in dst are appended,
+// compared by JSON encoding). All other values in src overwrite dst.
 func deepMerge(dst, src map[string]interface{}) {
 	for k, sv := range src {
-		if dv, ok := dst[k]; ok {
-			dstMap, dstIsMap := dv.(map[string]interface{})
-			srcMap, srcIsMap := sv.(map[string]interface{})
-			if dstIsMap && srcIsMap {
-				deepMerge(dstMap, srcMap)
-				continue
+		dv, exists := dst[k]
+		if !exists {
+			dst[k] = sv
+			continue
+		}
+		dstMap, dstIsMap := dv.(map[string]interface{})
+		srcMap, srcIsMap := sv.(map[string]interface{})
+		if dstIsMap && srcIsMap {
+			deepMerge(dstMap, srcMap)
+			continue
+		}
+		dstArr, dstIsArr := dv.([]interface{})
+		srcArr, srcIsArr := sv.([]interface{})
+		if dstIsArr && srcIsArr {
+			seen := make(map[string]bool, len(dstArr))
+			for _, item := range dstArr {
+				b, _ := json.Marshal(item)
+				seen[string(b)] = true
 			}
+			for _, item := range srcArr {
+				b, _ := json.Marshal(item)
+				if !seen[string(b)] {
+					dstArr = append(dstArr, item)
+					seen[string(b)] = true
+				}
+			}
+			dst[k] = dstArr
+			continue
 		}
 		dst[k] = sv
 	}

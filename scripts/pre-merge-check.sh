@@ -286,6 +286,12 @@ check_version_bump() {
 # ---------------------------------------------------------------------------
 branch_guard
 
+# If a single check name is passed, run only that function (used by CI jobs).
+if [[ -n "${1:-}" ]]; then
+  "$1"
+  exit $?
+fi
+
 echo ""
 echo "┌─────────────────────────────────────────┐"
 echo "│        pre-merge quality gate           │"

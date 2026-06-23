@@ -585,3 +585,16 @@ func TestInitVersionBumpCommandSet(t *testing.T) {
 		t.Errorf("ModelID = %q, want codex-1", cfg.ModelID)
 	}
 }
+
+func TestValidatePathExists_Valid(t *testing.T) {
+	dir := t.TempDir()
+	if err := validatePathExists(dir); err != nil {
+		t.Errorf("expected nil for existing path, got: %v", err)
+	}
+}
+
+func TestValidatePathExists_Invalid(t *testing.T) {
+	if err := validatePathExists(filepath.Join(t.TempDir(), "nonexistent")); err == nil {
+		t.Error("expected error for non-existent path, got nil")
+	}
+}
