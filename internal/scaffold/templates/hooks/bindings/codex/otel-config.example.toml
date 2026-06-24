@@ -1,0 +1,10 @@
+# Codex CLI OTEL configuration — merge this block into ~/.codex/config.toml
+# (project-level config.toml cannot set OTEL keys; only the user-level file is respected)
+#
+# Usage: cat this file >> ~/.codex/config.toml
+#   or:  dreamland init (with "Codex CLI" selected) will prompt to merge automatically
+
+[otel]
+otlp_endpoint = "http://localhost:4317"
+otlp_protocol = "grpc"
+service_name   = "dreamland"

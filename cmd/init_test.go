@@ -598,3 +598,129 @@ func TestValidatePathExists_Invalid(t *testing.T) {
 		t.Error("expected error for non-existent path, got nil")
 	}
 }
+
+func TestWriteCodexOtelConfig_Confirmed(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	orig := confirmCodexOtel
+	confirmCodexOtel = func() bool { return true }
+	t.Cleanup(func() { confirmCodexOtel = orig })
+
+	var buf bytes.Buffer
+	initCmd.SetOut(&buf)
+	t.Cleanup(func() { initCmd.SetOut(nil) })
+
+	writeCodexOtelConfig(initCmd, "http://localhost:4317")
+
+	target := filepath.Join(fakeHome, ".codex", "config.toml")
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("config.toml not found: %v", err)
+	}
+	if !strings.Contains(string(data), "[otel]") {
+		t.Errorf("config.toml missing [otel] block: %s", data)
+	}
+	if !strings.Contains(string(data), "http://localhost:4317") {
+		t.Errorf("config.toml missing endpoint: %s", data)
+	}
+}
+
+func TestWriteCodexOtelConfig_AlreadyHasOtel(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	codexDir := filepath.Join(fakeHome, ".codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := "[otel]\notlp_endpoint = \"http://old:4317\"\n"
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := confirmCodexOtel
+	confirmCodexOtel = func() bool { return true }
+	t.Cleanup(func() { confirmCodexOtel = orig })
+
+	var buf bytes.Buffer
+	initCmd.SetOut(&buf)
+	t.Cleanup(func() { initCmd.SetOut(nil) })
+
+	writeCodexOtelConfig(initCmd, "http://localhost:4317")
+
+	if !strings.Contains(buf.String(), "already has [otel]") {
+		t.Errorf("expected skip message, got: %q", buf.String())
+	}
+	data, _ := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	if string(data) != existing {
+		t.Errorf("file should not be modified: %s", data)
+	}
+}
+
+func TestWriteCodexOtelConfig_MkdirError(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	// Make .codex a regular file so MkdirAll for ~/.codex fails.
+	if err := os.WriteFile(filepath.Join(fakeHome, ".codex"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := confirmCodexOtel
+	confirmCodexOtel = func() bool { return true }
+	t.Cleanup(func() { confirmCodexOtel = orig })
+
+	var errBuf bytes.Buffer
+	initCmd.SetErr(&errBuf)
+	t.Cleanup(func() { initCmd.SetErr(nil) })
+
+	writeCodexOtelConfig(initCmd, "http://localhost:4317")
+	if !strings.Contains(errBuf.String(), "codex OTEL") {
+		t.Errorf("expected error log, got: %q", errBuf.String())
+	}
+}
+
+func TestWriteCodexOtelConfig_OpenFileError(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	// Create .codex as read-only so creating config.toml fails.
+	codexDir := filepath.Join(fakeHome, ".codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(codexDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(codexDir, 0o755) })
+
+	orig := confirmCodexOtel
+	confirmCodexOtel = func() bool { return true }
+	t.Cleanup(func() { confirmCodexOtel = orig })
+
+	var errBuf bytes.Buffer
+	initCmd.SetErr(&errBuf)
+	t.Cleanup(func() { initCmd.SetErr(nil) })
+
+	writeCodexOtelConfig(initCmd, "http://localhost:4317")
+	if !strings.Contains(errBuf.String(), "codex OTEL") {
+		t.Errorf("expected error log, got: %q", errBuf.String())
+	}
+}
+
+func TestWriteCodexOtelConfig_Declined(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	orig := confirmCodexOtel
+	confirmCodexOtel = func() bool { return false }
+	t.Cleanup(func() { confirmCodexOtel = orig })
+
+	var buf bytes.Buffer
+	initCmd.SetOut(&buf)
+	t.Cleanup(func() { initCmd.SetOut(nil) })
+
+	writeCodexOtelConfig(initCmd, "http://localhost:4317")
+
+	if !strings.Contains(buf.String(), "Skipped") {
+		t.Errorf("expected skip message, got: %q", buf.String())
+	}
+}

@@ -749,3 +749,30 @@ func TestBindGitHubCopilot_MergeError(t *testing.T) {
 		t.Fatal("expected error from bindGitHubCopilot when dir is unwritable")
 	}
 }
+
+func TestBindAntigravity_AlreadyExists(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	pluginDir := filepath.Join(home, ".gemini", "antigravity-cli", "plugins", "dreamland")
+	os.MkdirAll(pluginDir, 0o755)
+	os.WriteFile(filepath.Join(pluginDir, "hooks.json"), []byte("{}"), 0o644)
+	result, err := bindAntigravity("", []byte(`{"key":"val"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Action != "skipped (already exists)" {
+		t.Errorf("expected skipped, got: %q", result.Action)
+	}
+}
+
+func TestBindAntigravity_Force(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	result, err := bindAntigravity("", []byte(`{"key":"val"}`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Action != "installed (forced)" {
+		t.Errorf("expected 'installed (forced)', got: %q", result.Action)
+	}
+}

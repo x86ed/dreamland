@@ -22,7 +22,12 @@
       "WebFetch(domain:code.visualstudio.com)",
       "WebFetch(domain:docs.github.com)",
       "WebFetch(domain:codelabs.developers.google.com)",
-      "WebFetch(domain:www.cursor.com)"
+      "WebFetch(domain:www.cursor.com)",
+      "Bash(openspec list *)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:discuss.ai.google.dev)",
+      "Bash(awk '{if \\($3 != \"100.0%\"\\) print}')",
+      "Bash(awk '{if \\($3 ~ /[0-9]+\\\\.[0-9]+%/\\) {pct=substr\\($3, 1, length\\($3\\)-1\\); if \\(pct<100\\) print $1, $2, $3}}')"
     ]
   },
   "hooks": {

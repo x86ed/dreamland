@@ -911,6 +911,20 @@ func TestReadBranchBumps_ReadError(t *testing.T) {
 	}
 }
 
+func TestWriteBranchBumps_MkdirAllError(t *testing.T) {
+	dir := t.TempDir()
+	// Place a regular file where the directory should be so MkdirAll fails.
+	blockingFile := filepath.Join(dir, "dreamland-dir")
+	if err := os.WriteFile(blockingFile, []byte("block"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(blockingFile, "branch-bumps")
+	bumps := map[string]branchBumpEntry{"main": {Version: "v1.0.0"}}
+	if err := writeBranchBumps(path, bumps); err == nil {
+		t.Fatal("expected error when MkdirAll fails due to file blocking the path")
+	}
+}
+
 func TestWriteBranchBumps_WriteError(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("running as root; skip permission test")
