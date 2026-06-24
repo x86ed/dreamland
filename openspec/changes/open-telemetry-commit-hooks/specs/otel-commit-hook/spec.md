@@ -24,6 +24,8 @@ The installed `commit-msg` hook SHALL call `dreamland telemetry snapshot --forma
 
 The hook SHALL exit with code 0 regardless of whether telemetry data is available, so it never blocks a commit.
 
+**GitHub Copilot**: Commits made in Copilot repos will have `AI-*` trailers via the `agentStop` hook (which provides `transcriptPath`). Token counts are best-effort — the Copilot transcript format is undocumented, so parsing may yield zero tokens on format changes. Native OTel via `.vscode/settings.json` provides a parallel, more reliable signal in the OTEL backend.
+
 #### Scenario: Telemetry appended to commit message
 - **WHEN** a developer runs `git commit -m "feat: add login"` and `.dreamland-session.json` exists with valid data
 - **THEN** the resulting commit message contains the original text followed by a blank line and `AI-*` trailer lines (e.g., `AI-Model: claude-sonnet-4-6`, `AI-InputTokens: 15234`)
@@ -44,12 +46,13 @@ AI telemetry trailers SHALL use the prefix `AI-` followed by a PascalCase field 
 | `AI-Tool` | `tool` |
 | `AI-Model` | `model` |
 | `AI-ThinkingEffort` | `thinking_effort` |
-| `AI-ContextSize` | `context_size` |
 | `AI-InputTokens` | `input_tokens` |
 | `AI-OutputTokens` | `output_tokens` |
 | `AI-CachedTokens` | `cached_tokens` |
 | `AI-TotalTokens` | `total_tokens` |
 | `AI-CapturedAt` | `captured_at` |
+
+`AI-ContextSize` is intentionally absent — no supported tool exposes context window size through its hook payload.
 
 Fields with zero or empty values SHALL be omitted from the trailer output.
 

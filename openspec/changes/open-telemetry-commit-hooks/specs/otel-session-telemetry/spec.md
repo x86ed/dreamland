@@ -33,7 +33,7 @@ The collector SHALL attempt to iterate every line in `transcript_path` whose `ty
 
 **Stability caveat**: The Claude Code transcript JSONL schema is not documented as a stable interface in official docs ([code.claude.com/docs/en/hooks](https://code.claude.com/docs/en/hooks)). All transcript parsing MUST be wrapped in full error recovery: any parse failure (missing fields, changed schema, unreadable file) SHALL result in zero token counts + a stderr warning, never a fatal error or blocked commit. Token data is best-effort observability, not billing-accurate.
 
-`model` SHALL be read from `.dreamland.json` `model_id` (the Stop hook payload does not include the model name).
+`model` SHALL be read from `message.model` on the most recent assistant turn in the transcript JSONL (confirmed present via `jq 'select(.type=="assistant").message.model'` on Claude Code session files — the Anthropic API embeds the served model on every response). Fall back to `.dreamland.json` `model_id` if the transcript is absent or no assistant turn has a non-empty `model` field.
 `thinking_effort` SHALL be read from `effort.level` in the Stop hook stdin, with `CLAUDE_EFFORT` environment variable as a fallback.
 
 #### Scenario: Claude Code Stop hook parses transcript for token totals
@@ -103,50 +103,18 @@ For `--tool cursor`, `dreamland telemetry write` SHALL:
 
 ---
 
-### Requirement: Kiro collector queries AWS Bedrock model invocation logs
+### Requirement: Kiro collector is a stub in this change
 
-Kiro runs on Amazon Bedrock. AWS Bedrock model invocation logging ([docs.aws.amazon.com/bedrock/latest/userguide/model-invocation-logging.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-invocation-logging.html)) records every API call with `modelId`, `input.inputTokenCount`, and `output.outputTokenCount` to a CloudWatch Logs group (`aws/bedrock/modelinvocations` by default).
+Kiro's `stop` hook payload only contains `{hook_event_name, cwd, session_id, assistant_response}` — no model name, no tokens, no transcript path. Real token data via AWS Bedrock model invocation logging is implemented in the separate `kiro-bedrock-telemetry` change, which depends on this one.
 
-Two hooks collaborate:
-1. **`agentSpawn` hook** — runs `dreamland telemetry write --tool kiro --phase start`: writes `session_start_time` (RFC 3339 UTC) into `.dreamland-session.json`.
-2. **`stop` hook** — runs `dreamland telemetry write --tool kiro --phase stop`: reads `session_start_time` from `.dreamland-session.json`, queries CloudWatch Logs for `ModelInvocationLog` entries between that timestamp and now, sums `inputTokenCount` and `outputTokenCount`, and extracts `modelId` from the most recent entry.
+For `--tool kiro` in this change, `dreamland telemetry write` SHALL:
+1. Attempt to parse stdin as JSON; proceed regardless of whether it is valid.
+2. Write a `SnapshotResult` with `tool: "kiro"`, `model` from `.dreamland.json` `model_id`, and all token counts zero.
+3. Exit 0.
 
-The CloudWatch query uses the `aws` CLI (already required for Kiro usage) rather than importing the AWS Go SDK:
-
-```bash
-aws logs filter-log-events \
-  --log-group-name <bedrock_log_group> \
-  --start-time <session_start_epoch_ms> \
-  --filter-pattern '{ $.schemaType = "ModelInvocationLog" }' \
-  --query 'events[*].message' \
-  --output json
-```
-
-`bedrock_log_group` defaults to `aws/bedrock/modelinvocations` and is stored in `.dreamland.json`. Each element of the returned array is a JSON string containing a `ModelInvocationLog` record; the collector parses each and sums `input.inputTokenCount` and `output.outputTokenCount`.
-
-**Prerequisites** — `dreamland init` for Kiro SHALL print a one-time notice:
-1. Bedrock model invocation logging must be enabled: AWS Console → Bedrock → Settings → Model invocation logging → select CloudWatch Logs
-2. `aws` CLI must be configured with credentials that have `logs:FilterLogEvents` on the log group
-
-If `aws` is not on PATH, credentials are unavailable, the log group does not exist, or the CLI returns an error, the collector falls back to zero token counts and reads model from `.dreamland.json`, printing a stderr warning.
-
-`modelId` from Bedrock logs is a full ARN such as `anthropic.claude-sonnet-4-20250514-v1:0`. The collector SHALL strip the provider prefix and version suffix to produce a short model string (e.g. `claude-sonnet-4`).
-
-#### Scenario: Kiro agentSpawn records session start time
-- **WHEN** `dreamland telemetry write --tool kiro --phase start` is called by the Kiro `agentSpawn` hook
-- **THEN** `.dreamland-session.json` contains `session_start_time` set to the current RFC 3339 UTC timestamp
-
-#### Scenario: Kiro stop hook queries Bedrock logs and writes real token counts
-- **WHEN** `dreamland telemetry write --tool kiro --phase stop` is called and CloudWatch contains Bedrock log entries since `session_start_time`
-- **THEN** `.dreamland-session.json` contains `input_tokens` and `output_tokens` summed from all matching log entries, and `model` parsed from `modelId`
-
-#### Scenario: Kiro falls back gracefully when AWS credentials absent
-- **WHEN** no AWS credentials are configured
-- **THEN** `dreamland telemetry write --tool kiro --phase stop` writes a snapshot with zero token counts, model from `.dreamland.json`, and a stderr warning; it exits 0
-
-#### Scenario: Kiro falls back gracefully when log group not configured
-- **WHEN** `bedrock_log_group` is empty in `.dreamland.json` and the default log group does not exist
-- **THEN** zero tokens are written, a stderr warning is printed, exit code is 0
+#### Scenario: Kiro stop hook writes stub snapshot
+- **WHEN** `dreamland telemetry write --tool kiro` runs in a Kiro `stop` hook
+- **THEN** `.dreamland-session.json` contains `tool: "kiro"`, `model` from `.dreamland.json`, all token counts zero, and `captured_at` set to current timestamp
 
 ---
 
@@ -210,17 +178,29 @@ For `--tool antigravity`, `dreamland telemetry write` SHALL:
 
 ---
 
-### Requirement: GitHub Copilot write command is a documented no-op
+### Requirement: GitHub Copilot collector reads agentStop hook payload and parses transcript
 
-For `--tool github-copilot`, `dreamland telemetry write` SHALL print a message to stderr explaining that no lifecycle hook is available and directing the user to the two supported telemetry paths:
-1. OTel traces via `OTEL_EXPORTER_OTLP_ENDPOINT` (Copilot CLI SDK exports token counts as span attributes)
-2. `token-usage.jsonl` artifact (one record per API call: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `model`, `provider`, timestamps)
+GitHub Copilot's `agentStop` hook (confirmed from [docs.github.com/en/copilot/reference/hooks-reference](https://docs.github.com/en/copilot/reference/hooks-reference)) sends the following payload on stdin:
+- `sessionId` (string)
+- `timestamp` (integer, epoch ms)
+- `cwd` (string)
+- `transcriptPath` (string) — path to the session transcript
+- `stopReason` (string, e.g. `"end_turn"`)
 
-The command SHALL then exit 0 without writing to `.dreamland-session.json`.
+For `--tool github-copilot`, `dreamland telemetry write` SHALL:
+1. Parse the `agentStop` payload from stdin and extract `transcriptPath`.
+2. Attempt to parse `transcriptPath` as JSONL for token counts and model name. The Copilot transcript format is not publicly documented — all parsing is best-effort and MUST be wrapped in full error recovery.
+3. Fall back to zero tokens and `cfg.ModelID` if transcript parsing fails or the file is absent.
+4. Write the `SnapshotResult` with `tool: "github-copilot"`, `model`, and any available token counts.
+5. Exit 0 in all cases.
 
-#### Scenario: GitHub Copilot write command exits cleanly with guidance
-- **WHEN** `dreamland telemetry write --tool github-copilot` is called
-- **THEN** stderr contains guidance about OTel and token-usage.jsonl, stdout is empty, exit code is 0
+#### Scenario: GitHub Copilot agentStop hook writes snapshot with transcript data
+- **WHEN** `dreamland telemetry write --tool github-copilot` runs with a valid `transcriptPath` in the agentStop payload
+- **THEN** `.dreamland-session.json` is written with `tool: "github-copilot"` and token counts from the transcript where parseable
+
+#### Scenario: GitHub Copilot transcript unreadable falls back gracefully
+- **WHEN** `transcriptPath` does not exist or is in an unrecognized format
+- **THEN** zero tokens and `model` from `.dreamland.json` are written, a stderr warning is printed, and the command exits 0
 
 ---
 

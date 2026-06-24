@@ -40,12 +40,12 @@ Six tools are in scope: **Claude Code**, **GitHub Copilot / VSCode**, **Cursor**
 
 | Tool | Hook file | Event | Data available at hook time |
 | ---- | --------- | ----- | --------------------------- |
-| **Claude Code** | `.claude/settings.json` | `Stop` | stdin JSON: `transcript_path`, `effort.level`, `session_id`, `stop_hook_active`; env: `CLAUDE_EFFORT`. Token counts summed from transcript JSONL (`message.usage.*`). Model from `.dreamland.json`. |
+| **Claude Code** | `.claude/settings.json` | `Stop` | stdin JSON: `transcript_path`, `effort.level`, `session_id`, `stop_hook_active`; env: `CLAUDE_EFFORT`. Token counts summed from transcript JSONL (`message.usage.*`). Model from `message.model` on the most recent assistant turn in the transcript (falls back to `.dreamland.json`). |
 | **Codex CLI** | `.codex/hooks.json` | `Stop` | stdin JSON: `model` (directly), `transcript_path`, `session_id`, `turn_id`, `permission_mode`. Token counts from transcript JSONL (unstable format — parse with error recovery). |
 | **Cursor** | `.cursor/hooks.json` | `stop` | stdin JSON: `model`, `model_id`, `model_params`, `conversation_id`, `generation_id`, `transcript_path`, `status`, `loop_count`, `cursor_version`, `workspace_roots`, `user_email`. Model directly available; token counts from transcript JSONL (same parser as Claude Code/Codex). `CURSOR_TRANSCRIPT_PATH` env var also set automatically. |
 | **Kiro** | `.kiro/agent.json` | `stop` | Stub only in this change. Kiro's `stop` hook payload contains only `{hook_event_name, cwd, session_id, assistant_response}` — no tokens, no model, no transcript path. `dreamland telemetry write --tool kiro` writes `tool: "kiro"` and `model` from `.dreamland.json`; all token counts zero. Real token data via AWS Bedrock model invocation logging is implemented in the `kiro-bedrock-telemetry` change (depends on this change). |
 | **Antigravity** | `~/.gemini/antigravity-cli/plugins/dreamland/hooks.json` | `PostTurnHook` | stdin JSON: `stepIdx`, `conversationId`, `workspacePaths`, `transcriptPath`, `artifactDirectoryPath`. `transcriptPath` points to `~/.gemini/antigravity/brain/<conversationId>/.system_generated/logs/transcript.jsonl`. Each transcript line: `{"type":"...","model":"...","sessionId":"...","timestamp":"...","usageMetadata":{"promptTokenCount":N,"candidatesTokenCount":N,"thoughtsTokenCount":N,"cachedContentTokenCount":N,"totalTokenCount":N}}`. Model extracted from most recent line with a non-empty `model` field. Tokens summed across all lines. Separate parser needed (`ParseAntigravityTranscript`) due to different field names from Claude Code/Codex. |
-| **GitHub Copilot** | `.github/copilot-hooks/hooks-manifest.json` | stub | No public hook API. Write command is a no-op that documents two alternatives: (1) OTel traces via Copilot CLI SDK (`OTEL_EXPORTER_OTLP_ENDPOINT`); (2) `token-usage.jsonl` artifact (input/output/cache tokens, model, provider per API call). |
+| **GitHub Copilot** | `.github/hooks/dreamland-telemetry.json` | `agentStop` | Confirmed from [docs.github.com/en/copilot/reference/hooks-reference](https://docs.github.com/en/copilot/reference/hooks-reference). `agentStop` payload: `sessionId`, `timestamp`, `cwd`, `transcriptPath`, `stopReason`. `transcriptPath` available — format unknown, parsed best-effort with same error recovery as other tools. Native OTEL also available via `.vscode/settings.json` as a parallel path. |
 
 **`context_size` removed from SnapshotResult**: No supported tool exposes context window size through its hook payload or a stable programmatic API at hook execution time.
 
@@ -171,7 +171,9 @@ GitHub Copilot has native OpenTelemetry support exposed through VS Code settings
 
 ## Open Questions
 
-1. **Kiro `agentSpawn` env propagation**: Does env set in `agentSpawn` shell hook stdout propagate to `stop` hook? Needs validation against current Kiro release.
-2. **Codex user-level OTEL**: Should `dreamland init` offer to write `~/.codex/config.toml` directly (with user consent) rather than just writing the example file? Recommend asking: makes the setup complete for Codex users.
-3. **Stale snapshot warning threshold**: Default 4h configurable via `--max-age`. Resolved — keep configurable.
-4. **Copilot port translation**: When `otel_endpoint` uses gRPC port 4317, auto-translate to 4318 for `github.copilot.chat.otel.otlpEndpoint`. Risk: breaks if user intentionally runs HTTP on 4317. Recommend storing `otel_endpoint_http` separately in `.dreamland.json`.
+All questions resolved.
+
+1. **Kiro `agentSpawn` env propagation**: Moved to `kiro-bedrock-telemetry` change — Kiro is a stub in this change.
+2. **Codex user-level OTEL**: **Resolved** — `dreamland init` writes `~/.codex/config.toml` directly after a confirmation prompt. No example file needed.
+3. **Stale snapshot warning threshold**: **Resolved** — default 4h, configurable via `--max-age`.
+4. **Copilot port translation**: **Resolved** — init wizard auto-derives the HTTP endpoint at scaffold time. When writing `github.copilot.chat.otel.otlpEndpoint` to `.vscode/settings.json`, replace port 4317 with 4318. No separate config field stored.

@@ -13,7 +13,7 @@ The exact end-of-turn event key and binding file per platform:
 | Cursor         | `.cursor/hooks.json`                                      | `stop`                    |
 | Kiro           | `.kiro/agent.json`                                        | `stop`                    |
 | Antigravity    | `~/.gemini/antigravity-cli/plugins/dreamland/hooks.json`  | `PostTurnHook`            |
-| GitHub Copilot | `.github/copilot-hooks/hooks-manifest.json`               | stub — no public hook API |
+| GitHub Copilot | `.github/hooks/dreamland-telemetry.json`                  | `agentStop`               |
 
 All file merges use the atomic write strategy (temp file + rename) defined in `dev-workflow-hooks`.
 
@@ -37,9 +37,9 @@ All file merges use the atomic write strategy (temp file + rename) defined in `d
 - **WHEN** `dreamland init` completes with "Antigravity" selected
 - **THEN** `~/.gemini/antigravity-cli/plugins/dreamland/hooks.json` contains `dreamland telemetry write --tool antigravity` under `PostTurnHook`
 
-#### Scenario: GitHub Copilot telemetry remains a stub
+#### Scenario: Telemetry write command added to GitHub Copilot agentStop hook
 - **WHEN** `dreamland init` completes with "GitHub Copilot" selected
-- **THEN** `.github/copilot-hooks/hooks-manifest.json` contains a `_note` field referencing the OTel/token-usage.jsonl approach described below, with no executable hook command registered
+- **THEN** `.github/hooks/dreamland-telemetry.json` contains `dreamland telemetry write --tool github-copilot` registered under the `agentStop` event
 
 ---
 
@@ -58,14 +58,14 @@ When `dreamland telemetry write --tool claude-code` runs inside the Claude Code 
    - `message.usage.output_tokens` → `OutputTokens`
    - `message.usage.cache_creation_input_tokens` → accumulated into `CachedTokens` (creation cost)
    - `message.usage.cache_read_input_tokens` → accumulated into `CachedTokens` (read savings)
-4. Read `model` from `.dreamland.json` `model_id` field (the Stop hook payload does not include model name).
+4. Read `model` from `message.model` on the most recent assistant turn in the transcript (the Anthropic API embeds the served model on every response). Fall back to `.dreamland.json` `model_id` if the transcript is absent or no assistant turn has a non-empty `model` field.
 5. Write the accumulated `SnapshotResult` to `.dreamland-session.json`.
 
 **Note on token accuracy**: Claude Code writes JSONL entries during streaming before the input token count is finalized. The summed counts from transcript JSONL are best-effort and may not match final API billing. This is documented behavior; the snapshot is for observability, not billing reconciliation.
 
 #### Scenario: Claude Code Stop hook writes telemetry from transcript
-- **WHEN** `dreamland telemetry write --tool claude-code` runs in a Claude Code `Stop` hook with `transcript_path` on stdin pointing to a JSONL with 3 assistant turns totaling 5000 input, 800 output, and 2000 cache_read tokens
-- **THEN** `.dreamland-session.json` is written with `input_tokens: 5000`, `output_tokens: 800`, `cached_tokens: 2000`, `total_tokens: 5800`, `thinking_effort` from `effort.level`, and `model` from `.dreamland.json`
+- **WHEN** `dreamland telemetry write --tool claude-code` runs in a Claude Code `Stop` hook with `transcript_path` on stdin pointing to a JSONL with 3 assistant turns totaling 5000 input, 800 output, and 2000 cache_read tokens where the last turn has `"model": "claude-sonnet-4-6"`
+- **THEN** `.dreamland-session.json` is written with `input_tokens: 5000`, `output_tokens: 800`, `cached_tokens: 2000`, `total_tokens: 5800`, `thinking_effort` from `effort.level`, and `model: "claude-sonnet-4-6"` from the transcript
 
 #### Scenario: Missing transcript file handled gracefully
 - **WHEN** `transcript_path` in Stop hook stdin points to a file that does not exist
@@ -91,21 +91,32 @@ When `dreamland telemetry write --tool codex` runs inside the Codex CLI `Stop` h
 
 ---
 
-### Requirement: Cursor telemetry data is minimal due to limited stop hook payload
+### Requirement: Cursor telemetry data sourced from stop hook payload and transcript JSONL
 
-The Cursor `stop` hook payload is minimal: `{"status": "completed"|"aborted"|"error", "loop_count": N}`. It does not include model name, token counts, session ID, or transcript path.
+The Cursor `stop` hook payload (confirmed from [cursor.com/docs/hooks](https://cursor.com/docs/hooks)) contains:
+- `model` (string) — model name directly available
+- `model_id` (string) — model identifier
+- `model_params` (array)
+- `conversation_id`, `generation_id`, `hook_event_name`, `cursor_version`, `workspace_roots`, `user_email` (strings)
+- `transcript_path` (string | null) — path to session transcript when enabled
+- `status` (`"completed"` | `"aborted"` | `"error"`)
+- `loop_count` (integer)
+
+Cursor also auto-sets `CURSOR_TRANSCRIPT_PATH` as an env var for all hooks.
 
 When `dreamland telemetry write --tool cursor` runs in the Cursor `stop` hook, it SHALL:
-1. Read the stop payload from stdin and record `loop_count` in an extended field.
-2. Read `model` from `.dreamland.json` `model_id`.
-3. Set all token count fields to zero (unavailable from hook).
-4. Write the partial `SnapshotResult` to `.dreamland-session.json` with `tool: "cursor"` and `model` populated, tokens as zero.
+1. Read `model` directly from the stop payload stdin.
+2. If `transcript_path` is non-null, parse the transcript JSONL for token counts using the same parser as Claude Code and Codex. Fall back to `CURSOR_TRANSCRIPT_PATH` env var when `transcript_path` is null in the payload.
+3. Wrap transcript parsing in error recovery: parse failure yields zero tokens + a stderr warning.
+4. Write the `SnapshotResult` to `.dreamland-session.json` with `tool: "cursor"`, `model`, and token counts.
 
-If the `AGENT_TELEMETRY_URL` environment variable is set by Cursor (its internal run-summary endpoint), `dreamland telemetry write` MAY attempt an HTTP GET to that URL and parse any token fields from the response. This is a best-effort enhancement; failure does not block the write.
+#### Scenario: Cursor stop hook extracts model and parses transcript for tokens
+- **WHEN** `dreamland telemetry write --tool cursor` runs with stop payload containing `"model": "claude-sonnet-4-5"` and a valid `transcript_path`
+- **THEN** `.dreamland-session.json` contains `model: "claude-sonnet-4-5"` and token counts summed from the transcript JSONL
 
-#### Scenario: Cursor stop hook writes partial snapshot
-- **WHEN** `dreamland telemetry write --tool cursor` runs in a Cursor `stop` hook with `{"status": "completed", "loop_count": 4}`
-- **THEN** `.dreamland-session.json` contains `tool: "cursor"`, `model` from `.dreamland.json`, all token counts zero, and `captured_at` set to current timestamp
+#### Scenario: Cursor stop with null transcript_path falls back to env var
+- **WHEN** `transcript_path` is null in the stop payload but `CURSOR_TRANSCRIPT_PATH` env var is set
+- **THEN** `dreamland telemetry write` uses the env var path for transcript parsing
 
 #### Scenario: Cursor stop with aborted status still writes snapshot
 - **WHEN** the Cursor stop payload has `"status": "aborted"`
@@ -129,37 +140,74 @@ When `dreamland telemetry write --tool kiro` runs in a Kiro `stop` hook, it SHAL
 
 ---
 
-### Requirement: Antigravity telemetry data sourced from PostTurnHook payload
+### Requirement: Antigravity telemetry data sourced from PostTurnHook transcript JSONL
 
-Antigravity's `PostTurnHook` fires after each agent turn. The exact payload schema is not publicly documented; the hook is classified as an "Inspect" (read-only, non-blocking) hook in the Antigravity SDK.
+The Antigravity `PostTurnHook` stdin payload contains confirmed fields (from [antigravity.google/docs/hooks](https://antigravity.google/docs/hooks)):
+- `stepIdx` (integer)
+- `conversationId` (string)
+- `workspacePaths` (array of strings)
+- `transcriptPath` (string) — path to `~/.gemini/antigravity/brain/<conversationId>/.system_generated/logs/transcript.jsonl`
+- `artifactDirectoryPath` (string)
+
+Each line of the transcript JSONL has the schema:
+```json
+{
+  "type": "string",
+  "model": "string",
+  "sessionId": "string",
+  "timestamp": "string",
+  "usageMetadata": {
+    "promptTokenCount": 0,
+    "candidatesTokenCount": 0,
+    "thoughtsTokenCount": 0,
+    "cachedContentTokenCount": 0,
+    "totalTokenCount": 0
+  }
+}
+```
 
 When `dreamland telemetry write --tool antigravity` runs in the Antigravity `PostTurnHook`, it SHALL:
-1. Attempt to read JSON from stdin and extract any recognized token or model fields using best-effort field matching.
-2. Read `model` from `.dreamland.json` `model_id` as a fallback.
-3. Write whatever partial `SnapshotResult` can be constructed.
-4. Token fields for which no value is found SHALL be set to zero.
 
-The binding file (`~/.gemini/antigravity-cli/plugins/dreamland/hooks.json`) SHALL be marked `"_preview": true` to signal that Antigravity hook payload documentation is not yet finalized.
+1. Parse the PostTurnHook payload from stdin and extract `transcriptPath`.
+2. Call `transcript.ParseAntigravityTranscript(path)` which sums `usageMetadata.promptTokenCount` → `InputTokens`, `usageMetadata.candidatesTokenCount` → `OutputTokens`, `usageMetadata.cachedContentTokenCount` → `CachedTokens`.
+3. Extract `model` from the most recent transcript line where the `model` field is non-empty. Fall back to `cfg.ModelID` if absent.
+4. Wrap all transcript parsing in error recovery: any parse failure yields zero tokens + stderr warning, not a fatal error.
+5. Write the `SnapshotResult` with `tool: "antigravity"`, `model`, and token counts.
 
-#### Scenario: Antigravity PostTurnHook writes best-effort snapshot
-- **WHEN** `dreamland telemetry write --tool antigravity` runs in a `PostTurnHook` context
-- **THEN** `.dreamland-session.json` is written with available fields populated and unknown fields zeroed; the command exits 0
+#### Scenario: Antigravity PostTurnHook parses transcript for real token counts
+- **WHEN** `dreamland telemetry write --tool antigravity` runs with a valid `transcriptPath` pointing to 3 lines each having `usageMetadata.promptTokenCount: 500` and `candidatesTokenCount: 100`
+- **THEN** `.dreamland-session.json` contains `input_tokens: 1500`, `output_tokens: 300`, `model` from the most recent transcript line
+
+#### Scenario: Antigravity transcript parse failure falls back gracefully
+- **WHEN** `transcriptPath` points to a malformed JSONL
+- **THEN** zero tokens are written, `model` falls back to `.dreamland.json`, a warning is printed to stderr, exit code is 0
 
 ---
 
-### Requirement: GitHub Copilot telemetry documented via OTel and token-usage.jsonl
+### Requirement: GitHub Copilot telemetry data sourced from agentStop hook transcript
 
-GitHub Copilot does not expose a public lifecycle hook API. The hook binding file (`.github/copilot-hooks/hooks-manifest.json`) is a stub per `dev-workflow-hooks`.
+GitHub Copilot has a full hooks system ([docs.github.com/en/copilot/reference/hooks-reference](https://docs.github.com/en/copilot/reference/hooks-reference)) configured via `.github/hooks/*.json`. The `agentStop` event fires when a Copilot agent session ends and provides:
+- `sessionId` (string)
+- `timestamp` (integer, epoch ms)
+- `cwd` (string)
+- `transcriptPath` (string) — path to session transcript
+- `stopReason` (`"end_turn"` | other values)
 
-The stub manifest SHALL document the two available telemetry paths that users can configure manually:
-1. **OTel traces**: GitHub Copilot CLI SDK exports traces, metrics, and events via OpenTelemetry. Token counts, model name, and duration appear as span attributes. Configure via `OTEL_EXPORTER_OTLP_ENDPOINT`.
-2. **token-usage.jsonl**: Every Copilot workflow outputs a `token-usage.jsonl` artifact with one record per API call containing `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `model`, `provider`, and timestamps.
+When `dreamland telemetry write --tool github-copilot` runs in the Copilot `agentStop` hook, it SHALL:
+1. Parse the `agentStop` payload from stdin and extract `transcriptPath`.
+2. Attempt to parse `transcriptPath` for token counts and model name using best-effort JSONL parsing. The Copilot transcript format is not publicly documented — wrap all parsing in full error recovery.
+3. Fall back to zero tokens and `cfg.ModelID` from `.dreamland.json` if transcript parsing fails.
+4. Write the `SnapshotResult` with `tool: "github-copilot"`, `model`, and token counts.
 
-The stub SHALL include a `_note` field and a `_telemetry_paths` object describing both options and referencing the `dreamland telemetry write` command for manual invocation.
+The native OTel path (`.vscode/settings.json` keys) remains available in parallel for OTEL backend observability independent of the commit trailer path.
 
-#### Scenario: GitHub Copilot stub manifest created
-- **WHEN** `dreamland init` completes with "GitHub Copilot" selected
-- **THEN** `.github/copilot-hooks/hooks-manifest.json` exists with `_note` and `_telemetry_paths` fields, and no executable hook command
+#### Scenario: GitHub Copilot agentStop hook writes telemetry snapshot
+- **WHEN** `dreamland telemetry write --tool github-copilot` runs with `agentStop` stdin containing a valid `transcriptPath`
+- **THEN** `.dreamland-session.json` is written with `tool: "github-copilot"` and any token counts parseable from the transcript; the command exits 0
+
+#### Scenario: GitHub Copilot transcript parse failure falls back gracefully
+- **WHEN** `transcriptPath` is unreadable or in an unrecognized format
+- **THEN** zero tokens and `model` from `.dreamland.json` are written; a warning is printed to stderr; exit code is 0
 
 ---
 
@@ -208,17 +256,20 @@ Platform-specific injection mechanisms:
   ```
 - **AND** `.claude/settings.json` contains `dreamland-otel-env.sh` in the `SessionStart` hook array
 
-#### Scenario: Codex native OTEL config is user-level; project-level writes an example only
-- **WHEN** `dreamland init` completes with "Codex" selected
+#### Scenario: Codex native OTEL config written directly to user-level config with confirmation
+- **WHEN** `dreamland init` completes with "Codex" selected and the user confirms the prompt `"Write OTEL config to ~/.codex/config.toml? [y/N]"`
 - **THEN** `.codex/config.toml` does NOT contain any `[otel]` section (Codex ignores project-level OTEL config)
-- **AND** `.codex/otel-config.example.toml` is written with the correct `[otel]` TOML snippet and a comment instructing the user to merge it into `~/.codex/config.toml`:
+- **AND** `~/.codex/config.toml` is read (created if absent), the `[otel]` block is merged preserving all other keys, and the file is written atomically:
   ```toml
-  # Add this to ~/.codex/config.toml (project-level config.toml cannot set OTEL)
   [otel]
   environment = "dev"
   exporter = { otlp-http = { endpoint = "<otel_endpoint>", protocol = "binary" } }
   ```
-- **AND** `dreamland init` prints a warning: "Codex OTEL config must be set in ~/.codex/config.toml — see .codex/otel-config.example.toml"
+- **AND** `dreamland init` prints confirmation: "OTEL config written to ~/.codex/config.toml"
+
+#### Scenario: Codex OTEL config skipped when user declines
+- **WHEN** the user answers `N` at the `~/.codex/config.toml` prompt
+- **THEN** neither `~/.codex/config.toml` nor any project file is modified for OTEL, and `dreamland init` prints: "Skipped — set [otel] in ~/.codex/config.toml manually to enable Codex telemetry"
 
 #### Scenario: Cursor sessionStart hook returns env JSON that persists to all hooks
 - **WHEN** `dreamland init` completes with "Cursor" selected
