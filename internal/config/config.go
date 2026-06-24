@@ -22,6 +22,8 @@ type Config struct {
 	VersionBumpCommand string `json:"version_bump_command,omitempty"`
 	ModelID            string `json:"model_id,omitempty"`
 	EmailSuffix        string `json:"email_suffix,omitempty"`
+	OtelEndpoint       string `json:"otel_endpoint,omitempty"`
+	BedrockLogGroup    string `json:"bedrock_log_group,omitempty"`
 }
 
 var reNotAllowed = regexp.MustCompile(`[^a-z0-9.\-]`)

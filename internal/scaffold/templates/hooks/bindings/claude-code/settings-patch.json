@@ -15,7 +15,8 @@
         "hooks": [
           {"type": "command", "command": "dreamland version-bump --patch"},
           {"type": "command", "command": "dreamland transition-log"},
-          {"type": "command", "command": "dreamland test"}
+          {"type": "command", "command": "dreamland test"},
+          {"type": "command", "command": "dreamland telemetry write --tool claude-code"}
         ]
       }
     ]

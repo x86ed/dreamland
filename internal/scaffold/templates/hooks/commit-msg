@@ -1,0 +1,10 @@
+# BEGIN dreamland-telemetry
+COMMIT_MSG_FILE="$1"
+if command -v dreamland >/dev/null 2>&1; then
+  TRAILERS="$(dreamland telemetry snapshot --format trailers 2>/dev/null)"
+  if [ -n "$TRAILERS" ]; then
+    printf '\n%s' "$TRAILERS" >> "$COMMIT_MSG_FILE"
+  fi
+fi
+exit 0
+# END dreamland-telemetry

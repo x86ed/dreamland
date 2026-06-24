@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "bash",
+        "bash": "dreamland telemetry write --tool github-copilot",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}

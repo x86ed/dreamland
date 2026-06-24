@@ -5,7 +5,8 @@
     "PostTurnHook": [
       {"command": "dreamland version-bump --patch"},
       {"command": "dreamland transition-log"},
-      {"command": "dreamland test"}
+      {"command": "dreamland test"},
+      {"command": "dreamland telemetry write --tool antigravity"}
     ]
   }
 }
