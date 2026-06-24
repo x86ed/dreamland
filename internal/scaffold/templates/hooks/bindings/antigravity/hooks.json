@@ -1,0 +1,11 @@
+{
+  "_preview": true,
+  "_note_session_start": "Antigravity session-start hook is not yet publicly documented. Stub only — update when schema is published.",
+  "hooks": {
+    "PostTurnHook": [
+      {"command": "dreamland version-bump --patch"},
+      {"command": "dreamland transition-log"},
+      {"command": "dreamland test"}
+    ]
+  }
+}

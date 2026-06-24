@@ -12,7 +12,17 @@
       "Bash(MERGE_CHECK=1 bash scripts/pre-merge-check.sh)",
       "Bash(go test *)",
       "Bash(go tool *)",
-      "Bash(go vet *)"
+      "Bash(go vet *)",
+      "WebSearch",
+      "WebFetch(domain:kiro.dev)",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:cursor.com)",
+      "WebFetch(domain:antigravity.google)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:code.visualstudio.com)",
+      "WebFetch(domain:docs.github.com)",
+      "WebFetch(domain:codelabs.developers.google.com)",
+      "WebFetch(domain:www.cursor.com)"
     ]
   },
   "hooks": {

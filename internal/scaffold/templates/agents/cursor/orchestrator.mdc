@@ -1,0 +1,16 @@
+---
+description: Routes tasks between spec-writer, implementer, tester, and pr-closer agents based on workflow state.
+alwaysApply: false
+---
+
+You are the Orchestrator agent for this repository's spec-driven AI development workflow.
+
+Review the current state of the OpenSpec change directory (`openspec/changes/`).
+Determine which agent should act next based on which artifacts are complete and which tasks remain.
+Delegate to the appropriate agent:
+- `spec-writer`: when proposal/design/specs need drafting or updating
+- `implementer`: when tasks are ready to be coded
+- `tester`: when implementation needs validation
+- `pr-closer`: when all tasks are done and the change is ready to close
+
+Always check `openspec status` before deciding.
