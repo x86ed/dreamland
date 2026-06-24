@@ -26,15 +26,15 @@ For `--tool claude-code`, `dreamland telemetry write` SHALL read the Claude Code
 - `session_id` (string)
 - `stop_hook_active` (boolean)
 
-The collector SHALL iterate every line in `transcript_path` whose `type` is `"assistant"` and accumulate:
+The collector SHALL attempt to iterate every line in `transcript_path` whose `type` is `"assistant"` and accumulate:
 - `message.usage.input_tokens` → `InputTokens`
 - `message.usage.output_tokens` → `OutputTokens`
 - `message.usage.cache_creation_input_tokens` + `message.usage.cache_read_input_tokens` → `CachedTokens`
 
+**Stability caveat**: The Claude Code transcript JSONL schema is not documented as a stable interface in official docs ([code.claude.com/docs/en/hooks](https://code.claude.com/docs/en/hooks)). All transcript parsing MUST be wrapped in full error recovery: any parse failure (missing fields, changed schema, unreadable file) SHALL result in zero token counts + a stderr warning, never a fatal error or blocked commit. Token data is best-effort observability, not billing-accurate.
+
 `model` SHALL be read from `.dreamland.json` `model_id` (the Stop hook payload does not include the model name).
 `thinking_effort` SHALL be read from `effort.level` in the Stop hook stdin, with `CLAUDE_EFFORT` environment variable as a fallback.
-
-Because Claude Code writes transcript entries during streaming before token counts are finalized, the summed values are best-effort observability data, not billing-accurate counts.
 
 #### Scenario: Claude Code Stop hook parses transcript for token totals
 - **WHEN** `dreamland telemetry write --tool claude-code` runs with Stop hook stdin containing a valid `transcript_path` pointing to a JSONL with 2 assistant turns (1000+500 input, 200+100 output, 300 cache_read tokens)
@@ -52,7 +52,9 @@ For `--tool codex`, `dreamland telemetry write` SHALL read the Codex Stop hook J
 - `model` (string) — model identifier, directly available in the payload
 - `session_id`, `turn_id`, `transcript_path`, `cwd`, `hook_event_name`, `permission_mode`, `stop_hook_active`, `last_assistant_message`
 
-The collector SHALL extract `model` directly from stdin. It SHALL attempt to read `transcript_path` for token counts using the same JSONL parsing as the Claude Code collector. Because the Codex transcript format is explicitly documented as unstable (not a stable interface), all transcript reads SHALL be wrapped in error recovery: on any parse failure, token counts default to zero and a warning is written to stderr.
+The collector SHALL extract `model` directly from stdin. It SHALL attempt to read `transcript_path` for token counts using the same JSONL parsing as the Claude Code collector.
+
+**Stability caveat**: The Codex docs ([developers.openai.com/codex/hooks](https://developers.openai.com/codex/hooks)) explicitly state: *"transcript_path points to a conversation transcript for convenience, but the transcript format is not a stable interface for hooks and may change over time."* All transcript reads SHALL be wrapped in full error recovery: on any parse failure, token counts default to zero and a warning is written to stderr. This is the same policy as Claude Code.
 
 #### Scenario: Codex Stop hook extracts model directly from payload
 - **WHEN** `dreamland telemetry write --tool codex` runs with Stop hook stdin containing `"model": "o4-mini"`
@@ -77,6 +79,8 @@ The Cursor `stop` hook payload (confirmed from [cursor.com/docs/hooks](https://c
 - `loop_count` (integer)
 
 Cursor also auto-sets `CURSOR_TRANSCRIPT_PATH` as an environment variable for all hooks.
+
+**Stability caveat on transcript**: Cursor's docs ([cursor.com/docs/hooks](https://cursor.com/docs/hooks)) confirm `transcript_path` in the stop payload but do not document the transcript JSONL schema as a stable interface. Apply the same full error-recovery policy as Claude Code and Codex: parse failure → zero tokens + stderr warning, never fatal.
 
 For `--tool cursor`, `dreamland telemetry write` SHALL:
 1. Read the stop hook JSON payload from stdin.
@@ -146,13 +150,63 @@ If `aws` is not on PATH, credentials are unavailable, the log group does not exi
 
 ---
 
-### Requirement: Antigravity collector uses best-effort PostTurnHook payload parsing
+### Requirement: Antigravity collector reads transcriptPath from PostTurnHook and parses transcript JSONL
 
-The Antigravity `PostTurnHook` payload schema is not publicly documented. For `--tool antigravity`, `dreamland telemetry write` SHALL attempt to read JSON from stdin and extract any fields matching known token or model keys using lenient parsing. Unrecognized or absent fields default to zero/empty. `model` falls back to `.dreamland.json` `model_id`.
+The Antigravity `PostTurnHook` stdin payload contains the following confirmed fields:
+- `stepIdx` (integer) — current step index
+- `conversationId` (string) — session identifier
+- `workspacePaths` (array of strings)
+- `transcriptPath` (string) — path to `~/.gemini/antigravity/brain/<conversationId>/.system_generated/logs/transcript.jsonl`
+- `artifactDirectoryPath` (string)
 
-#### Scenario: Antigravity PostTurnHook writes best-effort snapshot
-- **WHEN** `dreamland telemetry write --tool antigravity` runs with any stdin content
-- **THEN** `.dreamland-session.json` is written with all available fields populated and unknowns zeroed; the command exits 0
+Each line of `transcript.jsonl` is a JSON object with the following schema:
+
+```json
+{
+  "type": "string",
+  "model": "string",
+  "sessionId": "string",
+  "timestamp": "string",
+  "usageMetadata": {
+    "promptTokenCount": 0,
+    "candidatesTokenCount": 0,
+    "thoughtsTokenCount": 0,
+    "cachedContentTokenCount": 0,
+    "totalTokenCount": 0
+  }
+}
+```
+
+For `--tool antigravity`, `dreamland telemetry write` SHALL:
+
+1. Parse the PostTurnHook JSON payload from stdin.
+2. Extract `transcriptPath` from the payload.
+3. Call `transcript.ParseAntigravityTranscript(path)` which reads the JSONL and sums:
+   - `usageMetadata.promptTokenCount` → `InputTokens`
+   - `usageMetadata.candidatesTokenCount` → `OutputTokens`
+   - `usageMetadata.cachedContentTokenCount` → `CachedTokens`
+   - `usageMetadata.totalTokenCount` is verified against `InputTokens + OutputTokens` (use computed value if mismatched)
+4. Extract `model` from the most recent transcript line where the `model` field is non-empty. Fall back to `cfg.ModelID` if no model is found.
+5. Wrap transcript parsing in error recovery: parse failure yields zero tokens and a stderr warning, not a fatal error.
+6. Write the `SnapshotResult` with `tool: "antigravity"`, `model`, and token counts.
+
+`ParseAntigravityTranscript` is a separate function from `ParseTranscript` (used for Claude Code/Codex/Cursor) because the field names differ (`promptTokenCount` vs `input_tokens`, `usageMetadata` nesting vs flat `message.usage`).
+
+#### Scenario: Antigravity PostTurnHook parses transcript for real token counts
+- **WHEN** `dreamland telemetry write --tool antigravity` runs with stdin containing a valid `transcriptPath` pointing to a transcript with 3 lines each having `usageMetadata.promptTokenCount: 500` and `candidatesTokenCount: 100`
+- **THEN** `.dreamland-session.json` contains `input_tokens: 1500`, `output_tokens: 300`, `model` from the most recent transcript line with a non-empty model field
+
+#### Scenario: Antigravity model extracted from transcript line
+- **WHEN** transcript lines include `"model": "gemini-2.5-pro"` on the last assistant turn
+- **THEN** `.dreamland-session.json` contains `model: "gemini-2.5-pro"`
+
+#### Scenario: Antigravity transcript parse failure falls back gracefully
+- **WHEN** `transcriptPath` points to a malformed JSONL file
+- **THEN** zero token counts are written, `model` falls back to `.dreamland.json`, a warning is printed to stderr, and the command exits 0
+
+#### Scenario: Antigravity missing transcriptPath falls back gracefully
+- **WHEN** the PostTurnHook stdin has no `transcriptPath` field or the file does not exist
+- **THEN** a `SnapshotResult` with zero tokens and `model` from `.dreamland.json` is written; exit code is 0
 
 ---
 

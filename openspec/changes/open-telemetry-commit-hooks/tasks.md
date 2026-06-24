@@ -15,6 +15,8 @@
 - [ ] 3.1 Create `internal/telemetry/transcript.go` with `ParseTranscript(path string) (TranscriptUsage, error)` that reads a JSONL file, filters lines where `type == "assistant"`, and sums `message.usage.input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` across all lines
 - [ ] 3.2 Ensure the parser returns zero counts (not an error) when the file does not exist; returns a wrapped error only on file read failures other than not-found
 - [ ] 3.3 Write unit tests with a synthetic JSONL fixture covering: multi-turn accumulation, missing usage fields, empty file, non-existent file
+- [ ] 3.4 Create `ParseAntigravityTranscript(path string) (TranscriptUsage, string, error)` in `internal/telemetry/transcript.go` — reads the same JSONL path but maps Antigravity field names: `usageMetadata.promptTokenCount` → `InputTokens`, `usageMetadata.candidatesTokenCount` → `OutputTokens`, `usageMetadata.cachedContentTokenCount` → `CachedTokens`; second return value is the `model` field from the most recent line where it is non-empty
+- [ ] 3.5 Write unit tests for `ParseAntigravityTranscript` covering: multi-turn accumulation, model extracted from last non-empty line, `thoughtsTokenCount` present but not surfaced in `SnapshotResult`, missing `usageMetadata`, empty file, non-existent file
 
 ## 4. Per-Tool Collectors
 
@@ -25,7 +27,7 @@
 - [ ] 4.5 Create `internal/telemetry/tools/kiro.go` — Kiro collector with two phases via `--phase start|stop` flag:
   - `start` phase: write `session_start_time` (RFC 3339 UTC) to `.dreamland-session.json`; called by Kiro `agentSpawn` hook
   - `stop` phase: read `session_start_time` from `.dreamland-session.json`; run `aws logs filter-log-events --log-group-name <cfg.BedrockLogGroup> --start-time <epoch_ms> --filter-pattern '{ $.schemaType = "ModelInvocationLog" }' --query 'events[*].message' --output json` via `exec.Command`; parse each returned JSON string to sum `input.inputTokenCount` + `output.outputTokenCount`; extract `modelId` from the most recent entry and normalize it (strip `anthropic.` prefix and `-v1:0` suffix); fall back to zero tokens + `cfg.ModelID` if `aws` not on PATH, credentials absent, non-zero exit code, or no events returned; write stderr warning on fallback
-- [ ] 4.6 Create `internal/telemetry/tools/antigravity.go` — Antigravity collector: attempt lenient JSON parse of stdin; extract any recognizable token/model fields; fall back to `cfg.ModelID` for model; zero unrecognized fields
+- [ ] 4.6 Create `internal/telemetry/tools/antigravity.go` — Antigravity collector: parse PostTurnHook stdin JSON for `transcriptPath`, `conversationId`, `stepIdx`; call `transcript.ParseAntigravityTranscript` for token counts; extract model from most recent transcript line with non-empty `model` field; fall back to `cfg.ModelID` if no model found in transcript; wrap all transcript reads in error recovery
 - [ ] 4.7 Create `internal/telemetry/tools/copilot.go` — GitHub Copilot collector: write guidance message to stderr about OTel (`OTEL_EXPORTER_OTLP_ENDPOINT`) and `token-usage.jsonl`; return nil result (no-op write)
 - [ ] 4.8 Write table-driven unit tests for each collector in `internal/telemetry/tools/*_test.go` covering: normal payloads, empty stdin, malformed JSON, missing fields
 
@@ -107,5 +109,6 @@ Each platform needs a dedicated shell script or config file that injects the thr
 - [ ] 12.7 Validate Kiro OTEL env: confirm `.kiro/agent.json` `agentSpawn` array references `dreamland-otel-env.sh` and that `.kiro/dreamland-otel-setup.md` exists with shell profile instructions
 - [ ] 12.7b Validate Kiro Bedrock telemetry path: run `dreamland telemetry write --tool kiro --phase start`, then simulate an `aws logs filter-log-events` response via a mock (or real call if credentials available), run `--phase stop`, and confirm `.dreamland-session.json` contains non-zero token counts and a normalized `modelId`
 - [ ] 12.8 Validate Antigravity OTEL env: confirm `.agents/hooks.json` contains `SessionStart` with the four OTEL vars including `IDE_OTEL_IDE_NAME=antigravity`
+- [ ] 12.8b Validate Antigravity telemetry collection: synthesize a `transcript.jsonl` file with the Antigravity schema (`usageMetadata.promptTokenCount`, `candidatesTokenCount`, `cachedContentTokenCount`, `model`), call `dreamland telemetry write --tool antigravity` with a stdin payload containing the transcript path, and confirm `.dreamland-session.json` contains correct summed token counts and the model name from the transcript
 - [ ] 12.9 Verify end-to-end commit hook: in a scratch git repo, run `dreamland init` with "Claude Code", simulate a Claude Code Stop hook writing `.dreamland-session.json`, make a commit, and confirm `git log --format=%B -1` contains `AI-Model:` and `AI-InputTokens:` trailer lines
 - [ ] 12.10 Verify `git interpret-trailers --parse` correctly parses the `AI-*` trailers on a commit produced by the hook
