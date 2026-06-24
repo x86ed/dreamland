@@ -23,7 +23,9 @@
       "WebFetch(domain:docs.github.com)",
       "WebFetch(domain:codelabs.developers.google.com)",
       "WebFetch(domain:www.cursor.com)",
-      "Bash(openspec list *)"
+      "Bash(openspec list *)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:discuss.ai.google.dev)"
     ]
   },
   "hooks": {

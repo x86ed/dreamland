@@ -36,16 +36,18 @@ Six tools are in scope: **Claude Code**, **GitHub Copilot / VSCode**, **Cursor**
 
 ### D2: Per-tool data collection mechanisms
 
-Each tool has a distinct telemetry surface:
+`dreamland telemetry write --tool <name>` is registered in each platform's end-of-turn hook (the same binding files defined in `dev-workflow-hooks`). What data is available at hook execution time differs significantly by tool:
 
-| Tool | Collection mechanism |
-|------|---------------------|
-| **Claude Code** | `Stop` hook receives JSON on stdin (`usage.inputTokens`, `usage.outputTokens`, `usage.cacheReadInputTokens`, `usage.cacheCreationInputTokens`, `model`) — write these to `.dreamland-session.json` |
-| **GitHub Copilot / VSCode** | VSCode task (`tasks.json`) calls `gh api /orgs/{org}/copilot/usage` and writes output to file; for per-user fallback, reads Copilot Language Server log at `~/.config/github-copilot/logs/` |
-| **Cursor** | MCP tool call — Cursor calls the dreamland MCP server with session context; MCP handler writes to file. Cursor also supports a `postContext` rule that invokes a terminal command |
-| **OpenAI Codex CLI** | Codex CLI writes session records to `~/.codex/sessions/<id>.json` containing `usage` block; `dreamland telemetry snapshot` reads the most-recently-modified file |
-| **AWS Kiro** | `.kiro/hooks/` YAML defines a `postToolUse` hook; hook script calls `dreamland telemetry write` which writes to the session file |
-| **Antigravity** | Antigravity supports a `hooks.afterResponse` in `.antigravity/config.json`; hook calls `dreamland telemetry write` |
+| Tool | Hook file | Event | Data available at hook time |
+| ---- | --------- | ----- | --------------------------- |
+| **Claude Code** | `.claude/settings.json` | `Stop` | stdin JSON: `transcript_path`, `effort.level`, `session_id`, `stop_hook_active`; env: `CLAUDE_EFFORT`. Token counts summed from transcript JSONL (`message.usage.*`). Model from `.dreamland.json`. |
+| **Codex CLI** | `.codex/hooks.json` | `Stop` | stdin JSON: `model` (directly), `transcript_path`, `session_id`, `turn_id`, `permission_mode`. Token counts from transcript JSONL (unstable format — parse with error recovery). |
+| **Cursor** | `.cursor/hooks.json` | `stop` | stdin JSON: `model`, `model_id`, `model_params`, `conversation_id`, `generation_id`, `transcript_path`, `status`, `loop_count`, `cursor_version`, `workspace_roots`, `user_email`. Model directly available; token counts from transcript JSONL (same parser as Claude Code/Codex). `CURSOR_TRANSCRIPT_PATH` env var also set automatically. |
+| **Kiro** | `.kiro/agent.json` | `stop` | Stub only in this change. Kiro's `stop` hook payload contains only `{hook_event_name, cwd, session_id, assistant_response}` — no tokens, no model, no transcript path. `dreamland telemetry write --tool kiro` writes `tool: "kiro"` and `model` from `.dreamland.json`; all token counts zero. Real token data via AWS Bedrock model invocation logging is implemented in the `kiro-bedrock-telemetry` change (depends on this change). |
+| **Antigravity** | `~/.gemini/antigravity-cli/plugins/dreamland/hooks.json` | `PostTurnHook` | Payload schema not publicly documented. Best-effort stdin parsing; unknown fields zeroed. Model from `.dreamland.json`. |
+| **GitHub Copilot** | `.github/copilot-hooks/hooks-manifest.json` | stub | No public hook API. Write command is a no-op that documents two alternatives: (1) OTel traces via Copilot CLI SDK (`OTEL_EXPORTER_OTLP_ENDPOINT`); (2) `token-usage.jsonl` artifact (input/output/cache tokens, model, provider per API call). |
+
+**`context_size` removed from SnapshotResult**: No supported tool exposes context window size through its hook payload or a stable programmatic API at hook execution time.
 
 ---
 
@@ -130,13 +132,46 @@ The existing `dreamland serve` (MCP server) gains an OTEL `TracerProvider` initi
 4. `cmd/init.go` — extend to add Codex/Cursor options and call scaffolding step post-save
 5. `internal/scaffold/` — new package; templates embedded via `go:embed`
 6. `scripts/` — no changes needed
-7. Existing `.dreamland.json` — new optional `telemetry` object added; old configs without it work unchanged
+7. Existing `.dreamland.json` — `otel_endpoint` field added (optional, additive); old configs without it work unchanged
 
 Rollback: the `commit-msg` hook is removed by `dreamland telemetry uninstall` or by deleting the marker block manually. The OTEL TracerProvider is a no-op if `OTEL_SDK_DISABLED=true`.
 
+---
+
+### D8: Platform-specific OTEL environment injection strategy
+
+**Decision:** Each platform requires a different mechanism to inject `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`, and `OTEL_SERVICE_NAME` into the agent session. The Go scaffold code generates a small, platform-specific shell script or config merge for each tool at `dreamland init` time, with the endpoint baked in from `.dreamland.json`.
+
+The three core OTEL env vars are identical across all platforms. What varies is *how* they reach the session:
+
+**Claude Code — `CLAUDE_ENV_FILE` (SessionStart hook):**
+Claude Code does not have native OTEL support. `SessionStart` hooks receive the `CLAUDE_ENV_FILE` environment variable pointing to a file whose contents are sourced into subsequent Bash tool invocations. The scaffold writes `.claude/scripts/dreamland-otel-env.sh` and registers it in the `SessionStart` hook array in `.claude/settings.json`. The script appends `KEY=VALUE` lines (no `export` prefix — Claude Code sources them as-is) to `$CLAUDE_ENV_FILE`.
+
+**Codex CLI — user-level `config.toml` only (example file written):**
+Codex has native OTEL support via `[otel]` in `config.toml`, but Codex explicitly blocks project-level `config.toml` from setting OTEL keys — only `~/.codex/config.toml` is respected. The scaffold writes `.codex/otel-config.example.toml` with the correct TOML and a merge instruction, and prints a one-time warning at `init` time. The `Stop` hook in `.codex/hooks.json` runs `dreamland telemetry write` as normal.
+
+**Cursor — `sessionStart` hook JSON output:**
+Cursor `sessionStart` hooks can return `{"env": {"KEY": "VALUE"}}` JSON on stdout. These vars are session-scoped and propagated to all subsequent hooks (`preToolUse`, `postToolUse`, `stop`, etc.). The scaffold writes `.cursor/hooks/dreamland-otel-env.sh` that prints this JSON, and registers it in the `sessionStart` array in `.cursor/hooks.json`.
+
+**Kiro — `agentSpawn` hook (best-effort):**
+Kiro's `agentSpawn` shell command hook runs at agent start. Whether its exported env vars propagate to subsequent hooks is not publicly documented. The scaffold writes `.kiro/hooks/dreamland-otel-env.sh` and registers it, but also prints a notice at init time that env propagation from Kiro's `agentSpawn` shell hooks should be validated against the current Kiro version.
+
+**Antigravity — `.agents/hooks.json` `SessionStart` + `IDE_OTEL_IDE_NAME`:**
+Antigravity uses `.agents/hooks.json` for project-scoped hooks. The `SessionStart` event runs the OTEL env script. An additional env var `IDE_OTEL_IDE_NAME=antigravity` is required by the `opentelemetry-hooks` ecosystem for Antigravity-specific span attribution. Both the project-scoped `.agents/hooks.json` and the plugin bundle `~/.gemini/antigravity-cli/plugins/dreamland/hooks.json` are written — the former for OTEL env setup, the latter for `PostTurnHook` telemetry write (per D1).
+
+**GitHub Copilot — `.vscode/settings.json` (native OTel support):**
+GitHub Copilot has native OpenTelemetry support exposed through VS Code settings. The scaffold merges three keys into `.vscode/settings.json`: `github.copilot.chat.otel.enabled`, `github.copilot.chat.otel.exporterType`, and `github.copilot.chat.otel.otlpEndpoint`. Because Copilot's native OTel uses OTLP HTTP (port 4318), the endpoint is derived from the configured value (replacing port 4317 with 4318 if the user used the gRPC default).
+
+**Alternatives considered:**
+- *Single `.env` file that all tools source*: tools don't share a universal `.env` loading mechanism. Rejected.
+- *Requiring a running OTEL collector sidecar*: out of scope for `dreamland init`. Rejected.
+- *Using a `dreamland serve` MCP sidecar as the OTEL relay*: valid for future work but adds a required running process. Deferred.
+
+---
+
 ## Open Questions
 
-1. **Antigravity hooks API**: Is `hooks.afterResponse` the correct key in `.antigravity/config.json`, or has the schema changed? Needs verification against latest Antigravity docs.
-2. **Cursor MCP context**: Does Cursor pass session usage data in the MCP `CallTool` request, or only in its own telemetry stream? Needs testing with Cursor 0.44+.
-3. **Threshold for stale snapshot warning**: Should the default be 1 hour, 4 hours, or configurable only? Recommend making it configurable with a 4-hour default.
-4. **`.dreamland-session.json` in `.gitignore`**: Should `init` add this file to `.gitignore` automatically? It contains token counts but no secrets; leaning toward yes for cleanliness.
+1. **Kiro `agentSpawn` env propagation**: Does env set in `agentSpawn` shell hook stdout propagate to `stop` hook? Needs validation against current Kiro release.
+2. **Codex user-level OTEL**: Should `dreamland init` offer to write `~/.codex/config.toml` directly (with user consent) rather than just writing the example file? Recommend asking: makes the setup complete for Codex users.
+3. **Stale snapshot warning threshold**: Default 4h configurable via `--max-age`. Resolved — keep configurable.
+4. **Copilot port translation**: When `otel_endpoint` uses gRPC port 4317, auto-translate to 4318 for `github.copilot.chat.otel.otlpEndpoint`. Risk: breaks if user intentionally runs HTTP on 4317. Recommend storing `otel_endpoint_http` separately in `.dreamland.json`.
