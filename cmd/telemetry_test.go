@@ -258,5 +258,96 @@ func TestRegisterCollectors(t *testing.T) {
 	}
 }
 
+// errReader is an io.Reader that always returns an error, used to test stdin failure paths.
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("forced read error") }
+
+func TestTelemetryWrite_NoGitRepo(t *testing.T) {
+	root := t.TempDir() // no .git
+	orig, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	rootCmd.SetIn(strings.NewReader("{}"))
+	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	_, _, err := execCLI(t, "telemetry", "write", "--tool", "claude-code")
+	if err == nil {
+		t.Error("expected error when not in a git repo")
+	}
+}
+
+func TestTelemetryWrite_CollectError(t *testing.T) {
+	telemetryGitRepo(t)
+	rootCmd.SetIn(errReader{})
+	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	_, _, err := execCLI(t, "telemetry", "write", "--tool", "claude-code")
+	if err == nil {
+		t.Error("expected error when stdin fails")
+	}
+}
+
+func TestTelemetryInstall_NoGitRepo(t *testing.T) {
+	root := t.TempDir() // no .git
+	orig, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	_, _, err := execCLI(t, "telemetry", "install")
+	if err == nil {
+		t.Error("expected error outside git repo")
+	}
+}
+
+func TestTelemetryInstall_HookError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; skip permission test")
+	}
+	root := telemetryGitRepo(t)
+	hooksDir := filepath.Join(root, ".git", "hooks")
+	if err := os.Chmod(hooksDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(hooksDir, 0o755) })
+	_, _, err := execCLI(t, "telemetry", "install")
+	if err == nil {
+		t.Error("expected error when hooks dir is read-only")
+	}
+}
+
+func TestTelemetryUninstall_NoGitRepo(t *testing.T) {
+	root := t.TempDir() // no .git
+	orig, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	_, _, err := execCLI(t, "telemetry", "uninstall")
+	if err == nil {
+		t.Error("expected error outside git repo")
+	}
+}
+
+func TestTelemetryReset_RemoveError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; skip permission test")
+	}
+	root := telemetryGitRepo(t)
+	sessionPath := filepath.Join(root, ".dreamland-session.json")
+	if err := os.WriteFile(sessionPath, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	_, _, err := execCLI(t, "telemetry", "reset")
+	if err == nil {
+		t.Error("expected error when session file cannot be removed")
+	}
+}
+
 // Compile-time check that config package is importable.
 var _ = config.Config{}

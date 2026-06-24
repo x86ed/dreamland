@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,11 @@ import (
 	"dreamland/internal/config"
 	"dreamland/internal/telemetry"
 )
+
+// stdinErrReader is an io.Reader that always returns an error, used to test stdin failure paths.
+type stdinErrReader struct{}
+
+func (stdinErrReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 
 var testCfg = &config.Config{ModelID: "default-model"}
 
@@ -228,6 +234,34 @@ func TestCopilotCollector_MissingTranscript(t *testing.T) {
 	}
 	if res.Model != testCfg.ModelID {
 		t.Errorf("Model fallback = %q, want %q", res.Model, testCfg.ModelID)
+	}
+}
+
+func TestClaudeCollector_StdinError(t *testing.T) {
+	_, err := (&ClaudeCollector{}).Collect(stdinErrReader{}, nil)
+	if err == nil {
+		t.Error("expected error when stdin fails")
+	}
+}
+
+func TestCodexCollector_StdinError(t *testing.T) {
+	_, err := (&CodexCollector{}).Collect(stdinErrReader{}, nil)
+	if err == nil {
+		t.Error("expected error when stdin fails")
+	}
+}
+
+func TestAntigravityCollector_StdinError(t *testing.T) {
+	_, err := (&AntigravityCollector{}).Collect(stdinErrReader{}, nil)
+	if err == nil {
+		t.Error("expected error when stdin fails")
+	}
+}
+
+func TestCopilotCollector_StdinError(t *testing.T) {
+	_, err := (&CopilotCollector{}).Collect(stdinErrReader{}, nil)
+	if err == nil {
+		t.Error("expected error when stdin fails")
 	}
 }
 
