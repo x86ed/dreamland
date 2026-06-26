@@ -44,15 +44,19 @@ type branchBumpEntry struct {
 	InitializedAt string `json:"initialized_at"`
 }
 
-func runVersionBump(cmd *cobra.Command, _ []string) error {
+func runVersionBump(_ *cobra.Command, _ []string) error {
+	return execVersionBump(vbMajor, vbMinor, vbPatch, vbBreaking, vbVersion)
+}
+
+func execVersionBump(major, minor, patch, breaking bool, version string) error {
 	// Validate: at most one of major/minor/patch/version.
 	explicit := 0
-	for _, b := range []bool{vbMajor, vbMinor, vbPatch} {
+	for _, b := range []bool{major, minor, patch} {
 		if b {
 			explicit++
 		}
 	}
-	if vbVersion != "" {
+	if version != "" {
 		explicit++
 	}
 	if explicit > 1 {
@@ -87,9 +91,9 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 		return nil // exit 0 silently
 	}
 
-	if vbPatch {
+	if patch {
 		// End-of-turn patch mode: skip branch marker.
-		return performBump(cmd, cfg, repoRoot, lastTag, "patch", vbVersion)
+		return performBump(cfg, repoRoot, lastTag, "patch", version)
 	}
 
 	// Session-start minor/major mode: check branch marker.
@@ -105,7 +109,7 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 	}
 
 	// If this branch already has an entry and no explicit override, skip.
-	if _, exists := bumps[branch]; exists && vbVersion == "" {
+	if _, exists := bumps[branch]; exists && version == "" {
 		return nil // exit 0 silently
 	}
 
@@ -114,17 +118,17 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 
 	// Determine bump level.
 	level := "minor"
-	if vbMajor || vbBreaking {
+	if major || breaking {
 		level = "major"
 	}
-	if vbMinor {
+	if minor {
 		level = "minor"
 	}
-	if vbVersion != "" {
+	if version != "" {
 		level = ""
 	}
 
-	if err := performBump(cmd, cfg, repoRoot, lastTag, level, vbVersion); err != nil {
+	if err := performBump(cfg, repoRoot, lastTag, level, version); err != nil {
 		return err
 	}
 
@@ -151,7 +155,7 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func performBump(_ *cobra.Command, cfg *config.Config, _ string, lastTag, level, explicit string) error {
+func performBump(cfg *config.Config, _ string, lastTag, level, explicit string) error {
 	if cfg.VersionBumpCommand == "" {
 		// Go path: manage git tags directly.
 		newVer, err := bumpSemver(lastTag, level, explicit)

@@ -24,6 +24,10 @@ func init() {
 }
 
 func runTransitionLog(_ *cobra.Command, _ []string) error {
+	return execTransitionLog()
+}
+
+func execTransitionLog() error {
 	cwd, err := osGetwd()
 	if err != nil {
 		return err

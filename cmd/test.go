@@ -27,6 +27,10 @@ var sourceExtensions = map[string][]string{
 }
 
 func runTest(_ *cobra.Command, _ []string) error {
+	return execTest()
+}
+
+func execTest() error {
 	cwd, err := osGetwd()
 	if err != nil {
 		return err

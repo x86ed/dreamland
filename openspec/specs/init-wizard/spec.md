@@ -34,7 +34,7 @@ The `init` wizard SHALL present an editable text input pre-filled with the detec
 
 The `init` wizard SHALL present a numbered list of supported AI coding tools and require the user to select exactly one before proceeding. This is step 2 of 6.
 
-Supported options: Claude Code, Codex CLI, Cursor, GitHub Copilot, Antigravity, Kiro.
+Supported options: Claude Code, GitHub Copilot, Antigravity, Kiro, Cursor, Codex.
 
 #### Scenario: User selects a coding tool
 
@@ -105,6 +105,26 @@ Default values by language:
 
 - **WHEN** the user clears the pre-filled value and types a custom command
 - **THEN** the wizard records the custom command and proceeds to write the config
+
+### Requirement: Post-save scaffolding step
+
+After writing `.dreamland.json`, `dreamland init` SHALL execute a scaffolding step that:
+
+1. Creates per-tool OTEL configuration files (as defined in the `otel-tool-config` spec)
+2. Installs the `commit-msg` git hook (as defined in the `otel-commit-hook` spec)
+3. Adds `.dreamland-session.json` to `.gitignore`
+
+The scaffolding step SHALL print one line per file written/skipped/updated.
+
+#### Scenario: Scaffolding runs after config write
+
+- **WHEN** all five wizard steps complete and `.dreamland.json` is written
+- **THEN** the tool-specific OTEL config files and the `commit-msg` hook are created before the success message is printed
+
+#### Scenario: Scaffolding failures do not abort init
+
+- **WHEN** a scaffolding file write fails (e.g., permission denied on `.git/hooks/`)
+- **THEN** `init` prints the error for that file and continues scaffolding remaining files; the final exit code is 0 if `.dreamland.json` was written successfully
 
 ### Requirement: Scaffolding is triggered after config is written
 

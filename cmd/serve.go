@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
@@ -24,28 +23,38 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 }
 
-type helloInput struct {
-	Name string `json:"name" description:"Name to greet"`
+type transitionLogInput struct{}
+type transitionLogOutput struct {
+	OK bool `json:"ok"`
 }
 
-type helloOutput struct {
-	Message string `json:"message"`
+type versionBumpInput struct {
+	Major    bool   `json:"major,omitempty" description:"bump major version"`
+	Minor    bool   `json:"minor,omitempty" description:"bump minor version"`
+	Patch    bool   `json:"patch,omitempty" description:"bump patch version (end-of-turn mode)"`
+	Breaking bool   `json:"breaking,omitempty" description:"breaking change: bump major instead of minor"`
+	Version  string `json:"version,omitempty" description:"set explicit version (e.g. v1.2.3)"`
+}
+type versionBumpOutput struct {
+	OK bool `json:"ok"`
 }
 
-type telemetryWriteInput struct {
-	Tool    string `json:"tool" description:"Tool name (claude-code, codex, cursor, kiro, antigravity, github-copilot)"`
-	Payload string `json:"payload" description:"JSON hook payload string"`
+type runTestsInput struct{}
+type runTestsOutput struct {
+	OK bool `json:"ok"`
 }
 
-type telemetryWriteOutput struct {
-	Written bool   `json:"written"`
-	Message string `json:"message,omitempty"`
+type coauthorInput struct {
+	Trailer string `json:"trailer,omitempty" description:"commit message file path (prepare-commit-msg delegation mode)"`
+}
+type coauthorOutput struct {
+	OK bool `json:"ok"`
 }
 
 var mcpTracer trace.Tracer
 
 // runServe starts the MCP server over stdio.
-func runServe(cmd *cobra.Command, args []string) error {
+func runServe(cmd *cobra.Command, _ []string) error {
 	ctx := context.Background()
 
 	tp, err := telemetry.NewTracerProvider(ctx)
@@ -63,14 +72,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}, nil)
 
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "hello",
-		Description: "Say hello",
-	}, makeSpanHandler("hello", helloHandler))
+		Name:        "transition_log",
+		Description: "Append a timestamped turn-complete entry to .dreamland/transition.log",
+	}, makeSpanHandler("transition_log", transitionLogHandler))
 
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "telemetry_write",
-		Description: "Write an AI session telemetry snapshot from a hook payload JSON string",
-	}, makeSpanHandler("telemetry_write", telemetryWriteHandler))
+		Name:        "version_bump",
+		Description: "Bump the project version (session-start: minor/major; end-of-turn: --patch)",
+	}, makeSpanHandler("version_bump", versionBumpHandler))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "run_tests",
+		Description: "Run tests if source files changed since last commit",
+	}, makeSpanHandler("run_tests", runTestsHandler))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "coauthor",
+		Description: "Set agent git identity and install prepare-commit-msg hook",
+	}, makeSpanHandler("coauthor", coauthorMCPHandler))
 
 	fmt.Fprintln(cmd.ErrOrStderr(), "Starting MCP server (stdio)...")
 	return s.Run(ctx, &mcp.StdioTransport{})
@@ -95,47 +114,46 @@ func makeSpanHandler[I, O any](
 	}
 }
 
-// helloHandler responds to hello tool requests.
-func helloHandler(_ context.Context, _ *mcp.CallToolRequest, input helloInput) (*mcp.CallToolResult, helloOutput, error) {
-	msg := fmt.Sprintf("Hello, %s!", input.Name)
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: msg}},
-	}, helloOutput{Message: msg}, nil
-}
-
-// telemetryWriteHandler allows MCP-capable tools to write session telemetry directly.
-func telemetryWriteHandler(_ context.Context, _ *mcp.CallToolRequest, input telemetryWriteInput) (*mcp.CallToolResult, telemetryWriteOutput, error) {
-	collector, ok := telemetry.Registry[input.Tool]
-	if !ok {
-		msg := fmt.Sprintf("unknown tool %q", input.Tool)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: msg}},
-		}, telemetryWriteOutput{Written: false, Message: msg}, nil
-	}
-
-	cfg := GetConfig()
-	result, err := collector.Collect(strings.NewReader(input.Payload), cfg)
-	if err != nil || result == nil {
-		msg := "collect error"
-		if err != nil {
-			msg = err.Error()
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: msg}},
-		}, telemetryWriteOutput{Written: false, Message: msg}, nil
-	}
-
-	repoRoot := "."
-	if cfg != nil && cfg.RepoRoot != "" {
-		repoRoot = cfg.RepoRoot
-	}
-	if err := telemetry.Write(repoRoot, result); err != nil {
+func transitionLogHandler(_ context.Context, _ *mcp.CallToolRequest, _ transitionLogInput) (*mcp.CallToolResult, transitionLogOutput, error) {
+	if err := execTransitionLog(); err != nil {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
-		}, telemetryWriteOutput{Written: false, Message: err.Error()}, nil
+		}, transitionLogOutput{}, err
 	}
-
 	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: "telemetry written"}},
-	}, telemetryWriteOutput{Written: true}, nil
+		Content: []mcp.Content{&mcp.TextContent{Text: "transition log written"}},
+	}, transitionLogOutput{OK: true}, nil
+}
+
+func versionBumpHandler(_ context.Context, _ *mcp.CallToolRequest, input versionBumpInput) (*mcp.CallToolResult, versionBumpOutput, error) {
+	if err := execVersionBump(input.Major, input.Minor, input.Patch, input.Breaking, input.Version); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+		}, versionBumpOutput{}, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: "version bumped"}},
+	}, versionBumpOutput{OK: true}, nil
+}
+
+func runTestsHandler(_ context.Context, _ *mcp.CallToolRequest, _ runTestsInput) (*mcp.CallToolResult, runTestsOutput, error) {
+	if err := execTest(); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+		}, runTestsOutput{}, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: "tests passed"}},
+	}, runTestsOutput{OK: true}, nil
+}
+
+func coauthorMCPHandler(_ context.Context, _ *mcp.CallToolRequest, input coauthorInput) (*mcp.CallToolResult, coauthorOutput, error) {
+	if err := execCoauthor(input.Trailer); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+		}, coauthorOutput{}, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: "coauthor configured"}},
+	}, coauthorOutput{OK: true}, nil
 }

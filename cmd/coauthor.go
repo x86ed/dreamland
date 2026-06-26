@@ -24,7 +24,11 @@ func init() {
 	coauthorCmd.Flags().StringVar(&coauthorTrailer, "trailer", "", "commit message file path (prepare-commit-msg delegation mode)")
 }
 
-func runCoauthor(cmd *cobra.Command, args []string) error {
+func runCoauthor(_ *cobra.Command, _ []string) error {
+	return execCoauthor(coauthorTrailer)
+}
+
+func execCoauthor(trailer string) error {
 	cwd, err := osGetwd()
 	if err != nil {
 		return err
@@ -42,10 +46,9 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 		suffix = "@github.com"
 	}
 
-	if coauthorTrailer != "" {
+	if trailer != "" {
 		// --trailer mode: invoked by prepare-commit-msg git hook.
-		// args[0] (via --trailer flag value) is the commit message file path.
-		return appendCoauthorTrailer(coauthorTrailer, cfg.ModelID, suffix)
+		return appendCoauthorTrailer(trailer, cfg.ModelID, suffix)
 	}
 
 	// Default mode: set agent git identity and install the hook.

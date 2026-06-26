@@ -280,7 +280,7 @@ func TestPerformBump_GoPath(t *testing.T) {
 		return "", nil
 	})
 	cfg := &config.Config{} // empty VersionBumpCommand → Go path
-	if err := performBump(nil, cfg, t.TempDir(), "v1.0.0", "minor", ""); err != nil {
+	if err := performBump(cfg, t.TempDir(), "v1.0.0", "minor", ""); err != nil {
 		t.Fatalf("performBump: %v", err)
 	}
 	if tagged != "v1.1.0" {
@@ -297,7 +297,7 @@ func TestPerformBump_GoPath_ExplicitVersion(t *testing.T) {
 		return "", nil
 	})
 	cfg := &config.Config{}
-	if err := performBump(nil, cfg, t.TempDir(), "v1.0.0", "", "v3.0.0"); err != nil {
+	if err := performBump(cfg, t.TempDir(), "v1.0.0", "", "v3.0.0"); err != nil {
 		t.Fatalf("performBump: %v", err)
 	}
 	if tagged != "v3.0.0" {
@@ -312,7 +312,7 @@ func TestPerformBump_DelegatedPath(t *testing.T) {
 		return "", nil
 	})
 	cfg := &config.Config{VersionBumpCommand: "npm version"}
-	if err := performBump(nil, cfg, t.TempDir(), "v1.0.0", "minor", ""); err != nil {
+	if err := performBump(cfg, t.TempDir(), "v1.0.0", "minor", ""); err != nil {
 		t.Fatalf("performBump: %v", err)
 	}
 	if len(delegatedArgs) < 3 || delegatedArgs[0] != "npm" || delegatedArgs[1] != "version" || delegatedArgs[2] != "minor" {
@@ -801,7 +801,7 @@ func TestRunVersionBump_GitPushError(t *testing.T) {
 func TestPerformBump_GoPath_BumpSemverError(t *testing.T) {
 	cfg := &config.Config{} // empty VersionBumpCommand → Go path
 	// "bogus" level causes bumpSemver to return an error.
-	if err := performBump(nil, cfg, t.TempDir(), "v1.0.0", "bogus", ""); err == nil {
+	if err := performBump(cfg, t.TempDir(), "v1.0.0", "bogus", ""); err == nil {
 		t.Fatal("expected error from bumpSemver with unknown level")
 	}
 }
@@ -814,7 +814,7 @@ func TestPerformBump_GoPath_GitTagError(t *testing.T) {
 		return "", nil
 	})
 	cfg := &config.Config{}
-	if err := performBump(nil, cfg, t.TempDir(), "v1.0.0", "minor", ""); err == nil {
+	if err := performBump(cfg, t.TempDir(), "v1.0.0", "minor", ""); err == nil {
 		t.Fatal("expected error from git tag failure")
 	}
 }
@@ -829,7 +829,7 @@ func TestPerformBump_DelegatedPath_ExplicitArg(t *testing.T) {
 		return "", nil
 	})
 	cfg := &config.Config{VersionBumpCommand: "npm version"}
-	if err := performBump(nil, cfg, t.TempDir(), "v1.0.0", "minor", "v2.0.0"); err != nil {
+	if err := performBump(cfg, t.TempDir(), "v1.0.0", "minor", "v2.0.0"); err != nil {
 		t.Fatalf("performBump: %v", err)
 	}
 	if delegatedArg != "v2.0.0" {
@@ -842,7 +842,7 @@ func TestPerformBump_DelegatedPath_NotFoundError(t *testing.T) {
 		return "", &exec.Error{Name: "missing-cmd", Err: exec.ErrNotFound}
 	})
 	cfg := &config.Config{VersionBumpCommand: "missing-cmd"}
-	err := performBump(nil, cfg, t.TempDir(), "v1.0.0", "minor", "")
+	err := performBump(cfg, t.TempDir(), "v1.0.0", "minor", "")
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}
@@ -856,7 +856,7 @@ func TestPerformBump_DelegatedPath_GenericError(t *testing.T) {
 		return "output line", errors.New("command failed")
 	})
 	cfg := &config.Config{VersionBumpCommand: "bump-tool"}
-	err := performBump(nil, cfg, t.TempDir(), "v1.0.0", "minor", "")
+	err := performBump(cfg, t.TempDir(), "v1.0.0", "minor", "")
 	if err == nil {
 		t.Fatal("expected generic command error")
 	}

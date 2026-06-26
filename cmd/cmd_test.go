@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"dreamland/internal/config"
 )
 
 // TestExecuteHelp verifies Execute returns cleanly when --help is passed.
@@ -32,14 +34,15 @@ func TestExecuteUnknownFlag(t *testing.T) {
 	}
 }
 
-// TestHelloHandler verifies the hello tool returns the expected greeting.
-func TestHelloHandler(t *testing.T) {
-	result, out, err := helloHandler(context.Background(), nil, helloInput{Name: "World"})
+// TestTransitionLogHandlerContent verifies the transition_log tool returns content.
+func TestTransitionLogHandlerContent(t *testing.T) {
+	makeServeRepo(t, config.Config{})
+	result, out, err := transitionLogHandler(context.Background(), nil, transitionLogInput{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Message != "Hello, World!" {
-		t.Errorf("got %q, want %q", out.Message, "Hello, World!")
+	if !out.OK {
+		t.Error("OK should be true")
 	}
 	if len(result.Content) == 0 {
 		t.Error("expected at least one content item")

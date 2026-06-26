@@ -2,16 +2,16 @@ package cmd
 
 import (
 	"context"
-	"fmt"
-	"io"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
 
 	"dreamland/internal/config"
-	"dreamland/internal/telemetry"
 )
 
 func init() {
@@ -19,78 +19,199 @@ func init() {
 	mcpTracer = otel.Tracer("test")
 }
 
-func TestTelemetryWriteHandler_UnknownTool(t *testing.T) {
-	telemetryGitRepo(t)
-	_, out, err := telemetryWriteHandler(context.Background(), nil, telemetryWriteInput{
-		Tool:    "unknown-tool",
-		Payload: "{}",
-	})
-	if err != nil {
-		t.Fatalf("handler should not error: %v", err)
+// makeServeRepo creates a temp git repo with an optional .dreamland.json and stubs osGetwd.
+func makeServeRepo(t *testing.T, cfg config.Config) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git", "hooks"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if out.Written {
-		t.Error("Written should be false for unknown tool")
+	data, _ := json.Marshal(cfg)
+	if err := os.WriteFile(filepath.Join(root, ".dreamland.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+	return root
+}
+
+func TestTransitionLogHandler_OK(t *testing.T) {
+	makeServeRepo(t, config.Config{})
+
+	_, out, err := transitionLogHandler(context.Background(), nil, transitionLogInput{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.OK {
+		t.Error("OK should be true on success")
 	}
 }
 
-func TestTelemetryWriteHandler_KnownTool(t *testing.T) {
-	telemetryGitRepo(t)
-	_, out, err := telemetryWriteHandler(context.Background(), nil, telemetryWriteInput{
-		Tool:    "claude-code",
-		Payload: `{}`,
-	})
-	if err != nil {
+func TestTransitionLogHandler_WritesLog(t *testing.T) {
+	root := makeServeRepo(t, config.Config{})
+
+	if _, _, err := transitionLogHandler(context.Background(), nil, transitionLogInput{}); err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	if !out.Written {
-		t.Errorf("Written should be true for known tool, message: %q", out.Message)
+
+	logPath := filepath.Join(root, ".dreamland", "transition.log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("log not written: %v", err)
+	}
+	if !strings.Contains(string(data), "turn complete") {
+		t.Errorf("unexpected log content: %s", data)
 	}
 }
 
-func TestTelemetryWriteHandler_NilCollectorResult(t *testing.T) {
-	telemetryGitRepo(t)
-	const nilTool = "nil-collector-test"
-	orig := telemetry.Registry[nilTool]
-	telemetry.Registry[nilTool] = &nilCollector{}
-	t.Cleanup(func() {
-		if orig == nil {
-			delete(telemetry.Registry, nilTool)
-		} else {
-			telemetry.Registry[nilTool] = orig
+func TestVersionBumpHandler_MultipleFlags(t *testing.T) {
+	makeServeRepo(t, config.Config{})
+
+	// major+minor together → validation error returned as MCP result
+	_, out, err := versionBumpHandler(context.Background(), nil, versionBumpInput{Major: true, Minor: true})
+	if err == nil {
+		t.Fatal("expected error for conflicting flags")
+	}
+	if out.OK {
+		t.Error("OK should be false on error")
+	}
+}
+
+func TestVersionBumpHandler_PatchNoChanges(t *testing.T) {
+	makeServeRepo(t, config.Config{})
+
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		if strings.Contains(strings.Join(args, " "), "describe") {
+			return "v1.0.0\n", nil
 		}
+		if strings.Contains(strings.Join(args, " "), "diff") {
+			return "", nil // no changes → silent no-op
+		}
+		return "", nil
 	})
 
-	_, out, err := telemetryWriteHandler(context.Background(), nil, telemetryWriteInput{
-		Tool:    nilTool,
-		Payload: "{}",
-	})
+	_, out, err := versionBumpHandler(context.Background(), nil, versionBumpInput{Patch: true})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Written {
-		t.Error("Written should be false when collector returns nil")
+	if !out.OK {
+		t.Error("OK should be true for no-op patch")
 	}
 }
 
-func TestHelloHandler_Direct(t *testing.T) {
-	_, out, err := helloHandler(context.Background(), nil, helloInput{Name: "Dreamland"})
+func TestRunTestsHandler_NoConfig(t *testing.T) {
+	// No .dreamland.json → config is nil → execTest returns nil silently
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	_, out, err := runTestsHandler(context.Background(), nil, runTestsInput{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.OK {
+		t.Error("OK should be true when no config")
+	}
+}
+
+func TestRunTestsHandler_SourceChanged(t *testing.T) {
+	makeServeRepo(t, config.Config{Language: "Go", TestCommand: "true"})
+
+	stubRunCmd(t, func(name string, args ...string) (string, error) {
+		if name == "git" && strings.Contains(strings.Join(args, " "), "status") {
+			return "M  main.go\n", nil
+		}
+		return "", nil
+	})
+
+	_, out, err := runTestsHandler(context.Background(), nil, runTestsInput{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.OK {
+		t.Error("OK should be true when test command succeeds")
+	}
+}
+
+func TestCoauthorMCPHandler_DefaultMode(t *testing.T) {
+	makeServeRepo(t, config.Config{CodingTool: "Claude Code", ModelID: "claude-sonnet-4-6"})
+
+	origRunCmd := runCmd
+	runCmd = func(_ string, _ ...string) (string, error) { return "", nil }
+	t.Cleanup(func() { runCmd = origRunCmd })
+
+	_, out, err := coauthorMCPHandler(context.Background(), nil, coauthorInput{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.OK {
+		t.Error("OK should be true on success")
+	}
+}
+
+func TestCoauthorMCPHandler_TrailerMode(t *testing.T) {
+	makeServeRepo(t, config.Config{ModelID: "claude-sonnet-4-6"})
+
+	msgFile, err := os.CreateTemp(t.TempDir(), "commit-msg")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Message != "Hello, Dreamland!" {
-		t.Errorf("Message = %q", out.Message)
+	if _, err := msgFile.WriteString("fix: something\n"); err != nil {
+		t.Fatal(err)
+	}
+	msgFile.Close()
+
+	_, out, err := coauthorMCPHandler(context.Background(), nil, coauthorInput{Trailer: msgFile.Name()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.OK {
+		t.Error("OK should be true in trailer mode")
+	}
+
+	data, _ := os.ReadFile(msgFile.Name())
+	if !strings.Contains(string(data), "Co-authored-by: claude-sonnet-4-6") {
+		t.Errorf("trailer not appended, got:\n%s", data)
+	}
+}
+
+func TestCoauthorMCPHandler_Error(t *testing.T) {
+	// No .git dir → execCoauthor (default mode) fails on gitExec
+	root := t.TempDir()
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	origRunCmd := runCmd
+	runCmd = func(_ string, _ ...string) (string, error) {
+		return "", errors.New("git not available")
+	}
+	t.Cleanup(func() { runCmd = origRunCmd })
+
+	_, out, err := coauthorMCPHandler(context.Background(), nil, coauthorInput{})
+	if err == nil {
+		t.Fatal("expected error when git fails")
+	}
+	if out.OK {
+		t.Error("OK should be false on error")
 	}
 }
 
 func TestMakeSpanHandler_ExecutesInner(t *testing.T) {
-	// Create a wrapped handler directly and invoke it to exercise the span logic.
-	wrapped := makeSpanHandler("hello-test", helloHandler)
-	_, out, err := wrapped(context.Background(), nil, helloInput{Name: "Span"})
+	makeServeRepo(t, config.Config{})
+
+	wrapped := makeSpanHandler("transition_log", transitionLogHandler)
+	_, out, err := wrapped(context.Background(), nil, transitionLogInput{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Message != "Hello, Span!" {
-		t.Errorf("Message = %q", out.Message)
+	if !out.OK {
+		t.Error("OK should be true")
 	}
 }
 
@@ -99,94 +220,14 @@ func TestMakeSpanHandler_WithNonNilConfig(t *testing.T) {
 	t.Cleanup(func() { currentConfig = orig })
 	currentConfig = &config.Config{ModelID: "test-model", CodingTool: "claude-code"}
 
-	wrapped := makeSpanHandler("hello-cfg", helloHandler)
-	_, out, err := wrapped(context.Background(), nil, helloInput{Name: "Config"})
+	makeServeRepo(t, config.Config{})
+
+	wrapped := makeSpanHandler("transition_log", transitionLogHandler)
+	_, out, err := wrapped(context.Background(), nil, transitionLogInput{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Message != "Hello, Config!" {
-		t.Errorf("Message = %q", out.Message)
+	if !out.OK {
+		t.Error("OK should be true")
 	}
-}
-
-func TestTelemetryWriteHandler_CollectError(t *testing.T) {
-	telemetryGitRepo(t)
-	const errTool = "err-collector-test"
-	orig := telemetry.Registry[errTool]
-	telemetry.Registry[errTool] = &errCollector{}
-	t.Cleanup(func() {
-		if orig == nil {
-			delete(telemetry.Registry, errTool)
-		} else {
-			telemetry.Registry[errTool] = orig
-		}
-	})
-
-	_, out, err := telemetryWriteHandler(context.Background(), nil, telemetryWriteInput{
-		Tool:    errTool,
-		Payload: "{}",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Written {
-		t.Error("Written should be false when collector errors")
-	}
-	if out.Message == "" {
-		t.Error("Message should contain error text")
-	}
-}
-
-func TestTelemetryWriteHandler_WithRepoRoot(t *testing.T) {
-	root := telemetryGitRepo(t)
-	orig := currentConfig
-	t.Cleanup(func() { currentConfig = orig })
-	currentConfig = &config.Config{ModelID: "test-model", RepoRoot: root}
-
-	_, out, err := telemetryWriteHandler(context.Background(), nil, telemetryWriteInput{
-		Tool:    "claude-code",
-		Payload: `{}`,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !out.Written {
-		t.Errorf("Written should be true when cfg.RepoRoot is set, message: %q", out.Message)
-	}
-}
-
-func TestTelemetryWriteHandler_WriteError(t *testing.T) {
-	tmpDir := t.TempDir()
-	fileAsDir := filepath.Join(tmpDir, "notadir")
-	if err := os.WriteFile(fileAsDir, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	orig := currentConfig
-	t.Cleanup(func() { currentConfig = orig })
-	currentConfig = &config.Config{RepoRoot: fileAsDir}
-
-	_, out, err := telemetryWriteHandler(context.Background(), nil, telemetryWriteInput{
-		Tool:    "claude-code",
-		Payload: `{}`,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Written {
-		t.Error("Written should be false when Write fails")
-	}
-}
-
-// nilCollector implements telemetry.Collector and always returns nil, nil.
-type nilCollector struct{}
-
-func (n *nilCollector) Collect(_ io.Reader, _ *config.Config) (*telemetry.SnapshotResult, error) {
-	return nil, nil
-}
-
-// errCollector implements telemetry.Collector and always returns an error.
-type errCollector struct{}
-
-func (e *errCollector) Collect(_ io.Reader, _ *config.Config) (*telemetry.SnapshotResult, error) {
-	return nil, fmt.Errorf("forced collect error")
 }
