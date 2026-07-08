@@ -375,3 +375,14 @@ The `init` wizard SHALL set `version_bump_command` and `model_id` in `.dreamland
 
 - **WHEN** `dreamland init` completes with "Claude Code" selected
 - **THEN** `.dreamland.json` contains `"model_id": "claude-sonnet-4-6"` (or the current default model)
+
+### Requirement: Hook command logic is reusable via shared functions
+
+Each hook command (`transition-log`, `version-bump`, `test`, `coauthor`) SHALL expose its core logic through a package-internal function decoupled from `cobra.Command`, so it can be called from both the CLI runner and the MCP handler without duplication.
+
+The CLI `RunE` functions SHALL delegate to these shared functions. The MCP tool handlers SHALL call the same shared functions.
+
+#### Scenario: CLI and MCP invoke identical code path
+
+- **WHEN** `dreamland transition-log` is run from the shell AND the `transition_log` MCP tool is invoked
+- **THEN** both code paths call the same underlying function and produce identical side effects
