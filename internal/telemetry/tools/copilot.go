@@ -10,14 +10,20 @@ import (
 
 	"dreamland/internal/config"
 	"dreamland/internal/telemetry"
+	"dreamland/internal/telemetry/otelreceiver"
 )
 
-// CopilotCollector reads a GitHub Copilot Stop/SubagentStop hook payload and parses the transcript.
-// GitHub Copilot ships two payload shapes for the same event depending on invocation context:
-// camelCase (sessionId/transcriptPath — the GitHub Copilot CLI's native "agentStop" naming) and
-// snake_case (session_id/transcript_path, with hook_event_name — VS Code's "compatible" naming,
-// which is what the VS Code extension's .github/hooks/*.json hooks actually receive). Both are
-// checked; the transcript format itself remains best-effort/undocumented beyond its file path.
+// CopilotCollector reads a GitHub Copilot Stop/SubagentStop hook payload. GitHub Copilot
+// ships two payload shapes for the same event depending on invocation context: camelCase
+// (sessionId/transcriptPath — the GitHub Copilot CLI's native "agentStop" naming) and
+// snake_case (session_id/transcript_path, with hook_event_name — VS Code's "compatible"
+// naming, which is what the VS Code extension's .github/hooks/*.json hooks actually send).
+// Both are checked. Token usage is sourced from the local OTLP receiver's per-session
+// mailbox (see internal/telemetry/otelreceiver) keyed by session_id, since neither the
+// hook payload nor the transcript file expose usage data at all — confirmed empirically
+// by grepping a real, complete captured transcript for any token/usage field: none exist.
+// ParseTranscript is still attempted as a forward-compatible fallback in case that ever
+// changes, but is not expected to find anything today.
 type CopilotCollector struct{}
 
 func (c *CopilotCollector) Collect(stdin io.Reader, cfg *config.Config) (*telemetry.SnapshotResult, error) {
@@ -30,17 +36,30 @@ func (c *CopilotCollector) Collect(stdin io.Reader, cfg *config.Config) (*teleme
 	_ = json.Unmarshal(data, &raw) // best-effort
 
 	transcriptPath, _ := firstStringField(raw, "transcript_path", "transcriptPath")
+	sessionID, _ := firstStringField(raw, "session_id", "sessionId")
 
 	tu, parseErr := telemetry.ParseTranscript(transcriptPath)
 	if parseErr != nil {
 		fmt.Fprintf(os.Stderr, "dreamland telemetry: transcript parse warning (copilot format undocumented): %v\n", parseErr)
 	}
 
-	// The real Copilot transcript schema is unverified (ParseTranscript assumes the
-	// Claude Code JSONL shape). When extraction comes back empty, capture the raw hook
-	// payload and a transcript sample so the real schema can be confirmed from live data
-	// instead of guessed from docs — see .dreamland/copilot-hook-debug.jsonl.
-	if parseErr != nil || (tu.InputTokens == 0 && tu.OutputTokens == 0 && tu.CachedTokens == 0) {
+	var otelUsed bool
+	if tu.InputTokens == 0 && tu.OutputTokens == 0 && tu.CachedTokens == 0 && cfg != nil && cfg.RepoRoot != "" {
+		if usage, oerr := otelreceiver.ReadSessionUsage(cfg.RepoRoot, sessionID); oerr == nil && usage != nil {
+			tu.InputTokens = usage.InputTokens
+			tu.OutputTokens = usage.OutputTokens
+			tu.CachedTokens = usage.CachedTokens
+			if usage.Model != "" {
+				tu.Model = usage.Model
+			}
+			otelUsed = true
+		}
+	}
+
+	// Neither the transcript nor the OTLP receiver mailbox had anything: capture the raw
+	// hook payload and a transcript sample so the real schema can be confirmed from live
+	// data instead of guessed from docs — see .dreamland/copilot-hook-debug.jsonl.
+	if !otelUsed && (parseErr != nil || (tu.InputTokens == 0 && tu.OutputTokens == 0 && tu.CachedTokens == 0)) {
 		captureDebugPayload(cfg, data, transcriptPath, parseErr)
 	}
 

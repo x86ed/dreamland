@@ -241,6 +241,38 @@ func TestCopilotCollector_VSCodeSnakeCasePayload(t *testing.T) {
 	}
 }
 
+func TestCopilotCollector_UsesOtelSessionMailbox(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+
+	// Simulate the OTLP receiver having already captured usage for this session.
+	sessionsDir := filepath.Join(root, ".dreamland", "otel-sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	usage := `{"model":"gpt-4o","input_tokens":1500,"output_tokens":300,"cached_tokens":40,"captured_at":"2026-07-14T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(sessionsDir, "sess-abc.json"), []byte(usage), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdin := strings.NewReader(`{"hook_event_name":"SubagentStop","session_id":"sess-abc","transcript_path":"/nonexistent.jsonl"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens != 1500 || res.OutputTokens != 300 || res.CachedTokens != 40 {
+		t.Errorf("got %+v, want tokens from otel mailbox (1500/300/40)", res)
+	}
+	if res.Model != "gpt-4o" {
+		t.Errorf("Model = %q, want gpt-4o", res.Model)
+	}
+
+	// No debug capture should have fired, since the OTEL mailbox had real data.
+	if _, err := os.Stat(filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl")); !os.IsNotExist(err) {
+		t.Error("expected no debug capture when otel mailbox had data")
+	}
+}
+
 func TestCopilotCollector_CapturesDebugPayloadWhenZero(t *testing.T) {
 	root := t.TempDir()
 	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}

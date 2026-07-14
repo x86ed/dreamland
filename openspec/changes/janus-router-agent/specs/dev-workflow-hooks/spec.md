@@ -26,12 +26,14 @@ GitHub Copilot's VS Code agent framework supports a documented hooks mechanism (
 
 The scaffold installer SHALL write `.github/hooks/dreamland-hooks.json` (merged with any existing content at that path, same atomic-merge behavior as the other platforms' hook bindings) containing:
 
-- `SessionStart`: `dreamland version-bump`, `dreamland coauthor`
+- `SessionStart`: `dreamland version-bump`, `dreamland coauthor`, `dreamland otel-receiver`
 - `SubagentStart`: `dreamland coauthor` (identity refresh before a sub-agent is dispatched — GitHub Copilot's `SubagentStart` event serves the same purpose Claude Code's `PreToolUse` matcher achieves indirectly)
 - `SubagentStop`: `dreamland coauthor`, `dreamland telemetry write --tool github-copilot`, `dreamland version-bump --patch`, `dreamland commit --reason handoff`
 - `Stop`: `dreamland version-bump --patch`, `dreamland transition-log`, `dreamland test`, `dreamland telemetry write --tool github-copilot`, `dreamland commit --reason turn-complete`
 
 Each hook entry uses the real schema: `{"type": "command", "command": "<cmd>", "timeout": <seconds>}` — not a VS Code task (`.vscode/tasks.json`) and not an invented `bash`/`agentStop` shape.
+
+This SHALL be declared redundantly via GitHub Copilot's agent-scoped `hooks:` frontmatter field too (see the `agent-scaffolding` capability) — the workspace file needs no settings flag and always fires; the agent-scoped copy fires once `chat.useCustomAgentHooks` is enabled. Both bind identical commands, so neither is a fallback for the other in a weaker sense — they're two independent, redundant triggers for the same effect.
 
 #### Scenario: GitHub Copilot hooks file contains session-start entries
 
@@ -48,6 +50,31 @@ Each hook entry uses the real schema: `{"type": "command", "command": "<cmd>", "
 
 - **WHEN** `.github/hooks/dreamland-hooks.json` already contains a user-added hook entry and `dreamland init` runs again
 - **THEN** the user's entry is preserved alongside dreamland's entries
+
+### Requirement: A local OTLP/HTTP receiver captures GitHub Copilot's real token usage
+
+Neither GitHub Copilot's `SubagentStop`/`Stop` hook payload nor its transcript file (referenced by `transcript_path`) expose token usage — confirmed empirically by parsing a complete, real captured transcript: no token or usage field exists anywhere in it. Copilot's only real source of token-usage data is its native OpenTelemetry export (`github.copilot.chat.otel.*`, already configured by `dreamland init`), which follows the OTel GenAI Semantic Conventions: an `invoke_agent` trace span carries `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.request.model`/`gen_ai.response.model`, and `gen_ai.conversation.id` (which matches the hook payload's `session_id`). `dreamland otel-receiver` SHALL implement a minimal OTLP/HTTP trace-export endpoint to capture that data locally.
+
+`dreamland otel-receiver` SHALL implement a `POST /v1/traces` endpoint (accepting both `application/x-protobuf` and `application/json` bodies) at the same host:port `github.copilot.chat.otel.otlpEndpoint` is configured to use. For each span carrying a `gen_ai.conversation.id` and non-zero `gen_ai.usage.*` attributes, it SHALL write a per-session mailbox file at `.dreamland/otel-sessions/<conversation_id>.json` containing the extracted token counts and model.
+
+The command SHALL be idempotent and non-blocking: invoked without `--foreground` (as bound to the `SessionStart` hook), it SHALL probe whether something is already listening at the target address and exit immediately if so; otherwise it SHALL spawn a detached child process (running with `--foreground`) that serves the receiver indefinitely, and the invoking process SHALL return without waiting for that child, so the `SessionStart` hook is never blocked by a long-running server.
+
+`CopilotCollector` (the `dreamland telemetry write --tool github-copilot` collector) SHALL read `.dreamland/otel-sessions/<session_id>.json` (using the `session_id` from its own hook payload) and SHALL prefer that data over transcript parsing whenever present.
+
+#### Scenario: Receiver captures token usage from a real trace export
+
+- **WHEN** `dreamland otel-receiver` is running and receives a `POST /v1/traces` request containing a span with `gen_ai.conversation.id` and non-zero `gen_ai.usage.input_tokens`/`gen_ai.usage.output_tokens`
+- **THEN** `.dreamland/otel-sessions/<conversation_id>.json` is written with those token counts and the resolved model
+
+#### Scenario: Receiver is idempotent across repeated SessionStart invocations
+
+- **WHEN** `dreamland otel-receiver` runs and a receiver is already listening at the configured address
+- **THEN** it exits immediately without spawning a second instance
+
+#### Scenario: Telemetry write prefers OTEL-captured usage over transcript parsing
+
+- **WHEN** `dreamland telemetry write --tool github-copilot` runs and `.dreamland/otel-sessions/<session_id>.json` exists for the current hook payload's `session_id`
+- **THEN** the resulting snapshot's token counts come from that file, not from parsing `transcript_path`
 
 ### Requirement: Platforms without a sub-agent lifecycle hook rely on agent-driven invocation
 

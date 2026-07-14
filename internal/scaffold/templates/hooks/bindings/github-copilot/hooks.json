@@ -2,7 +2,8 @@
   "hooks": {
     "SessionStart": [
       {"type": "command", "command": "dreamland version-bump", "timeout": 30},
-      {"type": "command", "command": "dreamland coauthor", "timeout": 30}
+      {"type": "command", "command": "dreamland coauthor", "timeout": 30},
+      {"type": "command", "command": "dreamland otel-receiver", "timeout": 10}
     ],
     "SubagentStart": [
       {"type": "command", "command": "dreamland coauthor", "timeout": 30}
