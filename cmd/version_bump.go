@@ -148,10 +148,14 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Push branch if it had no upstream.
+	// Push branch if it had no upstream. Best-effort: the tag and branch-bumps record
+	// above already succeeded by this point, and this command runs from a SessionStart
+	// hook — a repo with no "origin" remote (or no network, or no push permission) is a
+	// legitimate, common case (local-only or throwaway repos) that must not fail the
+	// whole session-start hook chain over a non-essential publish step.
 	if noUpstream {
 		if out, err := gitExec("push", "--set-upstream", "origin", branch); err != nil {
-			return fmt.Errorf("git push --set-upstream: %w\n%s", err, out)
+			fmt.Fprintf(os.Stderr, "dreamland: version-bump warning: git push --set-upstream failed (tag %s was still created): %v\n%s\n", newTag, err, out)
 		}
 	}
 

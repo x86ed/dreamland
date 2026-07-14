@@ -840,7 +840,7 @@ func TestRunVersionBump_WriteBranchBumpsError(t *testing.T) {
 	}
 }
 
-func TestRunVersionBump_GitPushError(t *testing.T) {
+func TestRunVersionBump_GitPushError_IsBestEffort(t *testing.T) {
 	root := makeVersionBumpRepo(t, config.Config{})
 
 	origFlags := [4]interface{}{vbMajor, vbMinor, vbPatch, vbVersion}
@@ -871,8 +871,13 @@ func TestRunVersionBump_GitPushError(t *testing.T) {
 		return "", nil
 	})
 
-	if err := runVersionBump(versionBumpCmd, nil); err == nil {
-		t.Fatal("expected git push error to be propagated")
+	// A repo with no "origin" remote (or unreachable network) must not fail the whole
+	// session-start hook chain — the tag was already created before the push attempt.
+	if err := runVersionBump(versionBumpCmd, nil); err != nil {
+		t.Fatalf("expected git push failure to be best-effort (nil error), got: %v", err)
+	}
+	if taggedVersion == "" {
+		t.Error("expected the version tag to still be created despite the push failure")
 	}
 	_ = root
 }
