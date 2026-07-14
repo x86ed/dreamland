@@ -7,6 +7,8 @@ tags: [workflow, artifacts, experimental]
 
 Propose a new change - create the change and generate all artifacts in one step.
 
+**Routing**: `/opsx:propose` routes directly to the `phantasos` agent — its one deterministic target — rather than through Janus's routing decision.
+
 I'll create a change with artifacts:
 - proposal.md (what & why)
 - design.md (how)

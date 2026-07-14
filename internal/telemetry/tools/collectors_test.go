@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -220,6 +221,211 @@ func TestCopilotCollector_Normal(t *testing.T) {
 	}
 	if res.Tool != "github-copilot" {
 		t.Errorf("Tool = %q, want github-copilot", res.Tool)
+	}
+}
+
+func TestCopilotCollector_VSCodeSnakeCasePayload(t *testing.T) {
+	// The real VS Code extension payload uses snake_case field names
+	// (transcript_path, session_id, hook_event_name), not the GitHub Copilot
+	// CLI's camelCase (transcriptPath). Both must be parsed.
+	path := writeTempTranscript(t, sampleClaudeTranscript)
+	stdin := strings.NewReader(`{"hook_event_name":"SubagentStop","session_id":"s1","transcript_path":"` + filepath.ToSlash(path) + `","stop_reason":"end_turn","agent_name":"janus"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, testCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens != 1000 || res.OutputTokens != 200 {
+		t.Errorf("snake_case transcript_path not parsed: got input=%d output=%d", res.InputTokens, res.OutputTokens)
+	}
+	if res.Model != "claude-sonnet-4-6" {
+		t.Errorf("Model = %q, want claude-sonnet-4-6", res.Model)
+	}
+}
+
+func TestCopilotCollector_PrefersChatSessionFileOverOtel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	roots := vscodeWorkspaceStorageRoots()
+	if len(roots) == 0 {
+		t.Skip("no workspace storage roots resolved for this OS")
+	}
+	sessionDir := filepath.Join(roots[0], "workspace-hash", "chatSessions")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(sessionDir, "real-session.jsonl")
+	fixture := `{"kind":1,"k":["requests",0,"promptTokens"],"v":6027}` + "\n" +
+		`{"kind":1,"k":["requests",0,"completionTokens"],"v":610}` + "\n"
+	if err := os.WriteFile(sessionFile, []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "gpt-4o", RepoRoot: root}
+
+	// Also seed an OTEL mailbox with different numbers, to prove the chat-session file wins.
+	sessionsDir := filepath.Join(root, ".dreamland", "otel-sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	otelUsage := `{"model":"gpt-4o","input_tokens":1,"output_tokens":1,"cached_tokens":0,"captured_at":"2026-07-14T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(sessionsDir, "real-session.json"), []byte(otelUsage), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdin := strings.NewReader(`{"hook_event_name":"SubagentStop","session_id":"real-session"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens != 6027 || res.OutputTokens != 610 {
+		t.Errorf("got %+v, want tokens from the chat-session file (6027/610), not the otel mailbox", res)
+	}
+}
+
+func TestCopilotCollector_UsesOtelSessionMailbox(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+
+	// Simulate the OTLP receiver having already captured usage for this session.
+	sessionsDir := filepath.Join(root, ".dreamland", "otel-sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	usage := `{"model":"gpt-4o","input_tokens":1500,"output_tokens":300,"cached_tokens":40,"captured_at":"2026-07-14T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(sessionsDir, "sess-abc.json"), []byte(usage), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdin := strings.NewReader(`{"hook_event_name":"SubagentStop","session_id":"sess-abc","transcript_path":"/nonexistent.jsonl"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens != 1500 || res.OutputTokens != 300 || res.CachedTokens != 40 {
+		t.Errorf("got %+v, want tokens from otel mailbox (1500/300/40)", res)
+	}
+	if res.Model != "gpt-4o" {
+		t.Errorf("Model = %q, want gpt-4o", res.Model)
+	}
+
+	// No debug capture should have fired, since the OTEL mailbox had real data.
+	if _, err := os.Stat(filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl")); !os.IsNotExist(err) {
+		t.Error("expected no debug capture when otel mailbox had data")
+	}
+}
+
+func TestCopilotCollector_CapturesDebugPayloadWhenZero(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+
+	stdin := strings.NewReader(`{"hook_event_name":"SubagentStop","session_id":"s1","transcript_path":"/nonexistent/path.jsonl","stop_reason":"end_turn"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens != 0 {
+		t.Fatalf("expected zero tokens, got %d", res.InputTokens)
+	}
+
+	debugPath := filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl")
+	data, err := os.ReadFile(debugPath)
+	if err != nil {
+		t.Fatalf("expected debug capture file, got error: %v", err)
+	}
+	if !strings.Contains(string(data), "session_id") {
+		t.Errorf("debug capture missing raw hook payload, got: %s", data)
+	}
+	if !strings.Contains(string(data), "transcript_read_error") {
+		t.Errorf("debug capture missing transcript_read_error for nonexistent file, got: %s", data)
+	}
+}
+
+func TestCopilotCollector_DebugCaptureIncludesTranscriptSample(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+	path := writeTempTranscript(t, "not a usage record")
+
+	stdin := strings.NewReader(`{"transcript_path":"` + filepath.ToSlash(path) + `"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens != 0 {
+		t.Fatalf("expected zero tokens, got %d", res.InputTokens)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl"))
+	if err != nil {
+		t.Fatalf("expected debug capture file, got error: %v", err)
+	}
+	if !strings.Contains(string(data), "transcript_sample") {
+		t.Errorf("debug capture missing transcript_sample, got: %s", data)
+	}
+	if strings.Contains(string(data), "transcript_read_error") {
+		t.Errorf("did not expect transcript_read_error for a readable file, got: %s", data)
+	}
+}
+
+func TestCopilotCollector_DebugCaptureTruncatesLargeTranscript(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+	path := writeTempTranscript(t, strings.Repeat("x", 5000))
+
+	stdin := strings.NewReader(`{"transcript_path":"` + filepath.ToSlash(path) + `"}`)
+	if _, err := (&CopilotCollector{}).Collect(stdin, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl"))
+	if err != nil {
+		t.Fatalf("expected debug capture file, got error: %v", err)
+	}
+	var entry struct {
+		TranscriptSample string `json:"transcript_sample"`
+	}
+	if err := json.Unmarshal(data, &entry); err != nil {
+		t.Fatalf("failed to parse debug capture entry: %v", err)
+	}
+	if len(entry.TranscriptSample) != 4000 {
+		t.Errorf("transcript_sample length = %d, want 4000 (truncated)", len(entry.TranscriptSample))
+	}
+}
+
+func TestCopilotCollector_DebugCaptureMkdirFails(t *testing.T) {
+	root := t.TempDir()
+	// Create a regular file where the ".dreamland" directory needs to go, so
+	// MkdirAll fails inside captureDebugPayload.
+	blocker := filepath.Join(root, ".dreamland")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+
+	stdin := strings.NewReader(`{"session_id":"s1","transcript_path":"/nonexistent/path.jsonl"}`)
+	// Must not panic; captureDebugPayload is best-effort and swallows the error.
+	if _, err := (&CopilotCollector{}).Collect(stdin, cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCopilotCollector_NoDebugCaptureOnRealTokens(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+	path := writeTempTranscript(t, sampleClaudeTranscript)
+
+	stdin := strings.NewReader(`{"transcript_path":"` + filepath.ToSlash(path) + `"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens == 0 {
+		t.Fatal("expected non-zero tokens from sample transcript")
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl")); !os.IsNotExist(err) {
+		t.Error("expected no debug capture file when real tokens were extracted")
 	}
 }
 

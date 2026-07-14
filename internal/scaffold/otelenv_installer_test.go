@@ -85,6 +85,9 @@ func TestInstallOtelEnv_Copilot(t *testing.T) {
 	if endpoint, _ := settings["github.copilot.chat.otel.otlpEndpoint"].(string); !strings.Contains(endpoint, "4318") {
 		t.Errorf("Copilot endpoint should use port 4318, got: %q", endpoint)
 	}
+	if v, ok := settings["chat.useCustomAgentHooks"].(bool); !ok || !v {
+		t.Error("settings.json missing chat.useCustomAgentHooks: true (required for agent-scoped hooks to fire)")
+	}
 }
 
 func TestInstallOtelEnv_Copilot_PreservesExistingSettings(t *testing.T) {
@@ -112,7 +115,10 @@ func TestInstallOtelEnv_Copilot_PreservesExistingSettings(t *testing.T) {
 	}
 }
 
-func TestScaffoldTelemetry_Copilot(t *testing.T) {
+func TestScaffoldTelemetry_CopilotIsNoOp(t *testing.T) {
+	// Telemetry write for GitHub Copilot now ships in the base hooks.json
+	// binding template (see bindGitHubCopilot in scaffold.go) rather than a
+	// separate bolt-on file, so ScaffoldTelemetry is a no-op for every tool.
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
@@ -120,34 +126,8 @@ func TestScaffoldTelemetry_Copilot(t *testing.T) {
 	if err := ScaffoldTelemetry(root, "GitHub Copilot"); err != nil {
 		t.Fatal(err)
 	}
-	hookFile := filepath.Join(root, ".github", "hooks", "dreamland-telemetry.json")
-	data, err := os.ReadFile(hookFile)
-	if err != nil {
-		t.Fatalf("hook file not found: %v", err)
-	}
-	if !strings.Contains(string(data), "agentStop") {
-		t.Errorf("hook file missing agentStop: %s", data)
-	}
-	if !strings.Contains(string(data), "dreamland telemetry write --tool github-copilot") {
-		t.Errorf("hook file missing telemetry write command: %s", data)
-	}
-}
-
-func TestScaffoldTelemetry_Idempotent(t *testing.T) {
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := ScaffoldTelemetry(root, "GitHub Copilot"); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := os.ReadFile(filepath.Join(root, ".github", "hooks", "dreamland-telemetry.json"))
-	if err := ScaffoldTelemetry(root, "GitHub Copilot"); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := os.ReadFile(filepath.Join(root, ".github", "hooks", "dreamland-telemetry.json"))
-	if string(before) != string(after) {
-		t.Error("second ScaffoldTelemetry should not modify existing file")
+	if _, err := os.Stat(filepath.Join(root, ".github", "hooks", "dreamland-telemetry.json")); !os.IsNotExist(err) {
+		t.Error("expected no dreamland-telemetry.json to be written")
 	}
 }
 
@@ -292,18 +272,6 @@ func TestMergeVscodeSettings_CorruptJSON(t *testing.T) {
 	// Corrupt JSON resets to {} and proceeds — should not error.
 	if err := MergeVscodeSettings(root, map[string]any{"new": "val"}); err != nil {
 		t.Errorf("corrupt JSON should reset to {}, got error: %v", err)
-	}
-}
-
-func TestInstallCopilotHookBinding_MkdirError(t *testing.T) {
-	root := t.TempDir()
-	// Block .github dir creation.
-	if err := os.WriteFile(filepath.Join(root, ".github"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	err := ScaffoldTelemetry(root, "GitHub Copilot")
-	if err == nil {
-		t.Error("expected error when .github is a file")
 	}
 }
 

@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"dreamland/internal/config"
+	"dreamland/internal/telemetry"
 )
 
 func TestResolveAgentName_EnvVar(t *testing.T) {
@@ -174,6 +176,207 @@ func TestAppendCoauthorTrailer_EmptyModelID(t *testing.T) {
 	data, _ := os.ReadFile(f.Name())
 	if string(data) != original {
 		t.Errorf("file modified when model_id empty, got:\n%s", string(data))
+	}
+}
+
+// withPipedStdin replaces os.Stdin with a pipe containing data for the duration of fn,
+// then restores the original os.Stdin.
+func withPipedStdin(t *testing.T, data string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString(data); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	orig := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = orig
+		r.Close()
+	})
+}
+
+func TestAgentNameFromHookPayload_NeverBlocksWhenNoDataArrives(t *testing.T) {
+	// Simulates an interactive terminal (or any stdin that never sends EOF or data):
+	// the read end of a pipe with nothing written and never closed. This must return
+	// within hookPayloadReadTimeout, not hang — this is the exact bug reported when
+	// running `dreamland coauthor` directly in VS Code's integrated terminal.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close(); r.Close() })
+
+	orig := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = orig })
+
+	done := make(chan string, 1)
+	go func() { done <- agentNameFromHookPayload() }()
+
+	select {
+	case got := <-done:
+		if got != "" {
+			t.Errorf("got %q, want empty string", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("agentNameFromHookPayload blocked past its own timeout — hang reproduced")
+	}
+}
+
+func TestAgentNameFromHookPayload_CopilotAgentType(t *testing.T) {
+	withPipedStdin(t, `{"hook_event_name":"SubagentStop","session_id":"s1","agent_type":"morpheus"}`)
+	if got := agentNameFromHookPayload(); got != "morpheus" {
+		t.Errorf("got %q, want morpheus", got)
+	}
+}
+
+func TestAgentNameFromHookPayload_NoAgentTypeField(t *testing.T) {
+	withPipedStdin(t, `{"hook_event_name":"Stop","session_id":"s1"}`)
+	if got := agentNameFromHookPayload(); got != "" {
+		t.Errorf("got %q, want empty string when no agent_type field present", got)
+	}
+}
+
+func TestAgentNameFromHookPayload_EmptyStdin(t *testing.T) {
+	withPipedStdin(t, "")
+	if got := agentNameFromHookPayload(); got != "" {
+		t.Errorf("got %q, want empty string for empty stdin", got)
+	}
+}
+
+func TestAgentNameFromHookPayload_InvalidJSON(t *testing.T) {
+	withPipedStdin(t, "not json")
+	if got := agentNameFromHookPayload(); got != "" {
+		t.Errorf("got %q, want empty string for invalid JSON", got)
+	}
+}
+
+func TestRunCoauthor_UsesAgentTypeFromHookPayload(t *testing.T) {
+	makeCoauthorRepo(t, config.Config{CodingTool: "GitHub Copilot"})
+	withPipedStdin(t, `{"hook_event_name":"SubagentStop","agent_type":"iktomi"}`)
+
+	var gitCalls []string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		gitCalls = append(gitCalls, strings.Join(args, " "))
+		return "", nil
+	})
+
+	origTrailer := coauthorTrailer
+	coauthorTrailer = ""
+	t.Cleanup(func() { coauthorTrailer = origTrailer })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("runCoauthor: %v", err)
+	}
+
+	found := false
+	for _, c := range gitCalls {
+		if strings.Contains(c, "user.name iktomi") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected git config user.name iktomi, got calls: %v", gitCalls)
+	}
+}
+
+func TestAppendTokensReport_AllZeroOmitted(t *testing.T) {
+	root := t.TempDir()
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{
+		Tool: "github-copilot", Model: "gpt-4o", InputTokens: 0, OutputTokens: 0, CachedTokens: 0, TotalTokens: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := "feat: add something\nCo-authored-by: gpt-4o <gpt-4o@github.com>\n"
+	f.WriteString(original)
+	f.Close()
+
+	if err := appendTokensReport(f.Name(), root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(f.Name())
+	if string(data) != original {
+		t.Errorf("expected no Tokens: line for all-zero snapshot, got:\n%s", string(data))
+	}
+}
+
+func TestAppendTokensReport_Available(t *testing.T) {
+	root := t.TempDir()
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{
+		InputTokens: 100, OutputTokens: 50, CachedTokens: 10, TotalTokens: 150,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString("feat: add something\nCo-authored-by: claude-sonnet-4-6 <claude-sonnet-4-6@github.com>\n")
+	f.Close()
+
+	if err := appendTokensReport(f.Name(), root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(f.Name())
+	if !strings.Contains(string(data), "Tokens: input=100 output=50 cached=10 total=150") {
+		t.Errorf("Tokens line not appended, got:\n%s", string(data))
+	}
+}
+
+func TestAppendTokensReport_Unavailable(t *testing.T) {
+	root := t.TempDir() // no telemetry snapshot written
+
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := "feat: add something\n"
+	f.WriteString(original)
+	f.Close()
+
+	if err := appendTokensReport(f.Name(), root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(f.Name())
+	if string(data) != original {
+		t.Errorf("expected file unchanged when telemetry unavailable, got:\n%s", string(data))
+	}
+}
+
+func TestAppendTokensReport_NotDuplicated(t *testing.T) {
+	root := t.TempDir()
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{InputTokens: 1, TotalTokens: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := "feat: x\nTokens: input=1 output=0 cached=0 total=1\n"
+	f.WriteString(content)
+	f.Close()
+
+	if err := appendTokensReport(f.Name(), root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	data, _ := os.ReadFile(f.Name())
+	if strings.Count(string(data), "Tokens: ") != 1 {
+		t.Errorf("Tokens line duplicated, got:\n%s", string(data))
 	}
 }
 

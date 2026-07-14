@@ -27,7 +27,16 @@
       "WebFetch(domain:docs.anthropic.com)",
       "WebFetch(domain:discuss.ai.google.dev)",
       "Bash(awk '{if \\($3 != \"100.0%\"\\) print}')",
-      "Bash(awk '{if \\($3 ~ /[0-9]+\\\\.[0-9]+%/\\) {pct=substr\\($3, 1, length\\($3\\)-1\\); if \\(pct<100\\) print $1, $2, $3}}')"
+      "Bash(awk '{if \\($3 ~ /[0-9]+\\\\.[0-9]+%/\\) {pct=substr\\($3, 1, length\\($3\\)-1\\); if \\(pct<100\\) print $1, $2, $3}}')",
+      "Bash(openspec --version)",
+      "Bash(openspec validate *)",
+      "Bash(openspec --help)",
+      "Bash(openspec change *)",
+      "Bash(grep -n \"hooks:\\\\` field lists \\\\`coauthor\\\\`/\\\\`telemetry-write\\\\`\" /Users/adamsiegel/Workspace/git/dreamland/openspec/changes/janus-router-agent/proposal.md)",
+      "Bash(/tmp/dreamland-bin init *)",
+      "Bash(echo \"vet exit: $?\")",
+      "Bash(go list *)",
+      "Bash(gofmt -l .)"
     ]
   },
   "hooks": {

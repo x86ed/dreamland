@@ -27,6 +27,7 @@ var (
 	vbPatch    bool
 	vbBreaking bool
 	vbVersion  string
+	vbChange   string
 )
 
 func init() {
@@ -36,6 +37,7 @@ func init() {
 	versionBumpCmd.Flags().BoolVar(&vbPatch, "patch", false, "bump patch version (end-of-turn mode)")
 	versionBumpCmd.Flags().BoolVar(&vbBreaking, "breaking", false, "breaking change: bump major instead of minor")
 	versionBumpCmd.Flags().StringVar(&vbVersion, "version", "", "set explicit version (e.g. v1.2.3)")
+	versionBumpCmd.Flags().StringVar(&vbChange, "change", "", "change slug: bump minor once per OpenSpec change (independent of the branch marker)")
 }
 
 // branchBumpEntry is one entry in the .dreamland/branch-bumps JSON object.
@@ -92,6 +94,11 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 		return performBump(cmd, cfg, repoRoot, lastTag, "patch", vbVersion)
 	}
 
+	if vbChange != "" {
+		// Change-scoped minor mode: independent of, and skips, the branch marker.
+		return runChangeBump(cfg, repoRoot, lastTag)
+	}
+
 	// Session-start minor/major mode: check branch marker.
 	branch, err := gitCurrentBranch()
 	if err != nil {
@@ -141,14 +148,45 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Push branch if it had no upstream.
+	// Push branch if it had no upstream. Best-effort: the tag and branch-bumps record
+	// above already succeeded by this point, and this command runs from a SessionStart
+	// hook — a repo with no "origin" remote (or no network, or no push permission) is a
+	// legitimate, common case (local-only or throwaway repos) that must not fail the
+	// whole session-start hook chain over a non-essential publish step.
 	if noUpstream {
 		if out, err := gitExec("push", "--set-upstream", "origin", branch); err != nil {
-			return fmt.Errorf("git push --set-upstream: %w\n%s", err, out)
+			fmt.Fprintf(os.Stderr, "dreamland: version-bump warning: git push --set-upstream failed (tag %s was still created): %v\n%s\n", newTag, err, out)
 		}
 	}
 
 	return nil
+}
+
+// runChangeBump bumps minor once per OpenSpec change slug, tracked in
+// .dreamland/change-bumps (same append-and-check-membership shape as branch-bumps).
+func runChangeBump(cfg *config.Config, repoRoot, lastTag string) error {
+	bumpsFile := filepath.Join(repoRoot, ".dreamland", "change-bumps")
+	bumps, err := readBranchBumps(bumpsFile)
+	if err != nil {
+		return err
+	}
+	if _, exists := bumps[vbChange]; exists {
+		return nil // already bumped for this change
+	}
+
+	if err := performBump(nil, cfg, repoRoot, lastTag, "minor", ""); err != nil {
+		return err
+	}
+
+	newTag, err := gitLastTag()
+	if err != nil {
+		newTag = lastTag
+	}
+	bumps[vbChange] = branchBumpEntry{
+		Version:       newTag,
+		InitializedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	return writeBranchBumps(bumpsFile, bumps)
 }
 
 func performBump(_ *cobra.Command, cfg *config.Config, _ string, lastTag, level, explicit string) error {
