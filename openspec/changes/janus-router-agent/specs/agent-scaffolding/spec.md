@@ -129,12 +129,16 @@ On every platform that exposes a tool/capability list in agent frontmatter (Clau
 - **WHEN** `.claude/agents/mengpo.md` is installed
 - **THEN** its `tools` frontmatter field includes `Write` but does not include `Edit`
 
-### Requirement: GitHub Copilot frontmatter declares its subagent routing graph and hooks in the header
+### Requirement: GitHub Copilot frontmatter declares its subagent routing graph, and any agent that dispatches subagents grants itself the `agent` tool
 
-Every platform relies on the same deterministic-vs-judgment hand-off graph (see the `janus-router-agent` capability), but GitHub Copilot's VS Code agent framework is the one platform that requires this graph declared *structurally* in each agent's frontmatter, rather than left to prose alone — unlike Claude Code, where the `Task` tool can technically reach any agent and the deterministic/judgment distinction lives entirely in each agent's instruction body. Every `.github/agents/*.agent.md` file SHALL include, in addition to `name`/`description`/`tools`:
+Every platform relies on the same deterministic-vs-judgment hand-off graph (see the `janus-router-agent` capability), but GitHub Copilot's VS Code agent framework is the one platform that requires this graph declared *structurally* in each agent's frontmatter, rather than left to prose alone — unlike Claude Code, where the `Task`/`Agent` tool can technically reach any agent and the deterministic/judgment distinction lives entirely in each agent's instruction body. Every `.github/agents/*.agent.md` file SHALL include, in addition to `name`/`description`/`tools`:
 
 - `agents:` — the list of agent names this agent may invoke as a subagent (its deterministic hand-off targets and/or its broad-routing fan-out, plus `janus` for the ambiguous/terminal case).
-- `hooks:` — a normalized, identical set on every one of the ten agents: `coauthor`, `telemetry-write`, `commit`, `version-bump`. GitHub Copilot has no global session-level hook binding file the way Claude Code's `.claude/settings.json` provides, so each agent declares this set itself rather than inheriting it from one shared binding. These hooks exist to guarantee, per the `dev-workflow-hooks` capability, that on GitHub Copilot exactly as everywhere else: `coauthor` sets `git config user.name`/`user.email` to the currently acting agent for every turn; `telemetry-write` (surfaced via `coauthor --trailer`'s `Tokens:` line) pushes token/model usage into the commit message; `commit` guarantees every turn (`--reason turn-complete`) and hand-off (`--reason handoff`) produces a checkpoint commit, so no agent's cycle is left uncaptured in git history; and `version-bump` bumps the patch version by default on every turn, with minor (new change/branch) and major (breaking change) bumps triggered separately per the `dev-workflow-hooks` capability.
+- `tools:` includes `agent` whenever `agents:` is non-empty (every one of the ten agents, since even the narrow agents dispatch to `janus`). VS Code's custom-agent framework requires the invoking agent's own `tools:` list to grant the `agent` tool before its `agents:` restriction list has any effect — declaring `agents:` alone, without also granting the `agent` tool, leaves subagent dispatch unavailable to that agent.
+
+Hook bindings (`coauthor`, `telemetry-write`, `commit`, `version-bump`) are declared **twice**, redundantly, on GitHub Copilot: once workspace-wide (`.github/hooks/*.json` — see the `dev-workflow-hooks` capability's "GitHub Copilot binds identity, telemetry, and lifecycle commands via a real hooks file" requirement, which needs no settings flag and fires regardless of which agent is active) and once per-agent, via a real agent-scoped `hooks:` frontmatter field. Every `.github/agents/*.agent.md` file's frontmatter SHALL also include:
+
+- `hooks:` — a map from event name to an array of `{type: command, command: "<cmd>"}` entries, identical on every one of the ten agents: `SubagentStart` runs `dreamland coauthor`; `SubagentStop` runs `dreamland coauthor`, `dreamland telemetry write --tool github-copilot`, `dreamland version-bump --patch`, and `dreamland commit --reason handoff` — the same commands the workspace-level hooks file already binds to those events. This is belt-and-suspenders, not a different behavior: agent-scoped hooks are a real, separate VS Code mechanism (distinct schema location from the workspace file, same event names and command-entry shape) that requires the `chat.useCustomAgentHooks: true` setting — which `dreamland init` writes to `.vscode/settings.json` — to fire at all; the workspace-level file has no such gate. Declaring both means hooks still fire even if a user's environment has the agent-scoped preview flag off (workspace file) or if the workspace-file mechanism is ever restricted (agent-scoped, once the flag is on).
 
 The `agents:` list SHALL match the hand-off graph defined in the `janus-router-agent` capability, which has three tiers:
 
@@ -172,27 +176,17 @@ The `agents:` list SHALL match the hand-off graph defined in the `janus-router-a
 - **WHEN** `.github/agents/iktomi.agent.md`, `.github/agents/zhougong.agent.md`, `.github/agents/hypnos.agent.md`, or `.github/agents/mengpo.agent.md` is installed
 - **THEN** its `agents:` frontmatter field lists all nine other agents, the same set `janus.agent.md` lists
 
-#### Scenario: Every agent declares the same normalized hook set
+#### Scenario: Every agent that dispatches subagents grants itself the agent tool
 
 - **WHEN** any of the ten `.github/agents/*.agent.md` files is installed
-- **THEN** its `hooks:` frontmatter field lists `coauthor`, `telemetry-write`, `commit`, and `version-bump`, identically on every agent regardless of its `agents:` tier (router, narrow, or broad-routing)
+- **THEN** its `tools:` frontmatter field includes `agent`, since every agent's `agents:` list is non-empty (at minimum, every agent can reach `janus`)
 
-#### Scenario: Coauthor hook keeps git identity current per turn
+#### Scenario: Every agent declares identical agent-scoped hooks
 
-- **WHEN** any agent's turn begins on GitHub Copilot
-- **THEN** the `coauthor` hook it declares sets `git config user.name`/`user.email` to that agent's identity, the same as the `PreToolUse`/`SubagentStop` binding does on Claude Code
+- **WHEN** any of the ten `.github/agents/*.agent.md` files is installed
+- **THEN** its `hooks:` frontmatter field declares `SubagentStart` running `dreamland coauthor`, and `SubagentStop` running `dreamland coauthor`, `dreamland telemetry write --tool github-copilot`, `dreamland version-bump --patch`, and `dreamland commit --reason handoff` — identically on every agent
 
-#### Scenario: Telemetry is pushed into the commit message on every agent
+#### Scenario: dreamland init enables the agent-scoped hooks preview flag
 
-- **WHEN** any agent on GitHub Copilot produces a commit
-- **THEN** the `telemetry-write` hook it declares results in a `Tokens:` line in that commit's message, alongside the `Co-authored-by:` trailer `coauthor` appends
-
-#### Scenario: Commit hook guarantees every agent cycle is captured in git history
-
-- **WHEN** any agent's turn ends or hands off on GitHub Copilot
-- **THEN** the `commit` hook it declares runs `dreamland commit --reason turn-complete` (or `--reason handoff`), so a checkpoint commit exists for that cycle even if the agent never explicitly ran `git commit`
-
-#### Scenario: Version-bump hook defaults to a patch bump per turn
-
-- **WHEN** any agent's turn ends or hands off on GitHub Copilot
-- **THEN** the `version-bump` hook it declares runs `dreamland version-bump --patch`, per the `dev-workflow-hooks` capability
+- **WHEN** `dreamland init` completes with "GitHub Copilot" selected
+- **THEN** `.vscode/settings.json` contains `"chat.useCustomAgentHooks": true`

@@ -148,43 +148,19 @@ func installCopilotOtelEnv(repoRoot, endpoint string) {
 		"github.copilot.chat.otel.enabled":      true,
 		"github.copilot.chat.otel.exporterType": "otlp-http",
 		"github.copilot.chat.otel.otlpEndpoint": copilotOtelEndpoint(endpoint),
+		// Required (preview) for the agent-scoped `hooks:` frontmatter field on
+		// .github/agents/*.agent.md to actually fire — without this, only the
+		// workspace-level .github/hooks/*.json bindings run.
+		"chat.useCustomAgentHooks": true,
 	}
 	if err := MergeVscodeSettings(repoRoot, patch); err != nil {
 		fmt.Fprintf(os.Stderr, "dreamland: OTEL env warning (copilot): %v\n", err)
 	}
 }
 
-// ScaffoldTelemetry installs the Copilot agentStop hook binding file.
-// Other tools include the telemetry write command in their base binding templates.
-func ScaffoldTelemetry(repoRoot, tool string) error {
-	if tool == "GitHub Copilot" {
-		return installCopilotHookBinding(repoRoot)
-	}
+// ScaffoldTelemetry is a no-op: the telemetry write command is included directly
+// in each platform's base hook binding template (see bindHooks in scaffold.go),
+// GitHub Copilot included (templates/hooks/bindings/github-copilot/hooks.json).
+func ScaffoldTelemetry(_, _ string) error {
 	return nil
-}
-
-func installCopilotHookBinding(repoRoot string) error {
-	target := filepath.Join(repoRoot, ".github", "hooks", "dreamland-telemetry.json")
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	if _, err := os.Stat(target); err == nil {
-		return nil // already installed
-	}
-	data, err := json.MarshalIndent(map[string]any{
-		"version": 1,
-		"hooks": map[string]any{
-			"agentStop": []any{
-				map[string]any{
-					"type":       "bash",
-					"bash":       "dreamland telemetry write --tool github-copilot",
-					"timeoutSec": 30,
-				},
-			},
-		},
-	}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return atomicWrite(target, append(data, '\n'), 0o644)
 }

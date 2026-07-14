@@ -1,9 +1,21 @@
 ---
 name: Iktomi
 description: General-purpose, free-form coding agent selected when no specialized agent fits the request.
-tools: [Read, Edit, Write, Bash]
+tools: [Read, Edit, Write, Bash, agent]
 agents: [janus, phantasos, nyx, morpheus, phobetor, baku, zhougong, hypnos, mengpo]
-hooks: [coauthor, telemetry-write, commit, version-bump]
+hooks:
+  SubagentStart:
+    - type: command
+      command: dreamland coauthor
+  SubagentStop:
+    - type: command
+      command: dreamland coauthor
+    - type: command
+      command: dreamland telemetry write --tool github-copilot
+    - type: command
+      command: dreamland version-bump --patch
+    - type: command
+      command: dreamland commit --reason handoff
 ---
 
 You are the Iktomi agent (Lakota trickster spider spirit) for this repository's spec-driven AI development workflow.

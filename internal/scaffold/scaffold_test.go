@@ -160,16 +160,16 @@ func TestInstall_GitHubCopilot(t *testing.T) {
 		}
 	}
 
-	tasksPath := filepath.Join(root, ".vscode", "tasks.json")
-	data, err := os.ReadFile(tasksPath)
+	hooksPath := filepath.Join(root, ".github", "hooks", "dreamland-hooks.json")
+	data, err := os.ReadFile(hooksPath)
 	if err != nil {
-		t.Fatalf(".vscode/tasks.json not created: %v", err)
+		t.Fatalf(".github/hooks/dreamland-hooks.json not created: %v", err)
 	}
-	if !strings.Contains(string(data), "folderOpen") {
-		t.Error(".vscode/tasks.json missing folderOpen session-start task")
+	if !strings.Contains(string(data), "SessionStart") {
+		t.Error("dreamland-hooks.json missing SessionStart event")
 	}
-	if !strings.Contains(string(data), "dreamland: end of turn") {
-		t.Error(".vscode/tasks.json missing end-of-turn task")
+	if !strings.Contains(string(data), "SubagentStop") {
+		t.Error("dreamland-hooks.json missing SubagentStop event")
 	}
 }
 
@@ -193,6 +193,32 @@ func TestInstall_Antigravity(t *testing.T) {
 		}
 		if !strings.Contains(string(data), "name: "+skill) {
 			t.Errorf("skill file %s missing 'name: %s' in frontmatter", skill, skill)
+		}
+	}
+}
+
+func TestInstall_GitHubCopilot_AgentScopedHooks(t *testing.T) {
+	root := fakeGitRepo(t)
+	_, err := Install(Config{RepoRoot: root, CodingTool: "GitHub Copilot"})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	for _, a := range []string{
+		"janus.agent.md", "phantasos.agent.md", "nyx.agent.md", "morpheus.agent.md",
+		"phobetor.agent.md", "baku.agent.md", "iktomi.agent.md", "zhougong.agent.md",
+		"hypnos.agent.md", "mengpo.agent.md",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, ".github", "agents", a))
+		if err != nil {
+			t.Fatalf("missing %s: %v", a, err)
+		}
+		content := string(data)
+		if !strings.Contains(content, "SubagentStart:") || !strings.Contains(content, "SubagentStop:") {
+			t.Errorf("%s missing agent-scoped hooks: block (SubagentStart/SubagentStop)", a)
+		}
+		if !strings.Contains(content, "dreamland telemetry write --tool github-copilot") {
+			t.Errorf("%s agent-scoped hooks missing telemetry write command", a)
 		}
 	}
 }
@@ -495,16 +521,16 @@ func TestAtomicJSONMerge_CreatesParentDir(t *testing.T) {
 	}
 }
 
-func TestInstall_GitHubCopilot_MergesVSCodeTasks(t *testing.T) {
+func TestInstall_GitHubCopilot_MergesHooksFile(t *testing.T) {
 	root := fakeGitRepo(t)
 
-	// Pre-existing tasks.json with a user task.
-	vscodeDir := filepath.Join(root, ".vscode")
-	if err := os.MkdirAll(vscodeDir, 0o755); err != nil {
+	// Pre-existing dreamland-hooks.json with a user-added hook.
+	hooksDir := filepath.Join(root, ".github", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	existing := []byte(`{"version":"2.0.0","tasks":[{"label":"my-build","type":"shell","command":"go build ./..."}]}`)
-	if err := os.WriteFile(filepath.Join(vscodeDir, "tasks.json"), existing, 0o644); err != nil {
+	existing := []byte(`{"hooks":{"PostToolUse":[{"type":"command","command":"echo my-hook"}]}}`)
+	if err := os.WriteFile(filepath.Join(hooksDir, "dreamland-hooks.json"), existing, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -512,16 +538,16 @@ func TestInstall_GitHubCopilot_MergesVSCodeTasks(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(vscodeDir, "tasks.json"))
+	data, err := os.ReadFile(filepath.Join(hooksDir, "dreamland-hooks.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Both existing and dreamland tasks should be present.
-	if !strings.Contains(string(data), "my-build") {
-		t.Error("pre-existing task was lost after merge")
+	// Both existing and dreamland hooks should be present.
+	if !strings.Contains(string(data), "my-hook") {
+		t.Error("pre-existing hook was lost after merge")
 	}
-	if !strings.Contains(string(data), "dreamland: session start") {
-		t.Error("dreamland session-start task missing after merge")
+	if !strings.Contains(string(data), "SubagentStart") {
+		t.Error("dreamland SubagentStart hook missing after merge")
 	}
 }
 
@@ -768,14 +794,14 @@ func TestBindGitHubCopilot_MergeError(t *testing.T) {
 	}
 	root := t.TempDir()
 
-	// Make .vscode dir unwritable.
-	vscodeDir := filepath.Join(root, ".vscode")
-	if err := os.MkdirAll(vscodeDir, 0o555); err != nil {
+	// Make .github dir unwritable.
+	githubDir := filepath.Join(root, ".github")
+	if err := os.MkdirAll(githubDir, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(vscodeDir, 0o755) })
+	t.Cleanup(func() { os.Chmod(githubDir, 0o755) })
 
-	patch := []byte(`{"tasks":[]}`)
+	patch := []byte(`{"hooks":{}}`)
 	_, err := bindGitHubCopilot(root, patch, false)
 	if err == nil {
 		t.Fatal("expected error from bindGitHubCopilot when dir is unwritable")

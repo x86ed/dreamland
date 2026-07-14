@@ -2,11 +2,11 @@
 
 ### Requirement: Claude Code binds identity, telemetry, and patch-version commands to the sub-agent handoff lifecycle
 
-In addition to the existing `SessionStart`/`Stop` bindings, the scaffold installer SHALL register `dreamland coauthor` under Claude Code's `PreToolUse` event (matcher: `Task`) and `dreamland coauthor`, `dreamland telemetry write --tool claude-code`, and `dreamland version-bump --patch` under Claude Code's `SubagentStop` event, so that git identity, telemetry, and the patch version are refreshed on every hand-off to a sub-agent — every agent turn — not only once per session.
+In addition to the existing `SessionStart`/`Stop` bindings, the scaffold installer SHALL register `dreamland coauthor` under Claude Code's `PreToolUse` event (matcher: `Task|Agent` — the subagent-dispatch tool was renamed from `Task` to `Agent` in Claude Code v2.1.63; matching both keeps the binding correct across the VS Code extension's bundled CLI version and the standalone CLI regardless of which has updated) and `dreamland coauthor`, `dreamland telemetry write --tool claude-code`, and `dreamland version-bump --patch` under Claude Code's `SubagentStop` event, so that git identity, telemetry, and the patch version are refreshed on every hand-off to a sub-agent — every agent turn — not only once per session.
 
 #### Scenario: Identity refreshed before a sub-agent is dispatched
 
-- **WHEN** Janus invokes the `Task` tool to delegate to another agent
+- **WHEN** Janus invokes the `Task`/`Agent` tool to delegate to another agent
 - **THEN** `dreamland coauthor` runs via the `PreToolUse` hook before the sub-agent's turn begins, updating `git config user.name`/`user.email` to the dispatched agent's identity
 
 #### Scenario: Identity, telemetry, and patch version refreshed after a sub-agent's turn completes
@@ -17,14 +17,43 @@ In addition to the existing `SessionStart`/`Stop` bindings, the scaffold install
 #### Scenario: Claude Code settings.json contains handoff hook entries
 
 - **WHEN** `dreamland init` completes with "Claude Code" selected
-- **THEN** `.claude/settings.json` contains a `PreToolUse` entry matching `Task` that runs `dreamland coauthor`
+- **THEN** `.claude/settings.json` contains a `PreToolUse` entry matching `Task|Agent` that runs `dreamland coauthor`
 - **AND** contains a `SubagentStop` entry that runs `dreamland coauthor`, `dreamland telemetry write --tool claude-code`, and `dreamland version-bump --patch`
+
+### Requirement: GitHub Copilot binds identity, telemetry, and lifecycle commands via a real hooks file
+
+GitHub Copilot's VS Code agent framework supports a documented hooks mechanism (workspace-scoped `.github/hooks/*.json`, shipped February 2026) with event names that closely mirror Claude Code's: `SessionStart`, `SubagentStart`, `SubagentStop`, and `Stop`, among others. This SHALL supersede the base `dev-workflow-hooks` capability's "GitHub Copilot hook binding is a documented stub" requirement, written before hooks were publicly documented — GitHub Copilot is no longer a stub platform.
+
+The scaffold installer SHALL write `.github/hooks/dreamland-hooks.json` (merged with any existing content at that path, same atomic-merge behavior as the other platforms' hook bindings) containing:
+
+- `SessionStart`: `dreamland version-bump`, `dreamland coauthor`
+- `SubagentStart`: `dreamland coauthor` (identity refresh before a sub-agent is dispatched — GitHub Copilot's `SubagentStart` event serves the same purpose Claude Code's `PreToolUse` matcher achieves indirectly)
+- `SubagentStop`: `dreamland coauthor`, `dreamland telemetry write --tool github-copilot`, `dreamland version-bump --patch`, `dreamland commit --reason handoff`
+- `Stop`: `dreamland version-bump --patch`, `dreamland transition-log`, `dreamland test`, `dreamland telemetry write --tool github-copilot`, `dreamland commit --reason turn-complete`
+
+Each hook entry uses the real schema: `{"type": "command", "command": "<cmd>", "timeout": <seconds>}` — not a VS Code task (`.vscode/tasks.json`) and not an invented `bash`/`agentStop` shape.
+
+#### Scenario: GitHub Copilot hooks file contains session-start entries
+
+- **WHEN** `dreamland init` completes with "GitHub Copilot" selected
+- **THEN** `.github/hooks/dreamland-hooks.json` contains a `SessionStart` entry running `dreamland version-bump` and `dreamland coauthor`
+
+#### Scenario: GitHub Copilot hooks file refreshes identity and telemetry around subagent dispatch
+
+- **WHEN** `dreamland init` completes with "GitHub Copilot" selected
+- **THEN** `.github/hooks/dreamland-hooks.json` contains a `SubagentStart` entry running `dreamland coauthor`
+- **AND** contains a `SubagentStop` entry running `dreamland coauthor`, `dreamland telemetry write --tool github-copilot`, `dreamland version-bump --patch`, and `dreamland commit --reason handoff`
+
+#### Scenario: Existing hooks file content is preserved on merge
+
+- **WHEN** `.github/hooks/dreamland-hooks.json` already contains a user-added hook entry and `dreamland init` runs again
+- **THEN** the user's entry is preserved alongside dreamland's entries
 
 ### Requirement: Platforms without a sub-agent lifecycle hook rely on agent-driven invocation
 
 For platforms where no `PreToolUse`/`SubagentStop`-equivalent hook event is documented (Codex CLI, Cursor, Kiro, Antigravity), the scaffold installer SHALL NOT add a handoff-lifecycle hook binding. Instead, this is documented as a known limitation: the Janus agent's own instructions direct it to invoke `dreamland coauthor`, `dreamland telemetry write`, and `dreamland version-bump --patch` immediately before and after each delegation (see the `janus-router-agent` capability), and the existing `SessionStart`/`Stop` bindings continue to provide a session-level fallback.
 
-GitHub Copilot is the one exception to this limitation: rather than a global session-level binding file, it structurally declares the equivalent guarantee — `coauthor`, `telemetry-write`, `commit`, and `version-bump` — in each agent's own frontmatter (`hooks:`, see the `agent-scaffolding` capability's "GitHub Copilot frontmatter declares its subagent routing graph and hooks in the header" requirement), which is a stronger mechanism than the prose-only convention the other four platforms rely on.
+GitHub Copilot is no longer in this category — see the "GitHub Copilot binds identity, telemetry, and lifecycle commands via a real hooks file" requirement above.
 
 #### Scenario: No handoff hook binding added for Cursor
 

@@ -1,9 +1,21 @@
 ---
 name: Hypnos
 description: Authors new agent definitions across every platform template and registers them with Janus's routing table.
-tools: [Read, Edit, Write, Bash]
+tools: [Read, Edit, Write, Bash, agent]
 agents: [janus, phantasos, nyx, morpheus, phobetor, baku, iktomi, zhougong, mengpo]
-hooks: [coauthor, telemetry-write, commit, version-bump]
+hooks:
+  SubagentStart:
+    - type: command
+      command: dreamland coauthor
+  SubagentStop:
+    - type: command
+      command: dreamland coauthor
+    - type: command
+      command: dreamland telemetry write --tool github-copilot
+    - type: command
+      command: dreamland version-bump --patch
+    - type: command
+      command: dreamland commit --reason handoff
 ---
 
 You are the Hypnos agent (Greek god of sleep, father of the Oneiroi) for this repository's spec-driven AI development workflow.

@@ -208,7 +208,7 @@ func bindHooks(cfg Config) ([]Result, error) {
 		"Cursor":         {"templates/hooks/bindings/cursor/hooks.json", bindCursor},
 		"Kiro":           {"templates/hooks/bindings/kiro/agent-patch.json", bindKiro},
 		"Antigravity":    {"templates/hooks/bindings/antigravity/hooks.json", bindAntigravity},
-		"GitHub Copilot": {"templates/hooks/bindings/github-copilot/vscode-tasks.json", bindGitHubCopilot},
+		"GitHub Copilot": {"templates/hooks/bindings/github-copilot/hooks.json", bindGitHubCopilot},
 	}
 
 	b, ok := binders[cfg.CodingTool]
@@ -398,7 +398,7 @@ func bindAntigravity(_ string, patch []byte, force bool) (Result, error) {
 }
 
 func bindGitHubCopilot(repoRoot string, patch []byte, _ bool) (Result, error) {
-	target := filepath.Join(repoRoot, ".vscode", "tasks.json")
+	target := filepath.Join(repoRoot, ".github", "hooks", "dreamland-hooks.json")
 	if err := atomicJSONMerge(target, patch); err != nil {
 		return Result{}, err
 	}

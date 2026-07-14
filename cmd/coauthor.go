@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -57,6 +60,9 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 
 	// Default mode: set agent git identity and install the hook.
 	agentName := resolveAgentName(cfg.CodingTool)
+	if hookAgent := agentNameFromHookPayload(); hookAgent != "" {
+		agentName = hookAgent
+	}
 	agentEmail := config.EmailClean(agentName) + suffix
 
 	if _, err := gitExec("config", "--local", "user.name", agentName); err != nil {
@@ -85,6 +91,56 @@ func resolveAgentName(codingTool string) string {
 		return codingTool
 	}
 	return "dreamland"
+}
+
+// hookPayloadReadTimeout bounds how long agentNameFromHookPayload waits for a hook
+// payload before giving up. Stdin-type detection (os.ModeCharDevice) is not reliable
+// enough on its own to rule out blocking forever — VS Code's integrated terminal (and
+// other pty-backed shells) does not reliably present stdin the way a plain interactive
+// terminal does, so a bare Stat() check let `dreamland coauthor` hang indefinitely when
+// run directly in that terminal. A hard timeout guarantees this function can never block
+// its caller, regardless of what stdin actually is; a real hook payload arrives near-
+// instantly (the parent process writes it and closes/moves on immediately), so 200ms is
+// generous for the legitimate case and negligible for the interactive/no-payload case.
+const hookPayloadReadTimeout = 200 * time.Millisecond
+
+// agentNameFromHookPayload reads a JSON hook payload from stdin, if one arrives within
+// hookPayloadReadTimeout, and extracts the acting sub-agent's identity if present.
+// Confirmed from live GitHub Copilot SubagentStart/SubagentStop hook payloads: the field
+// is "agent_type" (e.g. "morpheus", "iktomi") — undocumented but consistently present.
+// SessionStart/Stop payloads (which aren't about a specific sub-agent) don't carry this
+// field, so the existing env-var/coding-tool fallback in resolveAgentName still applies
+// for those. Returns "" whenever no matching payload arrives in time.
+func agentNameFromHookPayload() string {
+	type result struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<16))
+		ch <- result{data, err}
+	}()
+
+	var data []byte
+	select {
+	case res := <-ch:
+		if res.err != nil || len(res.data) == 0 {
+			return ""
+		}
+		data = res.data
+	case <-time.After(hookPayloadReadTimeout):
+		return "" // nothing arrived in time — never block the caller
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return ""
+	}
+	if v, ok := payload["agent_type"].(string); ok && v != "" {
+		return v
+	}
+	return ""
 }
 
 const prepareCommitMsgContent = "#!/bin/sh\ndreamland coauthor --trailer \"$1\" \"$2\" \"$3\"\n"
@@ -146,6 +202,12 @@ func appendCoauthorTrailer(msgFile, modelID, suffix string) error {
 func appendTokensReport(msgFile, repoRoot string) error {
 	snap, err := telemetry.Read(repoRoot)
 	if err != nil || snap == nil {
+		return nil
+	}
+	// All-zero is indistinguishable from "no data" for platforms whose collector has no
+	// real source for token counts (e.g. GitHub Copilot's transcript exposes no usage
+	// field at all) — a fake "input=0 output=0..." line is worse than omitting it.
+	if snap.InputTokens == 0 && snap.OutputTokens == 0 && snap.CachedTokens == 0 && snap.TotalTokens == 0 {
 		return nil
 	}
 

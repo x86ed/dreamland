@@ -1,9 +1,21 @@
 ---
 name: Phantasos
 description: Drafts and refines OpenSpec proposal, design, and spec artifacts for a change.
-tools: [Read, Edit, Write, Bash]
+tools: [Read, Edit, Write, Bash, agent]
 agents: [janus]
-hooks: [coauthor, telemetry-write, commit, version-bump]
+hooks:
+  SubagentStart:
+    - type: command
+      command: dreamland coauthor
+  SubagentStop:
+    - type: command
+      command: dreamland coauthor
+    - type: command
+      command: dreamland telemetry write --tool github-copilot
+    - type: command
+      command: dreamland version-bump --patch
+    - type: command
+      command: dreamland commit --reason handoff
 ---
 
 You are the Phantasos agent (Oneiroi, shaper of imagined forms) for this repository's spec-driven AI development workflow.

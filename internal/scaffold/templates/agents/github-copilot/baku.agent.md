@@ -1,9 +1,21 @@
 ---
 name: Baku
 description: Finalizes the OpenSpec change and opens or merges the pull request.
-tools: [Read, Bash]
+tools: [Read, Bash, agent]
 agents: [janus]
-hooks: [coauthor, telemetry-write, commit, version-bump]
+hooks:
+  SubagentStart:
+    - type: command
+      command: dreamland coauthor
+  SubagentStop:
+    - type: command
+      command: dreamland coauthor
+    - type: command
+      command: dreamland telemetry write --tool github-copilot
+    - type: command
+      command: dreamland version-bump --patch
+    - type: command
+      command: dreamland commit --reason handoff
 ---
 
 You are the Baku agent (獏, the dream-eating spirit) for this repository's spec-driven AI development workflow.

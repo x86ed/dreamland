@@ -223,6 +223,69 @@ func TestCopilotCollector_Normal(t *testing.T) {
 	}
 }
 
+func TestCopilotCollector_VSCodeSnakeCasePayload(t *testing.T) {
+	// The real VS Code extension payload uses snake_case field names
+	// (transcript_path, session_id, hook_event_name), not the GitHub Copilot
+	// CLI's camelCase (transcriptPath). Both must be parsed.
+	path := writeTempTranscript(t, sampleClaudeTranscript)
+	stdin := strings.NewReader(`{"hook_event_name":"SubagentStop","session_id":"s1","transcript_path":"` + filepath.ToSlash(path) + `","stop_reason":"end_turn","agent_name":"janus"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, testCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens != 1000 || res.OutputTokens != 200 {
+		t.Errorf("snake_case transcript_path not parsed: got input=%d output=%d", res.InputTokens, res.OutputTokens)
+	}
+	if res.Model != "claude-sonnet-4-6" {
+		t.Errorf("Model = %q, want claude-sonnet-4-6", res.Model)
+	}
+}
+
+func TestCopilotCollector_CapturesDebugPayloadWhenZero(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+
+	stdin := strings.NewReader(`{"hook_event_name":"SubagentStop","session_id":"s1","transcript_path":"/nonexistent/path.jsonl","stop_reason":"end_turn"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens != 0 {
+		t.Fatalf("expected zero tokens, got %d", res.InputTokens)
+	}
+
+	debugPath := filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl")
+	data, err := os.ReadFile(debugPath)
+	if err != nil {
+		t.Fatalf("expected debug capture file, got error: %v", err)
+	}
+	if !strings.Contains(string(data), "session_id") {
+		t.Errorf("debug capture missing raw hook payload, got: %s", data)
+	}
+	if !strings.Contains(string(data), "transcript_read_error") {
+		t.Errorf("debug capture missing transcript_read_error for nonexistent file, got: %s", data)
+	}
+}
+
+func TestCopilotCollector_NoDebugCaptureOnRealTokens(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+	path := writeTempTranscript(t, sampleClaudeTranscript)
+
+	stdin := strings.NewReader(`{"transcript_path":"` + filepath.ToSlash(path) + `"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens == 0 {
+		t.Fatal("expected non-zero tokens from sample transcript")
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl")); !os.IsNotExist(err) {
+		t.Error("expected no debug capture file when real tokens were extracted")
+	}
+}
+
 func TestCopilotCollector_MissingTranscript(t *testing.T) {
 	stdin := strings.NewReader(`{"sessionId":"s1","transcriptPath":"/nonexistent/path.jsonl","stopReason":"end_turn"}`)
 	res, err := (&CopilotCollector{}).Collect(stdin, testCfg)

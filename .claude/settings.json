@@ -34,7 +34,8 @@
       "Bash(openspec change *)",
       "Bash(grep -n \"hooks:\\\\` field lists \\\\`coauthor\\\\`/\\\\`telemetry-write\\\\`\" /Users/adamsiegel/Workspace/git/dreamland/openspec/changes/janus-router-agent/proposal.md)",
       "Bash(/tmp/dreamland-bin init *)",
-      "Bash(echo \"vet exit: $?\")"
+      "Bash(echo \"vet exit: $?\")",
+      "Bash(go list *)"
     ]
   },
   "hooks": {

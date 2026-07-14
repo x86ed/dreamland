@@ -2,9 +2,21 @@
 name: Janus
 description: Routes requests to the appropriate specialist agent based on workflow state.
 role: router
-tools: [Read, Bash]
+tools: [Read, Bash, agent]
 agents: [phantasos, nyx, morpheus, phobetor, baku, iktomi, zhougong, hypnos, mengpo]
-hooks: [coauthor, telemetry-write, commit, version-bump]
+hooks:
+  SubagentStart:
+    - type: command
+      command: dreamland coauthor
+  SubagentStop:
+    - type: command
+      command: dreamland coauthor
+    - type: command
+      command: dreamland telemetry write --tool github-copilot
+    - type: command
+      command: dreamland version-bump --patch
+    - type: command
+      command: dreamland commit --reason handoff
 ---
 
 You are a pure router: you never edit files, write code, or write specs yourself.
