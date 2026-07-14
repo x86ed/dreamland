@@ -493,7 +493,7 @@ func TestInitForceFlag(t *testing.T) {
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(agentDir, "orchestrator.md"), []byte("old content"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(agentDir, "janus.md"), []byte("old content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -519,9 +519,9 @@ func TestInitForceFlag(t *testing.T) {
 		t.Errorf("expected 'installed (forced)' in output, got:\n%s", out)
 	}
 
-	data, _ := os.ReadFile(filepath.Join(agentDir, "orchestrator.md"))
+	data, _ := os.ReadFile(filepath.Join(agentDir, "janus.md"))
 	if string(data) == "old content" {
-		t.Error("orchestrator.md was not overwritten with --force")
+		t.Error("janus.md was not overwritten with --force")
 	}
 }
 

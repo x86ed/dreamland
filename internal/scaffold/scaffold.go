@@ -37,7 +37,39 @@ func Install(cfg Config) ([]Result, error) {
 	}
 	results = append(results, hookResults...)
 
+	commandResults, err := installCommands(cfg)
+	if err != nil {
+		return results, err
+	}
+	results = append(results, commandResults...)
+
 	return results, nil
+}
+
+// platformCommandSpec maps a coding tool to its slash-command template/target directories.
+// Only platforms with a project-scoped, file-based slash-command convention are listed here:
+//   - Claude Code's commands live directly in this repo's .claude/commands/ (not templated/installed).
+//   - Cursor reads project-scoped commands from .cursor/commands/*.md (filename -> command name).
+//   - Codex CLI's custom prompts are user-home-only (~/.codex/prompts/), not project-scoped, and
+//     are deprecated upstream in favor of "skills" — there is no repo-installable target.
+//   - Kiro's slash commands are steering files with `inclusion: manual`; giving a routing command
+//     the same name as an already-installed always-on agent steering file (e.g. iktomi.md) would
+//     collide in the same directory, so it has no clean separate target either.
+//   - GitHub Copilot and Antigravity have no public slash-command mechanism.
+func platformCommandSpec(tool, repoRoot string) (platformSpec, bool) {
+	specs := map[string]platformSpec{
+		"Cursor": {templateDir: "commands/cursor", targetDir: filepath.Join(repoRoot, ".cursor", "commands")},
+	}
+	spec, ok := specs[tool]
+	return spec, ok
+}
+
+func installCommands(cfg Config) ([]Result, error) {
+	spec, ok := platformCommandSpec(cfg.CodingTool, cfg.RepoRoot)
+	if !ok {
+		return nil, nil // no project-scoped slash-command convention for this platform
+	}
+	return installFlatAgents(cfg, spec)
 }
 
 // platformSpec maps a coding tool name to its template and target directories.

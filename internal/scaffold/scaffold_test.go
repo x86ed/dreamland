@@ -26,7 +26,7 @@ func TestInstall_ClaudeCode(t *testing.T) {
 	}
 
 	agentDir := filepath.Join(root, ".claude", "agents")
-	agents := []string{"orchestrator.md", "spec-writer.md", "implementer.md", "tester.md", "pr-closer.md"}
+	agents := []string{"janus.md", "phantasos.md", "nyx.md", "morpheus.md", "phobetor.md", "baku.md", "iktomi.md", "zhougong.md", "hypnos.md", "mengpo.md"}
 	for _, a := range agents {
 		if _, err := os.Stat(filepath.Join(agentDir, a)); err != nil {
 			t.Errorf("missing agent file %s: %v", a, err)
@@ -58,7 +58,7 @@ func TestInstall_Codex(t *testing.T) {
 	}
 
 	agentDir := filepath.Join(root, ".codex", "agents")
-	for _, a := range []string{"orchestrator.toml", "spec-writer.toml", "implementer.toml", "tester.toml", "pr-closer.toml"} {
+	for _, a := range []string{"janus.toml", "phantasos.toml", "nyx.toml", "morpheus.toml", "phobetor.toml", "baku.toml", "iktomi.toml", "zhougong.toml", "hypnos.toml", "mengpo.toml"} {
 		if _, err := os.Stat(filepath.Join(agentDir, a)); err != nil {
 			t.Errorf("missing agent file %s: %v", a, err)
 		}
@@ -78,7 +78,7 @@ func TestInstall_Cursor(t *testing.T) {
 	}
 
 	rulesDir := filepath.Join(root, ".cursor", "rules")
-	for _, a := range []string{"orchestrator.mdc", "spec-writer.mdc", "implementer.mdc", "tester.mdc", "pr-closer.mdc"} {
+	for _, a := range []string{"janus.mdc", "phantasos.mdc", "nyx.mdc", "morpheus.mdc", "phobetor.mdc", "baku.mdc", "iktomi.mdc", "zhougong.mdc", "hypnos.mdc", "mengpo.mdc"} {
 		if _, err := os.Stat(filepath.Join(rulesDir, a)); err != nil {
 			t.Errorf("missing agent file %s: %v", a, err)
 		}
@@ -106,7 +106,7 @@ func TestInstall_Kiro(t *testing.T) {
 	}
 
 	steeringDir := filepath.Join(root, ".kiro", "steering")
-	for _, a := range []string{"orchestrator.md", "spec-writer.md", "implementer.md", "tester.md", "pr-closer.md"} {
+	for _, a := range []string{"janus.md", "phantasos.md", "nyx.md", "morpheus.md", "phobetor.md", "baku.md", "iktomi.md", "zhougong.md", "hypnos.md", "mengpo.md"} {
 		data, err := os.ReadFile(filepath.Join(steeringDir, a))
 		if err != nil {
 			t.Errorf("missing steering file %s: %v", a, err)
@@ -144,11 +144,16 @@ func TestInstall_GitHubCopilot(t *testing.T) {
 
 	copilotDir := filepath.Join(root, ".github", "agents")
 	for _, a := range []string{
-		"orchestrator.agent.md",
-		"spec-writer.agent.md",
-		"implementer.agent.md",
-		"tester.agent.md",
-		"pr-closer.agent.md",
+		"janus.agent.md",
+		"phantasos.agent.md",
+		"nyx.agent.md",
+		"morpheus.agent.md",
+		"phobetor.agent.md",
+		"baku.agent.md",
+		"iktomi.agent.md",
+		"zhougong.agent.md",
+		"hypnos.agent.md",
+		"mengpo.agent.md",
 	} {
 		if _, err := os.Stat(filepath.Join(copilotDir, a)); err != nil {
 			t.Errorf("missing agent file %s: %v", a, err)
@@ -176,7 +181,7 @@ func TestInstall_Antigravity(t *testing.T) {
 	}
 
 	skillsDir := filepath.Join(root, ".agents", "skills")
-	for _, skill := range []string{"orchestrator", "spec-writer", "implementer", "tester", "pr-closer"} {
+	for _, skill := range []string{"janus", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"} {
 		skillFile := filepath.Join(skillsDir, skill, "SKILL.md")
 		data, err := os.ReadFile(skillFile)
 		if err != nil {
@@ -192,6 +197,33 @@ func TestInstall_Antigravity(t *testing.T) {
 	}
 }
 
+func TestInstall_Cursor_Commands(t *testing.T) {
+	root := fakeGitRepo(t)
+	_, err := Install(Config{RepoRoot: root, CodingTool: "Cursor"})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	commandsDir := filepath.Join(root, ".cursor", "commands")
+	for _, c := range []string{"route.md", "phantasos.md", "nyx.md", "morpheus.md", "phobetor.md", "baku.md", "iktomi.md", "zhougong.md", "hypnos.md", "mengpo.md"} {
+		if _, err := os.Stat(filepath.Join(commandsDir, c)); err != nil {
+			t.Errorf("missing command file %s: %v", c, err)
+		}
+	}
+}
+
+func TestInstall_ClaudeCode_NoCommandsInstalled(t *testing.T) {
+	root := fakeGitRepo(t)
+	_, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".cursor")); err == nil {
+		t.Error("expected no .cursor directory created for Claude Code install")
+	}
+}
+
 func TestInstall_SkipsExisting(t *testing.T) {
 	root := fakeGitRepo(t)
 
@@ -200,7 +232,7 @@ func TestInstall_SkipsExisting(t *testing.T) {
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	existingPath := filepath.Join(agentDir, "orchestrator.md")
+	existingPath := filepath.Join(agentDir, "janus.md")
 	if err := os.WriteFile(existingPath, []byte("existing content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +262,7 @@ func TestInstall_ForceOverwrites(t *testing.T) {
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	existingPath := filepath.Join(agentDir, "orchestrator.md")
+	existingPath := filepath.Join(agentDir, "janus.md")
 	if err := os.WriteFile(existingPath, []byte("existing content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -414,8 +446,8 @@ func TestInstallSkills_ForceOverwrites(t *testing.T) {
 		t.Fatalf("first Install: %v", err)
 	}
 
-	orchestratorPath := filepath.Join(root, ".agents", "skills", "orchestrator", "SKILL.md")
-	if err := os.WriteFile(orchestratorPath, []byte("custom content"), 0o644); err != nil {
+	janusPath := filepath.Join(root, ".agents", "skills", "janus", "SKILL.md")
+	if err := os.WriteFile(janusPath, []byte("custom content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -423,7 +455,7 @@ func TestInstallSkills_ForceOverwrites(t *testing.T) {
 	if _, err := Install(Config{RepoRoot: root, CodingTool: "Antigravity", Force: false}); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(orchestratorPath)
+	data, _ := os.ReadFile(janusPath)
 	if string(data) != "custom content" {
 		t.Error("expected custom content preserved without --force")
 	}
@@ -432,7 +464,7 @@ func TestInstallSkills_ForceOverwrites(t *testing.T) {
 	if _, err := Install(Config{RepoRoot: root, CodingTool: "Antigravity", Force: true}); err != nil {
 		t.Fatal(err)
 	}
-	data, _ = os.ReadFile(orchestratorPath)
+	data, _ = os.ReadFile(janusPath)
 	if string(data) == "custom content" {
 		t.Error("expected file overwritten with --force")
 	}
@@ -525,14 +557,14 @@ func TestInstallSkills_WriteFileError(t *testing.T) {
 
 	// Create the skills dir and one skill subdir, then make it unwritable.
 	skillsDir := filepath.Join(root, ".agents", "skills")
-	orchestratorDir := filepath.Join(skillsDir, "orchestrator")
-	if err := os.MkdirAll(orchestratorDir, 0o755); err != nil {
+	janusSkillDir := filepath.Join(skillsDir, "janus")
+	if err := os.MkdirAll(janusSkillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(orchestratorDir, 0o555); err != nil {
+	if err := os.Chmod(janusSkillDir, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(orchestratorDir, 0o755) })
+	t.Cleanup(func() { os.Chmod(janusSkillDir, 0o755) })
 
 	_, err := Install(Config{RepoRoot: root, CodingTool: "Antigravity", Force: true})
 	if err == nil {

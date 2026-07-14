@@ -424,6 +424,85 @@ func TestRunVersionBump_NewBranch_MinorBump(t *testing.T) {
 	}
 }
 
+func TestRunVersionBump_ChangeScoped_FirstBump(t *testing.T) {
+	root := makeVersionBumpRepo(t, config.Config{})
+
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.Contains(joined, "describe"):
+			return "v1.0.0\n", nil
+		case strings.Contains(joined, "diff"):
+			return "M main.go\n", nil
+		}
+		return "", nil
+	})
+
+	origFlags := [5]interface{}{vbMajor, vbMinor, vbPatch, vbVersion, vbChange}
+	vbMajor, vbMinor, vbPatch, vbVersion, vbChange = false, false, false, "", "add-auth"
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion, vbChange =
+			origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string), origFlags[4].(string)
+	})
+
+	if err := runVersionBump(versionBumpCmd, nil); err != nil {
+		t.Fatalf("runVersionBump: %v", err)
+	}
+
+	bumpsFile := filepath.Join(root, ".dreamland", "change-bumps")
+	data, err := os.ReadFile(bumpsFile)
+	if err != nil {
+		t.Fatalf("change-bumps not written: %v", err)
+	}
+	var bumps map[string]branchBumpEntry
+	if err := json.Unmarshal(data, &bumps); err != nil {
+		t.Fatalf("change-bumps invalid JSON: %v", err)
+	}
+	if _, ok := bumps["add-auth"]; !ok {
+		t.Error("change-bumps missing add-auth entry")
+	}
+}
+
+func TestRunVersionBump_ChangeScoped_NoDoubleBump(t *testing.T) {
+	root := makeVersionBumpRepo(t, config.Config{})
+
+	bumpsFile := filepath.Join(root, ".dreamland", "change-bumps")
+	if err := os.MkdirAll(filepath.Dir(bumpsFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bumps := map[string]branchBumpEntry{"add-auth": {Version: "v1.1.0"}}
+	data, _ := json.Marshal(bumps)
+	os.WriteFile(bumpsFile, data, 0o644)
+
+	var tagCalled bool
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.Contains(joined, "describe"):
+			return "v1.1.0\n", nil
+		case strings.Contains(joined, "diff"):
+			return "M main.go\n", nil
+		case len(args) > 0 && args[0] == "tag":
+			tagCalled = true
+		}
+		return "", nil
+	})
+
+	origFlags := [5]interface{}{vbMajor, vbMinor, vbPatch, vbVersion, vbChange}
+	vbMajor, vbMinor, vbPatch, vbVersion, vbChange = false, false, false, "", "add-auth"
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion, vbChange =
+			origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string), origFlags[4].(string)
+	})
+
+	if err := runVersionBump(versionBumpCmd, nil); err != nil {
+		t.Fatalf("runVersionBump: %v", err)
+	}
+	if tagCalled {
+		t.Error("expected no re-bump for a change slug already recorded")
+	}
+}
+
 func TestVersionBumpFlags_AtMostOne(t *testing.T) {
 	// Save and restore global flag state.
 	origMajor, origMinor, origPatch, origVersion := vbMajor, vbMinor, vbPatch, vbVersion

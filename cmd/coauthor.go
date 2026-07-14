@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"dreamland/internal/config"
+	"dreamland/internal/telemetry"
 )
 
 var coauthorCmd = &cobra.Command{
@@ -45,7 +46,13 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 	if coauthorTrailer != "" {
 		// --trailer mode: invoked by prepare-commit-msg git hook.
 		// args[0] (via --trailer flag value) is the commit message file path.
-		return appendCoauthorTrailer(coauthorTrailer, cfg.ModelID, suffix)
+		if err := appendCoauthorTrailer(coauthorTrailer, cfg.ModelID, suffix); err != nil {
+			return err
+		}
+		if repoRoot, rrErr := config.FindRepoRoot(cwd); rrErr == nil {
+			return appendTokensReport(coauthorTrailer, repoRoot)
+		}
+		return nil
 	}
 
 	// Default mode: set agent git identity and install the hook.
@@ -130,5 +137,33 @@ func appendCoauthorTrailer(msgFile, modelID, suffix string) error {
 		content += "\n"
 	}
 	content += trailer + "\n"
+	return os.WriteFile(msgFile, []byte(content), 0o644)
+}
+
+// appendTokensReport appends a Tokens: report line to the commit message file,
+// sourced from the current turn's telemetry snapshot. Silently omitted (not a
+// failure) when no telemetry data is available.
+func appendTokensReport(msgFile, repoRoot string) error {
+	snap, err := telemetry.Read(repoRoot)
+	if err != nil || snap == nil {
+		return nil
+	}
+
+	data, err := os.ReadFile(msgFile)
+	if err != nil {
+		return err
+	}
+	content := string(data)
+	if strings.Contains(content, "Tokens: ") {
+		return nil // idempotent
+	}
+
+	line := fmt.Sprintf("Tokens: input=%d output=%d cached=%d total=%d",
+		snap.InputTokens, snap.OutputTokens, snap.CachedTokens, snap.TotalTokens)
+
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += line + "\n"
 	return os.WriteFile(msgFile, []byte(content), 0o644)
 }

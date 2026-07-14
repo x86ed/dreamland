@@ -7,6 +7,8 @@ tags: [workflow, artifacts, experimental]
 
 Implement tasks from an OpenSpec change.
 
+**Routing**: `/opsx:apply` does not have one fixed target agent. It delegates to `janus`, which then routes the current task to either `nyx` (acceptance-test flow, for new externally-observable behavior with no covering test) or `morpheus` (direct-implementation flow, for mechanical/internal tasks or when a covering test already exists) — a per-task decision Janus makes, not a single fixed target.
+
 **Input**: Optionally specify a change name (e.g., `/opsx:apply add-auth`). If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
 
 **Steps**

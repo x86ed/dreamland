@@ -7,6 +7,8 @@ tags: [workflow, archive, experimental]
 
 Archive a completed change in the experimental workflow.
 
+**Routing**: `/opsx:archive` routes directly to the `baku` agent — its one deterministic target — rather than through Janus's routing decision.
+
 **Input**: Optionally specify a change name after `/opsx:archive` (e.g., `/opsx:archive add-auth`). If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
 
 **Steps**

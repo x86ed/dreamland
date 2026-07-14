@@ -27,6 +27,7 @@ var (
 	vbPatch    bool
 	vbBreaking bool
 	vbVersion  string
+	vbChange   string
 )
 
 func init() {
@@ -36,6 +37,7 @@ func init() {
 	versionBumpCmd.Flags().BoolVar(&vbPatch, "patch", false, "bump patch version (end-of-turn mode)")
 	versionBumpCmd.Flags().BoolVar(&vbBreaking, "breaking", false, "breaking change: bump major instead of minor")
 	versionBumpCmd.Flags().StringVar(&vbVersion, "version", "", "set explicit version (e.g. v1.2.3)")
+	versionBumpCmd.Flags().StringVar(&vbChange, "change", "", "change slug: bump minor once per OpenSpec change (independent of the branch marker)")
 }
 
 // branchBumpEntry is one entry in the .dreamland/branch-bumps JSON object.
@@ -90,6 +92,11 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 	if vbPatch {
 		// End-of-turn patch mode: skip branch marker.
 		return performBump(cmd, cfg, repoRoot, lastTag, "patch", vbVersion)
+	}
+
+	if vbChange != "" {
+		// Change-scoped minor mode: independent of, and skips, the branch marker.
+		return runChangeBump(cfg, repoRoot, lastTag)
 	}
 
 	// Session-start minor/major mode: check branch marker.
@@ -149,6 +156,33 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 	}
 
 	return nil
+}
+
+// runChangeBump bumps minor once per OpenSpec change slug, tracked in
+// .dreamland/change-bumps (same append-and-check-membership shape as branch-bumps).
+func runChangeBump(cfg *config.Config, repoRoot, lastTag string) error {
+	bumpsFile := filepath.Join(repoRoot, ".dreamland", "change-bumps")
+	bumps, err := readBranchBumps(bumpsFile)
+	if err != nil {
+		return err
+	}
+	if _, exists := bumps[vbChange]; exists {
+		return nil // already bumped for this change
+	}
+
+	if err := performBump(nil, cfg, repoRoot, lastTag, "minor", ""); err != nil {
+		return err
+	}
+
+	newTag, err := gitLastTag()
+	if err != nil {
+		newTag = lastTag
+	}
+	bumps[vbChange] = branchBumpEntry{
+		Version:       newTag,
+		InitializedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	return writeBranchBumps(bumpsFile, bumps)
 }
 
 func performBump(_ *cobra.Command, cfg *config.Config, _ string, lastTag, level, explicit string) error {

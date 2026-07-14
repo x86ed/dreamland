@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"dreamland/internal/config"
+	"dreamland/internal/telemetry"
 )
 
 func TestResolveAgentName_EnvVar(t *testing.T) {
@@ -174,6 +175,75 @@ func TestAppendCoauthorTrailer_EmptyModelID(t *testing.T) {
 	data, _ := os.ReadFile(f.Name())
 	if string(data) != original {
 		t.Errorf("file modified when model_id empty, got:\n%s", string(data))
+	}
+}
+
+func TestAppendTokensReport_Available(t *testing.T) {
+	root := t.TempDir()
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{
+		InputTokens: 100, OutputTokens: 50, CachedTokens: 10, TotalTokens: 150,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString("feat: add something\nCo-authored-by: claude-sonnet-4-6 <claude-sonnet-4-6@github.com>\n")
+	f.Close()
+
+	if err := appendTokensReport(f.Name(), root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(f.Name())
+	if !strings.Contains(string(data), "Tokens: input=100 output=50 cached=10 total=150") {
+		t.Errorf("Tokens line not appended, got:\n%s", string(data))
+	}
+}
+
+func TestAppendTokensReport_Unavailable(t *testing.T) {
+	root := t.TempDir() // no telemetry snapshot written
+
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := "feat: add something\n"
+	f.WriteString(original)
+	f.Close()
+
+	if err := appendTokensReport(f.Name(), root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(f.Name())
+	if string(data) != original {
+		t.Errorf("expected file unchanged when telemetry unavailable, got:\n%s", string(data))
+	}
+}
+
+func TestAppendTokensReport_NotDuplicated(t *testing.T) {
+	root := t.TempDir()
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{InputTokens: 1, TotalTokens: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := "feat: x\nTokens: input=1 output=0 cached=0 total=1\n"
+	f.WriteString(content)
+	f.Close()
+
+	if err := appendTokensReport(f.Name(), root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	data, _ := os.ReadFile(f.Name())
+	if strings.Count(string(data), "Tokens: ") != 1 {
+		t.Errorf("Tokens line duplicated, got:\n%s", string(data))
 	}
 }
 
