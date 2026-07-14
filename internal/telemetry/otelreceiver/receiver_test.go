@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -108,6 +109,43 @@ func TestHandler_JSONTraceExport_WritesSessionUsage(t *testing.T) {
 	}
 	if usage == nil || usage.InputTokens != 50 {
 		t.Fatalf("got %+v, want input=50", usage)
+	}
+}
+
+func TestHandler_LogsEveryRequest(t *testing.T) {
+	root := t.TempDir()
+	srv := httptest.NewServer(Handler(root))
+	defer srv.Close()
+
+	// A successful traces export.
+	req := sampleExportRequest("sess-log", 10, 5)
+	body, _ := proto.Marshal(req)
+	resp, err := http.Post(srv.URL+"/v1/traces", "application/x-protobuf", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// An unhandled path (e.g. Copilot exporting metrics/logs instead of traces).
+	resp2, err := http.Post(srv.URL+"/v1/metrics", "application/x-protobuf", bytes.NewReader([]byte("x")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+
+	data, err := os.ReadFile(filepath.Join(root, ".dreamland", "otel-receiver.log"))
+	if err != nil {
+		t.Fatalf("log file not written: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "/v1/traces") {
+		t.Errorf("log missing /v1/traces entry, got:\n%s", log)
+	}
+	if !strings.Contains(log, "sess-log") {
+		t.Errorf("log missing conversation.id, got:\n%s", log)
+	}
+	if !strings.Contains(log, "/v1/metrics") {
+		t.Errorf("log missing unhandled-path entry, got:\n%s", log)
 	}
 }
 

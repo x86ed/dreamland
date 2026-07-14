@@ -18,12 +18,17 @@ import (
 // (sessionId/transcriptPath — the GitHub Copilot CLI's native "agentStop" naming) and
 // snake_case (session_id/transcript_path, with hook_event_name — VS Code's "compatible"
 // naming, which is what the VS Code extension's .github/hooks/*.json hooks actually send).
-// Both are checked. Token usage is sourced from the local OTLP receiver's per-session
-// mailbox (see internal/telemetry/otelreceiver) keyed by session_id, since neither the
-// hook payload nor the transcript file expose usage data at all — confirmed empirically
-// by grepping a real, complete captured transcript for any token/usage field: none exist.
-// ParseTranscript is still attempted as a forward-compatible fallback in case that ever
-// changes, but is not expected to find anything today.
+// Both are checked.
+//
+// Token usage is sourced, in order, from:
+//  1. VS Code's own chat-session log (workspaceStorage/<hash>/chatSessions/<session_id>.jsonl)
+//     — the real, verified source: confirmed by parsing a live file and finding real
+//     non-zero promptTokens/completionTokens. Neither the hook payload, the transcript
+//     file, nor Copilot's OTel export (confirmed empirically: nothing ever arrives at a
+//     real running OTLP receiver in this environment) carry usage data.
+//  2. The local OTLP receiver's per-session mailbox (see internal/telemetry/otelreceiver),
+//     kept as a fallback in case the OTel export does start working in some environment.
+//  3. ParseTranscript, kept as a last-resort forward-compatible fallback.
 type CopilotCollector struct{}
 
 func (c *CopilotCollector) Collect(stdin io.Reader, cfg *config.Config) (*telemetry.SnapshotResult, error) {
@@ -38,13 +43,20 @@ func (c *CopilotCollector) Collect(stdin io.Reader, cfg *config.Config) (*teleme
 	transcriptPath, _ := firstStringField(raw, "transcript_path", "transcriptPath")
 	sessionID, _ := firstStringField(raw, "session_id", "sessionId")
 
-	tu, parseErr := telemetry.ParseTranscript(transcriptPath)
-	if parseErr != nil {
-		fmt.Fprintf(os.Stderr, "dreamland telemetry: transcript parse warning (copilot format undocumented): %v\n", parseErr)
+	var tu telemetry.TranscriptUsage
+	var sourceFound bool
+
+	if sessionID != "" {
+		if sessionFile, findErr := findChatSessionFile(sessionID); findErr == nil {
+			if promptTokens, completionTokens, parseErr := parseChatSessionTokens(sessionFile); parseErr == nil && (promptTokens > 0 || completionTokens > 0) {
+				tu.InputTokens = promptTokens
+				tu.OutputTokens = completionTokens
+				sourceFound = true
+			}
+		}
 	}
 
-	var otelUsed bool
-	if tu.InputTokens == 0 && tu.OutputTokens == 0 && tu.CachedTokens == 0 && cfg != nil && cfg.RepoRoot != "" {
+	if !sourceFound && cfg != nil && cfg.RepoRoot != "" {
 		if usage, oerr := otelreceiver.ReadSessionUsage(cfg.RepoRoot, sessionID); oerr == nil && usage != nil {
 			tu.InputTokens = usage.InputTokens
 			tu.OutputTokens = usage.OutputTokens
@@ -52,14 +64,25 @@ func (c *CopilotCollector) Collect(stdin io.Reader, cfg *config.Config) (*teleme
 			if usage.Model != "" {
 				tu.Model = usage.Model
 			}
-			otelUsed = true
+			sourceFound = true
 		}
 	}
 
-	// Neither the transcript nor the OTLP receiver mailbox had anything: capture the raw
-	// hook payload and a transcript sample so the real schema can be confirmed from live
-	// data instead of guessed from docs — see .dreamland/copilot-hook-debug.jsonl.
-	if !otelUsed && (parseErr != nil || (tu.InputTokens == 0 && tu.OutputTokens == 0 && tu.CachedTokens == 0)) {
+	var parseErr error
+	if !sourceFound {
+		tu, parseErr = telemetry.ParseTranscript(transcriptPath)
+		if parseErr != nil {
+			fmt.Fprintf(os.Stderr, "dreamland telemetry: transcript parse warning (copilot format undocumented): %v\n", parseErr)
+		}
+		if tu.InputTokens != 0 || tu.OutputTokens != 0 || tu.CachedTokens != 0 {
+			sourceFound = true
+		}
+	}
+
+	// None of the three sources had anything: capture the raw hook payload and a
+	// transcript sample so any new/changed schema can be confirmed from live data instead
+	// of guessed from docs — see .dreamland/copilot-hook-debug.jsonl.
+	if !sourceFound {
 		captureDebugPayload(cfg, data, transcriptPath, parseErr)
 	}
 

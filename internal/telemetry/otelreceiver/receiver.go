@@ -10,6 +10,7 @@ package otelreceiver
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -36,23 +37,32 @@ type SessionUsage struct {
 // Handler returns an http.Handler implementing the OTLP/HTTP trace-export endpoint
 // (POST /v1/traces) needed to receive GitHub Copilot's exported spans. Every request,
 // regardless of whether it yields usable token data, is answered with a valid empty
-// OTLP export response so the exporter never treats the send as failed.
+// OTLP export response so the exporter never treats the send as failed. Every request to
+// any path is logged to .dreamland/otel-receiver.log — since the receiver normally runs
+// detached with its own stdout/stderr discarded, this is the only way to confirm whether
+// an exporter is reaching it at all, and on which path, without guessing.
 func Handler(repoRoot string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/traces", func(w http.ResponseWriter, r *http.Request) {
 		handleTraces(repoRoot, w, r)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		logRequest(repoRoot, r, "unhandled path", 0, 0)
+		w.WriteHeader(http.StatusOK)
 	})
 	return mux
 }
 
 func handleTraces(repoRoot string, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		logRequest(repoRoot, r, "method not allowed", 0, 0)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		logRequest(repoRoot, r, "read body error: "+err.Error(), 0, 0)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -62,23 +72,34 @@ func handleTraces(repoRoot string, w http.ResponseWriter, r *http.Request) {
 	var req coltracepb.ExportTraceServiceRequest
 	if isJSON {
 		if err := protojsonUnmarshal(body, &req); err != nil {
+			logRequest(repoRoot, r, "json decode error: "+err.Error(), len(body), 0)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	} else {
 		if err := proto.Unmarshal(body, &req); err != nil {
+			logRequest(repoRoot, r, "protobuf decode error: "+err.Error(), len(body), 0)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
 
+	spanCount := 0
+	var spanNames []string
+	var conversationIDs []string
 	for _, rs := range req.ResourceSpans {
 		for _, ss := range rs.ScopeSpans {
 			for _, span := range ss.Spans {
+				spanCount++
+				spanNames = append(spanNames, span.GetName())
+				if cid, ok := attrMap(span.GetAttributes())["gen_ai.conversation.id"].(string); ok && cid != "" {
+					conversationIDs = append(conversationIDs, cid)
+				}
 				processSpan(repoRoot, span)
 			}
 		}
 	}
+	logRequest(repoRoot, r, fmt.Sprintf("ok spans=%v conversation.ids=%v", spanNames, conversationIDs), len(body), spanCount)
 
 	resp := &coltracepb.ExportTraceServiceResponse{}
 	if isJSON {
@@ -90,6 +111,22 @@ func handleTraces(repoRoot string, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-protobuf")
 	data, _ := proto.Marshal(resp)
 	w.Write(data)
+}
+
+// logRequest appends a one-line record of every request the receiver sees, regardless of
+// outcome, to .dreamland/otel-receiver.log. Best-effort: failures are silent.
+func logRequest(repoRoot string, r *http.Request, note string, bodyLen, spanCount int) {
+	path := filepath.Join(repoRoot, ".dreamland", "otel-receiver.log")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s %s %s content-type=%q body_bytes=%d spans=%d note=%s\n",
+		time.Now().UTC().Format(time.RFC3339), r.Method, r.URL.Path, r.Header.Get("Content-Type"), bodyLen, spanCount, note)
 }
 
 func processSpan(repoRoot string, span *tracepb.Span) {

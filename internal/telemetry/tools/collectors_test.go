@@ -241,6 +241,48 @@ func TestCopilotCollector_VSCodeSnakeCasePayload(t *testing.T) {
 	}
 }
 
+func TestCopilotCollector_PrefersChatSessionFileOverOtel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	roots := vscodeWorkspaceStorageRoots()
+	if len(roots) == 0 {
+		t.Skip("no workspace storage roots resolved for this OS")
+	}
+	sessionDir := filepath.Join(roots[0], "workspace-hash", "chatSessions")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(sessionDir, "real-session.jsonl")
+	fixture := `{"kind":1,"k":["requests",0,"promptTokens"],"v":6027}` + "\n" +
+		`{"kind":1,"k":["requests",0,"completionTokens"],"v":610}` + "\n"
+	if err := os.WriteFile(sessionFile, []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "gpt-4o", RepoRoot: root}
+
+	// Also seed an OTEL mailbox with different numbers, to prove the chat-session file wins.
+	sessionsDir := filepath.Join(root, ".dreamland", "otel-sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	otelUsage := `{"model":"gpt-4o","input_tokens":1,"output_tokens":1,"cached_tokens":0,"captured_at":"2026-07-14T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(sessionsDir, "real-session.json"), []byte(otelUsage), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdin := strings.NewReader(`{"hook_event_name":"SubagentStop","session_id":"real-session"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens != 6027 || res.OutputTokens != 610 {
+		t.Errorf("got %+v, want tokens from the chat-session file (6027/610), not the otel mailbox", res)
+	}
+}
+
 func TestCopilotCollector_UsesOtelSessionMailbox(t *testing.T) {
 	root := t.TempDir()
 	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
