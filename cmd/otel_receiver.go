@@ -23,6 +23,10 @@ var otelReceiverCmd = &cobra.Command{
 
 var otelReceiverForeground bool
 
+// osExecutable is a seam over os.Executable for tests: spawning the real test binary as
+// the detached child would recursively re-run the whole test suite.
+var osExecutable = os.Executable
+
 func init() {
 	rootCmd.AddCommand(otelReceiverCmd)
 	otelReceiverCmd.Flags().BoolVar(&otelReceiverForeground, "foreground", false,
@@ -63,7 +67,7 @@ func runOtelReceiver(_ *cobra.Command, _ []string) error {
 	// Spawn a detached child running the real server loop, then return immediately —
 	// this command is invoked from a SessionStart hook, which must not block the session
 	// waiting for a long-running server.
-	exe, err := os.Executable()
+	exe, err := osExecutable()
 	if err != nil {
 		exe = "dreamland"
 	}

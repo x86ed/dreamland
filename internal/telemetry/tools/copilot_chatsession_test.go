@@ -89,6 +89,19 @@ func TestParseChatSessionTokens_FileNotFound(t *testing.T) {
 	}
 }
 
+func TestDecodeJSONInt_InvalidValue(t *testing.T) {
+	if _, ok := decodeJSONInt([]byte(`"not a number"`)); ok {
+		t.Error("expected ok=false for a non-numeric JSON value")
+	}
+}
+
+func TestDecodeJSONInt_ValidValue(t *testing.T) {
+	n, ok := decodeJSONInt([]byte(`42`))
+	if !ok || n != 42 {
+		t.Errorf("got (%d, %v), want (42, true)", n, ok)
+	}
+}
+
 func TestFindChatSessionFile_EmptySessionID(t *testing.T) {
 	_, err := findChatSessionFile("")
 	if err == nil {
@@ -119,6 +132,31 @@ func TestFindChatSessionFile_Found(t *testing.T) {
 	}
 	if got != sessionFile {
 		t.Errorf("got %q, want %q", got, sessionFile)
+	}
+}
+
+func TestFindChatSessionFile_BadGlobPatternSkipped(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	roots := vscodeWorkspaceStorageRoots()
+	if len(roots) == 0 {
+		t.Skip("no workspace storage roots resolved for this OS")
+	}
+	sessionDir := filepath.Join(roots[0], "some-workspace-hash", "chatSessions")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// filepath.Glob only surfaces ErrBadPattern once it actually matches entries
+	// against the malformed pattern, so a directory entry must exist here.
+	if err := os.WriteFile(filepath.Join(sessionDir, "dummy.jsonl"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// An unterminated "[" makes the glob pattern invalid (filepath.ErrBadPattern),
+	// exercising the continue-on-error branch across every storage root.
+	if _, err := findChatSessionFile("["); err == nil {
+		t.Fatal("expected error for a session ID producing an invalid glob pattern")
 	}
 }
 

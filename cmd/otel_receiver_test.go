@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -29,6 +30,69 @@ func TestOtelReceiverAddr_CustomPortPreserved(t *testing.T) {
 func TestOtelReceiverAddr_InvalidURLFallsBack(t *testing.T) {
 	if got := otelReceiverAddr("://not a url"); got != "localhost:4318" {
 		t.Errorf("got %q, want localhost:4318 fallback", got)
+	}
+}
+
+func TestRunOtelReceiver_GetwdError(t *testing.T) {
+	orig := osGetwd
+	osGetwd = func() (string, error) { return "", errors.New("getwd failed") }
+	t.Cleanup(func() { osGetwd = orig })
+
+	if err := runOtelReceiver(nil, nil); err == nil {
+		t.Fatal("expected error when osGetwd fails")
+	}
+}
+
+func TestRunOtelReceiver_NotInGitRepo(t *testing.T) {
+	root := t.TempDir()
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	if err := runOtelReceiver(nil, nil); err == nil {
+		t.Fatal("expected error when cwd is not inside a git repository")
+	}
+}
+
+func TestRunOtelReceiver_SpawnsDetachedChildWhenNotListening(t *testing.T) {
+	root := makeCoauthorRepo(t, config.Config{
+		CodingTool:   "GitHub Copilot",
+		OtelEndpoint: "http://127.0.0.1:0",
+	})
+	_ = root
+
+	origForeground := otelReceiverForeground
+	otelReceiverForeground = false
+	t.Cleanup(func() { otelReceiverForeground = origForeground })
+
+	origExe := osExecutable
+	osExecutable = func() (string, error) { return "/bin/echo", nil }
+	t.Cleanup(func() { osExecutable = origExe })
+
+	if err := runOtelReceiver(nil, nil); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunOtelReceiver_ExecutableLookupFailsFallsBackToDreamland(t *testing.T) {
+	root := makeCoauthorRepo(t, config.Config{
+		CodingTool:   "GitHub Copilot",
+		OtelEndpoint: "http://127.0.0.1:0",
+	})
+	_ = root
+
+	origForeground := otelReceiverForeground
+	otelReceiverForeground = false
+	t.Cleanup(func() { otelReceiverForeground = origForeground })
+
+	origExe := osExecutable
+	osExecutable = func() (string, error) { return "", errors.New("no executable") }
+	t.Cleanup(func() { osExecutable = origExe })
+
+	// falls back to exe = "dreamland", which won't resolve on PATH in the test
+	// environment, so Start() fails — runOtelReceiver must swallow that error.
+	if err := runOtelReceiver(nil, nil); err != nil {
+		t.Errorf("expected best-effort nil error even when child fails to start, got: %v", err)
 	}
 }
 

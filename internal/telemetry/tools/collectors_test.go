@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -338,6 +339,74 @@ func TestCopilotCollector_CapturesDebugPayloadWhenZero(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "transcript_read_error") {
 		t.Errorf("debug capture missing transcript_read_error for nonexistent file, got: %s", data)
+	}
+}
+
+func TestCopilotCollector_DebugCaptureIncludesTranscriptSample(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+	path := writeTempTranscript(t, "not a usage record")
+
+	stdin := strings.NewReader(`{"transcript_path":"` + filepath.ToSlash(path) + `"}`)
+	res, err := (&CopilotCollector{}).Collect(stdin, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.InputTokens != 0 {
+		t.Fatalf("expected zero tokens, got %d", res.InputTokens)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl"))
+	if err != nil {
+		t.Fatalf("expected debug capture file, got error: %v", err)
+	}
+	if !strings.Contains(string(data), "transcript_sample") {
+		t.Errorf("debug capture missing transcript_sample, got: %s", data)
+	}
+	if strings.Contains(string(data), "transcript_read_error") {
+		t.Errorf("did not expect transcript_read_error for a readable file, got: %s", data)
+	}
+}
+
+func TestCopilotCollector_DebugCaptureTruncatesLargeTranscript(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+	path := writeTempTranscript(t, strings.Repeat("x", 5000))
+
+	stdin := strings.NewReader(`{"transcript_path":"` + filepath.ToSlash(path) + `"}`)
+	if _, err := (&CopilotCollector{}).Collect(stdin, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl"))
+	if err != nil {
+		t.Fatalf("expected debug capture file, got error: %v", err)
+	}
+	var entry struct {
+		TranscriptSample string `json:"transcript_sample"`
+	}
+	if err := json.Unmarshal(data, &entry); err != nil {
+		t.Fatalf("failed to parse debug capture entry: %v", err)
+	}
+	if len(entry.TranscriptSample) != 4000 {
+		t.Errorf("transcript_sample length = %d, want 4000 (truncated)", len(entry.TranscriptSample))
+	}
+}
+
+func TestCopilotCollector_DebugCaptureMkdirFails(t *testing.T) {
+	root := t.TempDir()
+	// Create a regular file where the ".dreamland" directory needs to go, so
+	// MkdirAll fails inside captureDebugPayload.
+	blocker := filepath.Join(root, ".dreamland")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
+
+	stdin := strings.NewReader(`{"session_id":"s1","transcript_path":"/nonexistent/path.jsonl"}`)
+	// Must not panic; captureDebugPayload is best-effort and swallows the error.
+	if _, err := (&CopilotCollector{}).Collect(stdin, cfg); err != nil {
+		t.Fatal(err)
 	}
 }
 
