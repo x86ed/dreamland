@@ -1,4 +1,6 @@
-## ADDED Requirements
+# router-slash-commands
+
+## Requirements
 
 ### Requirement: A generic slash command routes directly to Janus
 

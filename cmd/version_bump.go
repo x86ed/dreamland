@@ -17,7 +17,7 @@ import (
 
 var versionBumpCmd = &cobra.Command{
 	Use:   "version-bump",
-	Short: "Bump the project version (session-start: minor/major; end-of-turn: --patch)",
+	Short: "Bump the project version (session-start: minor/major; end-of-turn: --patch; per-turn agent-scoped: --minor --if-agent)",
 	RunE:  runVersionBump,
 }
 
@@ -28,6 +28,7 @@ var (
 	vbBreaking bool
 	vbVersion  string
 	vbChange   string
+	vbIfAgent  string
 )
 
 func init() {
@@ -38,6 +39,7 @@ func init() {
 	versionBumpCmd.Flags().BoolVar(&vbBreaking, "breaking", false, "breaking change: bump major instead of minor")
 	versionBumpCmd.Flags().StringVar(&vbVersion, "version", "", "set explicit version (e.g. v1.2.3)")
 	versionBumpCmd.Flags().StringVar(&vbChange, "change", "", "change slug: bump minor once per OpenSpec change (independent of the branch marker)")
+	versionBumpCmd.Flags().StringVar(&vbIfAgent, "if-agent", "", "only run if the hook payload's agent_type matches this name (silent no-op otherwise)")
 }
 
 // branchBumpEntry is one entry in the .dreamland/branch-bumps JSON object.
@@ -59,6 +61,10 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 	}
 	if explicit > 1 {
 		return errors.New("at most one of --major, --minor, --patch, --version may be specified")
+	}
+
+	if vbIfAgent != "" && agentNameFromHookPayload() != vbIfAgent {
+		return nil // hook fired for a different agent — silent no-op
 	}
 
 	cwd, err := osGetwd()
@@ -92,6 +98,12 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 	if vbPatch {
 		// End-of-turn patch mode: skip branch marker.
 		return performBump(cmd, cfg, repoRoot, lastTag, "patch", vbVersion)
+	}
+
+	if vbMinor && vbIfAgent != "" {
+		// Per-turn agent-scoped minor bump (e.g. Janus on every routing decision):
+		// unconditional like --patch, no branch-marker dedup.
+		return performBump(cmd, cfg, repoRoot, lastTag, "minor", vbVersion)
 	}
 
 	if vbChange != "" {

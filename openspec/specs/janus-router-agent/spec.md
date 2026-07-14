@@ -1,4 +1,6 @@
-## ADDED Requirements
+# janus-router-agent
+
+## Requirements
 
 ### Requirement: Janus is installed as the router agent, replacing Hypnos in that role
 

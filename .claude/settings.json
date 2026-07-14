@@ -36,7 +36,10 @@
       "Bash(/tmp/dreamland-bin init *)",
       "Bash(echo \"vet exit: $?\")",
       "Bash(go list *)",
-      "Bash(gofmt -l .)"
+      "Bash(gofmt -l .)",
+      "Bash(gofmt -l *)",
+      "Bash(git status *)",
+      "Bash(git checkout *)"
     ]
   },
   "hooks": {

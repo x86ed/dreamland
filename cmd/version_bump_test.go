@@ -548,6 +548,89 @@ func TestWriteBranchBumps_WriteFileFails(t *testing.T) {
 	}
 }
 
+func TestRunVersionBump_IfAgentMatch_BumpsMinorEveryCall(t *testing.T) {
+	root := makeVersionBumpRepo(t, config.Config{})
+
+	// Pre-populate branch-bumps so a session-start minor bump would normally be skipped —
+	// the --if-agent minor mode must ignore this marker (unconditional, like --patch).
+	bumpsFile := filepath.Join(root, ".dreamland", "branch-bumps")
+	if err := os.MkdirAll(filepath.Dir(bumpsFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(map[string]branchBumpEntry{"my-branch": {Version: "v1.0.0"}})
+	os.WriteFile(bumpsFile, data, 0o644)
+
+	origFlags := [5]interface{}{vbMajor, vbMinor, vbPatch, vbVersion, vbIfAgent}
+	vbMajor, vbMinor, vbPatch, vbVersion, vbIfAgent = false, true, false, "", "janus"
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion, vbIfAgent =
+			origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string), origFlags[4].(string)
+	})
+
+	var tagCount int
+	var lastTagged string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.Contains(joined, "describe"):
+			if lastTagged != "" {
+				return lastTagged + "\n", nil
+			}
+			return "v1.0.0\n", nil
+		case strings.Contains(joined, "diff"):
+			return "M main.go\n", nil
+		case len(args) > 0 && args[0] == "tag":
+			tagCount++
+			lastTagged = args[2]
+		}
+		return "", nil
+	})
+
+	withPipedStdin(t, `{"hook_event_name":"SubagentStop","agent_type":"janus"}`)
+	if err := runVersionBump(versionBumpCmd, nil); err != nil {
+		t.Fatalf("runVersionBump: %v", err)
+	}
+	if tagCount != 1 || lastTagged != "v1.1.0" {
+		t.Fatalf("expected one minor bump to v1.1.0, got count=%d last=%q", tagCount, lastTagged)
+	}
+
+	// A second call (still agent_type=janus) bumps again — no per-branch dedup.
+	withPipedStdin(t, `{"hook_event_name":"SubagentStop","agent_type":"janus"}`)
+	if err := runVersionBump(versionBumpCmd, nil); err != nil {
+		t.Fatalf("runVersionBump (2nd call): %v", err)
+	}
+	if tagCount != 2 || lastTagged != "v1.2.0" {
+		t.Fatalf("expected a second minor bump to v1.2.0, got count=%d last=%q", tagCount, lastTagged)
+	}
+}
+
+func TestRunVersionBump_IfAgentMismatch_SilentNoOp(t *testing.T) {
+	makeVersionBumpRepo(t, config.Config{})
+
+	origFlags := [5]interface{}{vbMajor, vbMinor, vbPatch, vbVersion, vbIfAgent}
+	vbMajor, vbMinor, vbPatch, vbVersion, vbIfAgent = false, true, false, "", "janus"
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion, vbIfAgent =
+			origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string), origFlags[4].(string)
+	})
+
+	var tagCalled bool
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "tag" {
+			tagCalled = true
+		}
+		return "", nil
+	})
+
+	withPipedStdin(t, `{"hook_event_name":"SubagentStop","agent_type":"morpheus"}`)
+	if err := runVersionBump(versionBumpCmd, nil); err != nil {
+		t.Fatalf("expected silent no-op, got error: %v", err)
+	}
+	if tagCalled {
+		t.Error("expected no tag created when agent_type doesn't match --if-agent")
+	}
+}
+
 func TestVersionBumpFlags_AtMostOne(t *testing.T) {
 	// Save and restore global flag state.
 	origMajor, origMinor, origPatch, origVersion := vbMajor, vbMinor, vbPatch, vbVersion
