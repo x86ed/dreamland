@@ -503,6 +503,51 @@ func TestRunVersionBump_ChangeScoped_NoDoubleBump(t *testing.T) {
 	}
 }
 
+func TestRunChangeBump_PerformBumpError(t *testing.T) {
+	makeVersionBumpRepo(t, config.Config{})
+
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.Contains(joined, "describe"):
+			return "v1.0.0\n", nil
+		case strings.Contains(joined, "diff"):
+			return "M main.go\n", nil
+		case len(args) > 0 && args[0] == "tag":
+			return "", errors.New("git tag failed")
+		}
+		return "", nil
+	})
+
+	origFlags := [5]interface{}{vbMajor, vbMinor, vbPatch, vbVersion, vbChange}
+	vbMajor, vbMinor, vbPatch, vbVersion, vbChange = false, false, false, "", "add-billing"
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion, vbChange =
+			origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string), origFlags[4].(string)
+	})
+
+	if err := runVersionBump(versionBumpCmd, nil); err == nil {
+		t.Fatal("expected error when the underlying git tag command fails")
+	}
+}
+
+func TestWriteBranchBumps_WriteFileFails(t *testing.T) {
+	root := t.TempDir()
+	bumpsFile := filepath.Join(root, ".dreamland", "change-bumps")
+	if err := os.MkdirAll(filepath.Dir(bumpsFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Make the ".tmp" write target a directory so os.WriteFile fails.
+	if err := os.MkdirAll(bumpsFile+".tmp", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := writeBranchBumps(bumpsFile, map[string]branchBumpEntry{"x": {Version: "v1.0.0"}})
+	if err == nil {
+		t.Fatal("expected error when the tmp write target is a directory")
+	}
+}
+
 func TestVersionBumpFlags_AtMostOne(t *testing.T) {
 	// Save and restore global flag state.
 	origMajor, origMinor, origPatch, origVersion := vbMajor, vbMinor, vbPatch, vbVersion
