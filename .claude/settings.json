@@ -44,7 +44,8 @@
       "Bash(/tmp/dreamland-readme-check --help)",
       "Bash(/tmp/dreamland-readme-check init *)",
       "Bash(/tmp/dreamland-readme-check telemetry *)",
-      "Bash(rm -f /tmp/dreamland-readme-check)"
+      "Bash(rm -f /tmp/dreamland-readme-check)",
+      "Bash(gofmt -l internal/scaffold/*.go)"
     ]
   },
   "hooks": {
