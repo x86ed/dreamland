@@ -14,6 +14,11 @@ The scaffold installer SHALL install a `/drmlnd:route` slash command (or platfor
 - **WHEN** a user invokes `/drmlnd:route` with a request that has no OpenSpec change/task context (e.g. an ad hoc coding question)
 - **THEN** Janus, per the `janus-router-agent` capability, delegates to `iktomi`
 
+#### Scenario: Cursor /drmlnd-route command installed
+
+- **WHEN** the selected coding tool is "Cursor" and `dreamland init` completes successfully
+- **THEN** `.cursor/commands/route.md` exists with frontmatter `name: drmlnd-route`, so it is invoked as `/drmlnd-route` — Cursor's command naming is flat kebab-case and does not support the colon separator Claude Code uses
+
 ### Requirement: Each non-router agent has an explicit, named direct-invoke slash command
 
 The scaffold installer SHALL install one slash command per non-router agent — `/drmlnd:phantasos`, `/drmlnd:nyx`, `/drmlnd:morpheus`, `/drmlnd:phobetor`, `/drmlnd:baku`, `/drmlnd:iktomi`, `/drmlnd:zhougong`, `/drmlnd:hypnos`, `/drmlnd:mengpo` (or platform equivalents) — on every platform that supports user-invocable commands. Each command invokes Janus with an explicit instruction to route directly to the named agent, overriding Janus's own judgment about which agent fits the request. Unlike `/drmlnd:route`, these commands do not ask Janus to decide; they force a specific destination while still going through Janus, so the identity/telemetry/hand-off machinery (`dreamland coauthor`, `dreamland telemetry write`) applies exactly as it does for every other delegation.
@@ -36,9 +41,14 @@ This gives three tiers of entry point: the `/opsx:*` commands (OpenSpec-lifecycl
 - **WHEN** the selected coding tool is "Claude Code" and `dreamland init` completes successfully
 - **THEN** `.claude/commands/drmlnd/phantasos.md`, `.claude/commands/drmlnd/nyx.md`, `.claude/commands/drmlnd/morpheus.md`, `.claude/commands/drmlnd/phobetor.md`, `.claude/commands/drmlnd/baku.md`, `.claude/commands/drmlnd/iktomi.md`, `.claude/commands/drmlnd/zhougong.md`, `.claude/commands/drmlnd/hypnos.md`, and `.claude/commands/drmlnd/mengpo.md` all exist, each instructing the invoking session to delegate to `janus` with an explicit "route to `<agent>`" instruction
 
+#### Scenario: All nine per-agent commands installed on Cursor with hyphenated names
+
+- **WHEN** the selected coding tool is "Cursor" and `dreamland init` completes successfully
+- **THEN** `.cursor/commands/phantasos.md`, `.cursor/commands/nyx.md`, `.cursor/commands/morpheus.md`, `.cursor/commands/phobetor.md`, `.cursor/commands/baku.md`, `.cursor/commands/iktomi.md`, `.cursor/commands/zhougong.md`, `.cursor/commands/hypnos.md`, and `.cursor/commands/mengpo.md` all exist, each with frontmatter `name: drmlnd-<agent>` so it is invoked as `/drmlnd-<agent>` (e.g. `/drmlnd-phantasos`)
+
 ### Requirement: No unprefixed dreamland command artifacts remain after install
 
-`dreamland init` SHALL NOT leave any unprefixed `route`/per-agent command file installed alongside its `drmlnd:`-prefixed replacement, on any supported platform. If a prior scaffold run left unprefixed command files in place (e.g. `.claude/commands/route.md`, `.claude/commands/phantasos.md`), a subsequent `dreamland init` run SHALL remove them. `/opsx:*` command files are not affected by this requirement — they are not dreamland-specific and keep their existing names and locations.
+`dreamland init` SHALL NOT leave any unprefixed `route`/per-agent command installed with its old identifier alongside the `drmlnd`-prefixed replacement, on any supported platform, using whatever separator that platform's naming model supports (`drmlnd:` colon-namespace for Claude Code, `drmlnd-` hyphen prefix for Cursor). If a prior scaffold run left unprefixed command files/identifiers in place (e.g. `.claude/commands/route.md`, or a Cursor command file whose `name:` frontmatter is still `phantasos` instead of `drmlnd-phantasos`), a subsequent `dreamland init` run SHALL remove/replace them. `/opsx:*` command files are not affected by this requirement — they are not dreamland-specific and keep their existing names and locations.
 
 #### Scenario: Re-running init on a repo with stale unprefixed commands cleans them up
 
@@ -46,3 +56,8 @@ This gives three tiers of entry point: the `/opsx:*` commands (OpenSpec-lifecycl
 - **THEN** the unprefixed files are removed
 - **AND** only the `drmlnd:`-prefixed equivalents remain
 - **AND** `.claude/commands/opsx/*.md` is left untouched
+
+#### Scenario: Re-running init on Cursor replaces old identifiers, not just old filenames
+
+- **WHEN** `.cursor/commands/phantasos.md` exists from a prior version (filename `phantasos.md`, no `name:` frontmatter or `name: phantasos`) and the user runs `dreamland init` again with "Cursor" selected
+- **THEN** the file's content is replaced so its frontmatter reads `name: drmlnd-phantasos`, so `/phantasos` no longer resolves and `/drmlnd-phantasos` does

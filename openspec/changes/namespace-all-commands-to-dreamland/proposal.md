@@ -4,9 +4,10 @@ Every dreamland-installed agent-routing slash command (`/route`, `/phantasos`, `
 
 ## What Changes
 
-- **BREAKING**: Rename dreamland's own agent-routing slash commands to carry a `drmlnd:` prefix, on every platform `dreamland init` supports (Claude Code, Cursor):
-  - Per-agent commands: `/phantasos` → `/drmlnd:phantasos` (and so on for `nyx`, `morpheus`, `phobetor`, `baku`, `iktomi`, `zhougong`, `hypnos`, `mengpo`)
-  - Router command: `/route` → `/drmlnd:route`
+- **BREAKING**: Rename dreamland's own agent-routing slash commands to carry a `drmlnd` prefix, on every platform `dreamland init` supports a real command mechanism for (Claude Code, Cursor). The separator is platform-native, not a literal requirement — Claude Code supports colon namespacing, Cursor's naming model is flat kebab-case only:
+  - Claude Code: `/phantasos` → `/drmlnd:phantasos` (and so on for `nyx`, `morpheus`, `phobetor`, `baku`, `iktomi`, `zhougong`, `hypnos`, `mengpo`); `/route` → `/drmlnd:route`
+  - Cursor: `/phantasos` → `/drmlnd-phantasos` (hyphen, same agent list); `/route` → `/drmlnd-route`, set via each command file's frontmatter `name:` field
+  - Codex CLI, GitHub Copilot, Kiro, and Antigravity have no real slash-command mechanism today and don't reference these command names as invocation strings — nothing to rename there
 - **Out of scope, explicitly**: `/opsx:propose`, `/opsx:explore`, `/opsx:apply`, `/opsx:archive` are OpenSpec-workflow commands, not dreamland-specific — they keep their current names. VSCode-level settings/commands (e.g. `chat.useCustomAgentHooks`) are not slash commands dreamland owns and are not touched either.
 - Update Janus's routing table and every renamed command's own definition file so their documented names match the new prefixed names.
 - Remove stale unprefixed per-agent/`route` command artifacts left behind by prior scaffolds so `dreamland init` doesn't leave both old and new names installed side by side.
@@ -17,6 +18,7 @@ Every dreamland-installed agent-routing slash command (`/route`, `/phantasos`, `
 ## Capabilities
 
 ### New Capabilities
+
 (none)
 
 ### Modified Capabilities
