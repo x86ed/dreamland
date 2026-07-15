@@ -1,27 +1,4 @@
-# agent-lifecycle-management
-
-## Requirements
-
-### Requirement: Zhou Gong generates agent-performance reports from git history and telemetry
-
-`zhougong`'s instructions SHALL direct it to build a report from data already produced by this project's lifecycle hooks — it introduces no new CLI commands or data sources:
-
-- **Git history**: `git log`, filtered/grouped by author (`git config user.name`, which `dreamland coauthor` sets to the acting agent's name per handoff — see the `dev-workflow-hooks` capability), to derive per-agent commit counts and time-between-commits.
-- **Token burn**: the `Tokens: input=<n> output=<n> cached=<n> total=<n>` line `dreamland coauthor --trailer` appends to commit messages, aggregated per agent.
-- **Turn/handoff timing**: `.dreamland/transition.log`, appended to by `dreamland transition-log` on every turn.
-
-The report SHALL be written as a new markdown file under `.dreamland/reports/` (e.g. `.dreamland/reports/<YYYY-MM-DD>-agent-report.md`) and SHALL include, at minimum: a per-agent breakdown of commit count and aggregate token totals, and a narrative section of tuning suggestions (e.g. an agent whose commits show disproportionate token burn relative to commit count, or unusually long time-between-handoffs).
-
-#### Scenario: Report includes a per-agent breakdown
-
-- **WHEN** `zhougong` generates a report
-- **THEN** the report file lists, for every agent that has authored at least one commit, its commit count and aggregate token totals parsed from `Tokens:` trailers
-
-#### Scenario: Report is written as a new file, not an edit to an existing one
-
-- **WHEN** `zhougong` finishes generating a report
-- **THEN** a new file is created under `.dreamland/reports/`
-- **AND** no existing file is modified (`zhougong` has no `Edit` tool — see the `agent-scaffolding` capability)
+## MODIFIED Requirements
 
 ### Requirement: Zhou Gong's report may recommend authoring a new agent
 

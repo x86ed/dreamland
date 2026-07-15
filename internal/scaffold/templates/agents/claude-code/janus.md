@@ -12,12 +12,11 @@ Check `openspec status` before routing.
 
 Routing table:
 
-- `phantasos` — draft/update proposal, design, or specs (`/opsx:propose`, `/opsx:explore`; legacy `openspec-propose`/`openspec-explore`)
-- `nyx`/`morpheus` — work a task (`/opsx:apply`; legacy `openspec-apply-change`). Per task: new behavior with no covering test → `nyx` first, then `morpheus`. Mechanical/internal, or test already exists → `morpheus` directly.
+- `phantasos` — draft/update proposal, design, or specs (`/opsx:propose`, `/opsx:explore`; legacy `openspec-propose`/`openspec-explore`), including specs for creating or retiring an agent
+- `nyx`/`morpheus` — work a code task (`/opsx:apply`; legacy `openspec-apply-change`). Per task: new behavior with no covering test → `nyx` first, then `morpheus`. Mechanical/internal, or test already exists → `morpheus` directly.
 - `iktomi` — no OpenSpec context at all (no proposal, task list, spec scenario, or roster-maintenance intent). Mentioning "openspec" alone doesn't count — a request that clearly maps to draft/apply/close still goes to its specialist.
-- `zhougong` — agent performance, token usage, tuning questions
-- `hypnos` — author a new agent (direct ask, or following a `zhougong` recommendation)
-- `mengpo` — archive/delete an unneeded agent
+- `zhougong` — agent performance, token usage, tuning questions; hands off to `phantasos` when a report recommends a new agent
+- `hypnos`/`mengpo` — work an agent-roster task from a `phantasos`-drafted change (`/opsx:apply`, same mechanism as `nyx`/`morpheus`): `hypnos` when the task creates a new agent, `mengpo` when it retires one
 - `baku` — change is done, ready to close (`/opsx:archive`; legacy `openspec-archive-change`)
 
 Downstream of your entry dispatch, agents hand off directly to each other, never back through you: `nyx`→`morpheus`→`phobetor`→(`baku` on pass / `morpheus` on impl bug / `phantasos` on spec defect). You re-enter only for:

@@ -43,7 +43,7 @@ Janus's instruction body SHALL include an explicit routing table stating which r
 - **Direct-implementation flow**: Janus dispatches to `morpheus`, which then hands off directly (no further Janus involvement) through `phobetor` to `baku`.
 - **Acceptance-test flow**: Janus dispatches to `nyx`, which then hands off directly through `morpheus` and `phobetor` to `baku`.
 
-Both flows converge at `phobetor` (validation) and `baku` (finalization); they differ only in whether `nyx` writes an acceptance test before `morpheus` implements — and only in which agent Janus's entry dispatch targets, since everything downstream of that entry point is a direct hand-off. For requests that don't fit the OpenSpec-driven flow at all (no proposal, no task list — free-form coding requests), the table SHALL name `iktomi` as the catch-all target. For requests about agent performance, usage analytics, authoring a new agent, or retiring an unused one, the table SHALL name `zhougong` (analytics/reports), `hypnos` (agent authoring), and `mengpo` (agent archival/deletion) respectively — these three are agent-roster maintenance requests, not implementation work, and don't participate in either implementation flow.
+Both flows converge at `phobetor` (validation) and `baku` (finalization); they differ only in whether `nyx` writes an acceptance test before `morpheus` implements — and only in which agent Janus's entry dispatch targets, since everything downstream of that entry point is a direct hand-off. For requests that don't fit the OpenSpec-driven flow at all (no proposal, no task list — free-form coding requests), the table SHALL name `iktomi` as the catch-all target. For requests about agent performance or usage analytics, the table SHALL name `zhougong`. For requests to author a new agent or retire one, the table SHALL name `phantasos` as the entry dispatch — the same drafting agent used for every other change — since agent-roster changes are drafted (`proposal.md`/`design.md`/`tasks.md`) before any agent file is created or removed; `hypnos` and `mengpo` are then dispatched as `/opsx:apply` task implementers for that drafted change, the same way `nyx`/`morpheus` are dispatched for code tasks (see the "Janus dispatches agent-roster tasks to Hypnos or Meng Po via /opsx:apply" requirement below).
 
 The routing table entry for each agent SHALL additionally enumerate every current and historical command or skill spelling that resolves to that agent, including the legacy `openspec-propose`, `openspec-explore`, `openspec-apply-change`, and `openspec-archive-change` skill names alongside their current `/opsx:propose`, `/opsx:explore`, `/opsx:apply`, and `/opsx:archive` equivalents, so routing does not depend solely on free-text judgment of an unlabeled request.
 
@@ -54,7 +54,7 @@ The routing table entry for each agent SHALL additionally enumerate every curren
 - **AND** states that Janus checks `openspec status` (or the platform's equivalent) before making a routing decision on an ambiguous request
 - **AND** describes both the direct-implementation flow (entry at `morpheus`) and the acceptance-test flow (entry at `nyx`) as valid, non-mutually-exclusive entry points for a given task, noting that the hops after entry are direct hand-offs Janus does not mediate
 - **AND** names `iktomi` as the fallback for requests with no matching specialized agent
-- **AND** names `zhougong`, `hypnos`, and `mengpo` as the targets for agent-roster analytics, authoring, and archival requests respectively
+- **AND** names `zhougong` as the target for agent-performance/analytics requests, and `phantasos` — not `hypnos` or `mengpo` directly — as the entry target for new-agent-authoring or agent-retirement requests
 
 #### Scenario: Routing table lists historical openspec-* spellings alongside current ones
 
@@ -110,28 +110,30 @@ The "no OpenSpec context at all" criterion SHALL be based on the absence of a ma
 - **WHEN** a request's text contains the word "openspec" but clearly asks to draft a proposal, work a task, or close a change (i.e. it matches a specialized agent's criteria)
 - **THEN** Janus routes to that specialized agent, not to `iktomi`, even though the literal word "openspec" appears in the request
 
-### Requirement: Janus routes agent-roster-maintenance requests to Zhou Gong, Hypnos, or Meng Po
+### Requirement: Janus routes agent-roster-maintenance requests to Zhou Gong for analysis and to Phantasos for drafting
 
 Requests about tuning agent performance, understanding agent/token usage, authoring a new agent, or retiring one are not implementation work and SHALL NOT be routed into either implementation flow. Janus routes:
 
 - Analytics/reporting requests ("how much is X agent costing us", "which agent is slow", "suggest tuning changes") to `zhougong`.
-- New-agent-authoring requests ("add an agent that does X", or a direct follow-up to a `zhougong` report recommending a new agent) to `hypnos`.
-- Agent-retirement requests ("remove the agent we don't use anymore", "archive X") to `mengpo`.
+- New-agent-authoring requests ("add an agent that does X"), including one that follows a `zhougong` report's recommendation, to `phantasos` — which drafts a `proposal.md`/`design.md`/`tasks.md` describing the agent's role and rationale, the same as any other change. `phantasos` does not author the agent itself.
+- Agent-retirement requests ("remove the agent we don't use anymore", "archive X") to `phantasos` for the same reason — the retirement rationale is drafted before `mengpo` acts.
+
+`hypnos` and `mengpo` are never Janus's *entry* dispatch target for a raw request; they are dispatched afterward as `/opsx:apply` task implementers once `phantasos`'s change exists (see the "Janus dispatches agent-roster tasks to Hypnos or Meng Po via /opsx:apply" requirement below).
 
 #### Scenario: Analytics request routed to Zhou Gong
 
 - **WHEN** a request asks about agent performance, token burn, time taken, or requests a tuning recommendation
 - **THEN** Janus delegates to `zhougong`
 
-#### Scenario: New-agent request routed to Hypnos
+#### Scenario: New-agent request routed to Phantasos, not directly to Hypnos
 
 - **WHEN** a request asks to create/author a new agent, including one that references a `zhougong` report's recommendation
-- **THEN** Janus delegates to `hypnos`
+- **THEN** Janus delegates to `phantasos` to draft the change first, not directly to `hypnos`
 
-#### Scenario: Archival request routed to Meng Po
+#### Scenario: Archival request routed to Phantasos, not directly to Meng Po
 
 - **WHEN** a request asks to remove, delete, or archive an agent that is no longer needed
-- **THEN** Janus delegates to `mengpo`
+- **THEN** Janus delegates to `phantasos` to draft the change first, not directly to `mengpo`
 
 ### Requirement: Janus invokes identity and telemetry commands around each delegation
 
@@ -191,10 +193,11 @@ This applies uniformly on every platform. On GitHub Copilot specifically, both t
 
 `iktomi`, `zhougong`, `hypnos`, and `mengpo` are not restricted to a narrow set of fixed hand-off targets the way `nyx`/`morpheus`/`phobetor` are. Each MAY hand off directly to any other agent when its own work clearly points there, and SHALL report to Janus when it doesn't (no specific target, or the next step needs Janus's broader context). This reflects the nature of their work — free-form coding, cross-cutting analytics, agent authoring, and agent retirement all routinely touch parts of the system a narrow pipeline agent never would.
 
-#### Scenario: Zhou Gong hands off directly to Hypnos when its report clearly recommends one action
+#### Scenario: Zhou Gong hands off directly to Phantasos when its report clearly recommends a new agent
 
 - **WHEN** any platform's `zhougong.*` agent file is installed and its report's "recommended new agent" section names a specific, unambiguous next step
-- **THEN** its instruction body permits it to hand off directly to `hypnos`, in addition to the default of reporting to Janus when the report doesn't point to one specific action
+- **THEN** its instruction body permits it to hand off directly to `phantasos` — which drafts the change describing the new agent — in addition to the default of reporting to Janus when the report doesn't point to one specific action
+- **AND** its instruction body does not name `hypnos` as this hand-off's direct target
 
 #### Scenario: Hypnos hands off directly to Phobetor to validate a newly authored agent
 
@@ -210,6 +213,20 @@ This applies uniformly on every platform. On GitHub Copilot specifically, both t
 
 - **WHEN** any of `iktomi.*`, `zhougong.*`, `hypnos.*`, or `mengpo.*` finishes work with no specific next agent implied
 - **THEN** its instruction body directs it to report to Janus, the same as any terminal case
+
+### Requirement: Janus dispatches agent-roster tasks to Hypnos or Meng Po via /opsx:apply
+
+For a change drafted by `phantasos` whose `tasks.md` describes creating or retiring an agent (rather than writing code), Janus's routing table SHALL name `hypnos` and `mengpo` as `/opsx:apply` task-implementer targets, the same dispatch mechanism used for `nyx`/`morpheus` on code tasks: `hypnos` when the task creates a new agent, `mengpo` when the task retires one.
+
+#### Scenario: Agent-creation task dispatched to Hypnos
+
+- **WHEN** Janus routes a task from an OpenSpec change whose `tasks.md` describes authoring a new agent
+- **THEN** it delegates to `hypnos`
+
+#### Scenario: Agent-retirement task dispatched to Meng Po
+
+- **WHEN** Janus routes a task from an OpenSpec change whose `tasks.md` describes retiring an existing agent
+- **THEN** it delegates to `mengpo`
 
 ### Requirement: Janus refuses to act outside the dispatch role
 

@@ -25,4 +25,6 @@ Draft clear, testable requirements in spec files following the BDD scenario form
 Write architectural decisions in `design.md` with rationale and trade-offs.
 Produce a concrete task list in `tasks.md` scoped to the minimum change required.
 
+This includes agent-roster changes — authoring a new agent or retiring one, whether from a direct ask or a `zhougong` report's recommendation. Draft it the same way: describe the agent's role/rationale in `proposal.md`/`design.md` and scope `tasks.md` so Janus can dispatch the implementation to `hypnos` (creation) or `mengpo` (retirement). You do not author or delete agent files yourself.
+
 Be specific about file paths, function names, and acceptance criteria.
