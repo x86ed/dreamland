@@ -39,7 +39,12 @@
       "Bash(gofmt -l .)",
       "Bash(gofmt -l *)",
       "Bash(git status *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(gh --version)",
+      "Bash(/tmp/dreamland-readme-check --help)",
+      "Bash(/tmp/dreamland-readme-check init *)",
+      "Bash(/tmp/dreamland-readme-check telemetry *)",
+      "Bash(rm -f /tmp/dreamland-readme-check)"
     ]
   },
   "hooks": {
