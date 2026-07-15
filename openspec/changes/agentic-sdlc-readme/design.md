@@ -15,7 +15,7 @@ None of this is documented outside `openspec/specs/*` and the template files the
 
 **Goals:**
 - Requirements and install sections that are true today: Go toolchain, git, `openspec` npm CLI, `gh` CLI, choice of one of six coding tools — and a source-build install path, since no packaged release exists.
-- A workflows section that documents the real routing graph: `janus`'s entry-dispatch table plus the fixed downstream hand-off chains agents use once inside a change, so a reader understands why (for example) `morpheus` hands off to `phobetor` directly instead of reporting back to `janus`.
+- A workflows section framed as five named paths off `janus`'s entry dispatch — **TDD/BDD** (`janus`→`nyx`→`morpheus`→`phobetor`→`baku`), **Standard SDD** (`janus`→`phantasos`→`morpheus`→`phobetor`→`baku`), **Walkabout** (`janus`→`iktomi`→context-dependent hop→`baku`), **Tuning** (`janus`→`zhougong` report, optionally feeding Agent Building), and **Agent Building** (creation: `janus`→`zhougong`→`phantasos`→`hypnos`→`phobetor`→`baku`; deletion: `janus`→`zhougong`→`phantasos`→`mengpo`) — so a reader understands why, for example, `morpheus` hands off to `phobetor` directly instead of reporting back to `janus`.
 - A per-agent purpose section covering all ten agents by their actual name and responsibilities, sourced from `internal/scaffold/templates/agents/claude-code/*.md` frontmatter/bodies (the canonical description of each role).
 - An analysis/improvement section that documents the real, already-shipped telemetry mechanism (`dreamland telemetry snapshot`, commit trailers, `zhougong`'s report file) as the concrete path to project-specific tuning — not aspirational auto-tuning.
 
@@ -35,6 +35,11 @@ None of this is documented outside `openspec/specs/*` and the template files the
 
 **Installation section documents source builds only, same reasoning as `add-readme-documentation`'s design.md.** `go.mod`'s `module dreamland` doesn't match the GitHub import path, so `go install github.com/x86ed/dreamland@latest` fails today. Documenting `git clone && go build` is the honest current path.
 
+**Four named workflows, not one generic lifecycle description.** `janus`'s routing table dispatches to a materially different agent depending on task shape (new-behavior-needs-test vs. mechanical vs. no-OpenSpec-context vs. tuning question), and each of those four paths has its own downstream chain. Naming them (TDD/BDD, Standard SDD, Walkabout, Tuning) gives a reader a lookup table instead of one paragraph they'd have to mentally branch themselves.
+
+**Walkabout's post-`iktomi` step is documented as context-dependent, not a fixed agent.** `iktomi.md` gives it the same broad routing capability as `janus` — it hands off to whichever specialist its freeform work turns out to need, or reports to `janus`, with no single fixed next step. The README must say so explicitly rather than naming one agent that would misrepresent `iktomi`'s actual routing freedom; the only fixed point in this path is the eventual `baku` hand-off to close out.
+
+**Agent Building is its own workflow, not a detail of Tuning.** `zhougong`'s recommendation is only the trigger; the actual creation/deletion work routes through `phantasos` (drafting the proposal/design/tasks for the new or retired agent, same as any other change) before reaching `hypnos` (authors the agent, hands to `phobetor` to validate, closes via `baku`) or `mengpo` (executes the archival/deletion directly, no `baku` hand-off — retiring an agent doesn't need a PR-closure step the way shipping one does). Keeping Tuning and Agent Building separate avoids collapsing "here's a report" and "here's the five-agent execution path that report can trigger" into one paragraph.
 **Analysis section frames the telemetry loop as a manual, maintainer-driven action, not automatic.** `zhougong` only runs when invoked (directly or via `janus` routing on "agent performance, token usage, tuning questions") and only recommends — it hands off to `hypnos` to actually author a new agent. The README must not imply the harness self-modifies without a human or agent explicitly running this loop.
 
 ## Risks / Trade-offs

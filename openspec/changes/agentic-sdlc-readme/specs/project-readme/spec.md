@@ -11,12 +11,27 @@
 
 ### Requirement: README documents the OpenSpec workflow lifecycle
 
-`README.md` SHALL describe the `/opsx:propose` → `/opsx:apply` → `/opsx:archive` change lifecycle, including how `janus` routes an entry request into that lifecycle (or to `iktomi` when there is no OpenSpec context) and the fixed downstream hand-off chain agents follow once inside a change without returning through `janus`.
+`README.md` SHALL describe the `/opsx:propose` → `/opsx:apply` → `/opsx:archive` change lifecycle and the five distinct hand-off paths `janus` can start, naming each path and its agent sequence:
+
+1. **TDD/BDD** — new behavior with a spec scenario and no covering test: `janus` → `nyx` → `morpheus` → `phobetor` → `baku`.
+2. **Standard SDD** — mechanical/internal task, or a task whose test already exists: `janus` → `phantasos` → `morpheus` → `phobetor` → `baku`.
+3. **Walkabout** — no OpenSpec context at all: `janus` → `iktomi` → *(context-dependent — `iktomi` routes freely to whichever agent its freeform work turns out to need, same broad routing capability as `janus`)* → `baku`.
+4. **Tuning** — agent performance/token-usage questions, not a feature change: `janus` → `zhougong` produces a report; if it recommends a new agent, that recommendation feeds the Agent Building workflow.
+5. **Agent Building** — creating or retiring an agent, with two sub-paths:
+   - *Creation*: `janus` → `zhougong` → `phantasos` → `hypnos` → `phobetor` → `baku`.
+   - *Deletion*: `janus` → `zhougong` → `phantasos` → `mengpo`.
+
+For all five paths, once `janus` makes its entry dispatch, downstream agents hand off directly to each other and do not return through `janus` except for genuinely ambiguous escalations.
 
 #### Scenario: Reader can trace a change from proposal to merged PR
 
-- **WHEN** a reader follows the workflows section for a hypothetical new feature
-- **THEN** they can name, in order, which slash command and which agent is responsible at each stage from proposal through PR creation
+- **WHEN** a reader follows the workflows section for a hypothetical new feature that needs a new test
+- **THEN** they can name the TDD/BDD path in order (`janus` → `nyx` → `morpheus` → `phobetor` → `baku`) and identify it as distinct from the Standard SDD path used for mechanical tasks
+
+#### Scenario: Reader distinguishes the five workflow paths
+
+- **WHEN** a reader wants to know which path applies to a freeform request with no OpenSpec change, versus a request to retire an unneeded agent
+- **THEN** the README identifies the former as Walkabout (`janus` → `iktomi` → context-dependent hop → `baku`) and the latter as Agent Building's deletion sub-path (`janus` → `zhougong` → `phantasos` → `mengpo`)
 
 ### Requirement: README documents the purpose of every agent
 
