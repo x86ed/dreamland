@@ -93,6 +93,22 @@ This gives three tiers of entry point: the `/opsx:*` commands (OpenSpec-lifecycl
 - **WHEN** the selected coding tool is "Codex CLI" and `dreamland init` completes successfully
 - **THEN** `.codex/skills/drmlnd-<agent>/SKILL.md` exists for each of the nine agents
 
+### Requirement: Command and skill enumeration is consistent across all six platform templates
+
+The full set of user-invocable entry points for the OpenSpec lifecycle and per-agent direct routes SHALL be present and consistent across all six supported platform templates (Claude Code, Codex CLI, Cursor, Kiro, Antigravity, GitHub Copilot) — no platform SHALL be missing an entry point, a legacy redirect, or a routing-table reference that another platform has.
+
+#### Scenario: Per-agent commands present on every platform
+
+- **WHEN** `dreamland init` completes successfully for any of the six supported platforms
+- **THEN** the platform's equivalent of all nine per-agent direct-invoke commands (`phantasos`, `nyx`, `morpheus`, `phobetor`, `baku`, `iktomi`, `zhougong`, `hypnos`, `mengpo`) and the generic routing command are present, each carrying the `drmlnd` prefix in that platform's native form (`drmlnd:` colon-namespace on Claude Code, `drmlnd-` hyphen prefix everywhere else)
+
+#### Scenario: Legacy redirect coverage matches across platforms wherever the platform supports skills/commands
+
+- **WHEN** a platform supports an auto-discoverable skill mechanism equivalent to Claude Code's `.claude/skills/`
+- **THEN** that platform's legacy `openspec-*` redirect stubs exist and resolve to the same targets documented for Claude Code
+
+## ADDED Requirements
+
 ### Requirement: No unprefixed dreamland command artifacts remain after install
 
 `dreamland init` SHALL NOT leave any unprefixed `route`/per-agent command installed with its old identifier alongside the `drmlnd`-prefixed replacement, on any supported platform. If a prior scaffold run left unprefixed Cursor command files/identifiers in place (e.g. a command file whose `name:` frontmatter is still `phantasos` instead of `drmlnd-phantasos`), a subsequent `dreamland init` run SHALL remove/replace them. The other five platforms have no prior unprefixed installs to clean up, since command installation on those platforms is new as of this change. `/opsx:*` command files are not affected by this requirement — they are not dreamland-specific and keep their existing names and locations.

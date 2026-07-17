@@ -45,7 +45,8 @@
       "Bash(/tmp/dreamland-readme-check init *)",
       "Bash(/tmp/dreamland-readme-check telemetry *)",
       "Bash(rm -f /tmp/dreamland-readme-check)",
-      "Bash(gofmt -l internal/scaffold/*.go)"
+      "Bash(gofmt -l internal/scaffold/*.go)",
+      "Bash(go clean *)"
     ]
   },
   "hooks": {
