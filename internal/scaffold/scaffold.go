@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 )
 
 // Config drives a scaffold installation.
@@ -47,18 +48,34 @@ func Install(cfg Config) ([]Result, error) {
 }
 
 // platformCommandSpec maps a coding tool to its slash-command template/target directories.
-// Only platforms with a project-scoped, file-based slash-command convention are listed here:
-//   - Claude Code's commands live directly in this repo's .claude/commands/ (not templated/installed).
-//   - Cursor reads project-scoped commands from .cursor/commands/*.md (filename -> command name).
-//   - Codex CLI's custom prompts are user-home-only (~/.codex/prompts/), not project-scoped, and
-//     are deprecated upstream in favor of "skills" — there is no repo-installable target.
-//   - Kiro's slash commands are steering files with `inclusion: manual`; giving a routing command
-//     the same name as an already-installed always-on agent steering file (e.g. iktomi.md) would
-//     collide in the same directory, so it has no clean separate target either.
-//   - GitHub Copilot and Antigravity have no public slash-command mechanism.
+// Every dreamland-installed command carries a `drmlnd` prefix (colon-namespaced where the
+// platform supports it, hyphen-prefixed identifier otherwise), which incidentally resolves the
+// Kiro/Antigravity naming collisions noted below — a command file no longer shares a name with
+// the always-on agent file already installed in the same directory.
+//   - Claude Code resolves colon-namespaced commands from a nested directory, so these land
+//     directly in `.claude/commands/drmlnd/` (filename -> command name under that namespace).
+//   - Cursor reads project-scoped commands from .cursor/commands/*.md; naming is flat kebab-case
+//     via frontmatter `name:` (no colon/nested namespacing), hence `drmlnd-<agent>`.
+//   - GitHub Copilot (VS Code) reads project-scoped prompt files from .github/prompts/*.prompt.md;
+//     frontmatter `name:` sets the slash-command identifier and `agent:` targets a custom chat
+//     agent directly (here, `janus`).
+//   - Kiro's slash commands are steering files with `inclusion: manual`, shown in the `/` menu.
+//     These share `.kiro/steering/` with the always-on agent steering files, but the `drmlnd-`
+//     prefix keeps filenames from colliding with an agent's own file (e.g. `iktomi.md`).
+//   - Antigravity turns any flat `.md` file under `.agents/skills/` into a slash command
+//     (distinct from the directory-per-skill layout `installAgents` uses for the agent
+//     personas themselves in that same directory).
+//   - Codex CLI's custom prompts are user-home-only (~/.codex/prompts/) and deprecated upstream;
+//     project-level Skills (directory + SKILL.md, explicit `$name`/`/skills`-menu invocation) are
+//     the current supported project-scoped mechanism, installed here under `.codex/skills/`.
 func platformCommandSpec(tool, repoRoot string) (platformSpec, bool) {
 	specs := map[string]platformSpec{
-		"Cursor": {templateDir: "commands/cursor", targetDir: filepath.Join(repoRoot, ".cursor", "commands")},
+		"Claude Code":    {templateDir: "commands/claude-code", targetDir: filepath.Join(repoRoot, ".claude", "commands", "drmlnd")},
+		"Cursor":         {templateDir: "commands/cursor", targetDir: filepath.Join(repoRoot, ".cursor", "commands")},
+		"GitHub Copilot": {templateDir: "commands/github-copilot", targetDir: filepath.Join(repoRoot, ".github", "prompts")},
+		"Kiro":           {templateDir: "commands/kiro", targetDir: filepath.Join(repoRoot, ".kiro", "steering")},
+		"Antigravity":    {templateDir: "commands/antigravity", targetDir: filepath.Join(repoRoot, ".agents", "skills")},
+		"Codex CLI":      {templateDir: "commands/codex", targetDir: filepath.Join(repoRoot, ".codex", "skills"), skillFile: "SKILL.md"},
 	}
 	spec, ok := specs[tool]
 	return spec, ok
@@ -69,7 +86,10 @@ func installCommands(cfg Config) ([]Result, error) {
 	if !ok {
 		return nil, nil // no project-scoped slash-command convention for this platform
 	}
-	return installFlatAgents(cfg, spec)
+	if spec.skillFile != "" {
+		return installSkills(cfg, spec)
+	}
+	return installFlatCommands(cfg, spec)
 }
 
 // platformSpec maps a coding tool name to its template and target directories.
@@ -136,6 +156,66 @@ func installFlatAgents(cfg Config, spec platformSpec) ([]Result, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+			return nil, err
+		}
+		action := "installed"
+		if cfg.Force {
+			action = "installed (forced)"
+		}
+		results = append(results, Result{Path: targetPath, Action: action})
+	}
+
+	return results, nil
+}
+
+// commandNamePattern extracts a command file's frontmatter `name:` value.
+var commandNamePattern = regexp.MustCompile(`(?m)^name:\s*(\S+)\s*$`)
+
+// commandName returns the frontmatter `name:` value in data, or "" if absent.
+func commandName(data []byte) string {
+	m := commandNamePattern.FindSubmatch(data)
+	if m == nil {
+		return ""
+	}
+	return string(m[1])
+}
+
+// installFlatCommands behaves like installFlatAgents, but a pre-existing destination file is only
+// treated as "already installed" (and thus skipped without --force) when its frontmatter `name:`
+// already matches the template's. A destination file whose name is stale — e.g. left over from
+// before dreamland's commands were renamed with a `drmlnd` prefix — is overwritten unconditionally,
+// so a plain re-run of `dreamland init` self-heals a pre-rename install without requiring --force.
+func installFlatCommands(cfg Config, spec platformSpec) ([]Result, error) {
+	if err := os.MkdirAll(spec.targetDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create commands dir: %w", err)
+	}
+
+	var results []Result
+	templateDir := "templates/" + spec.templateDir
+	entries, err := fs.ReadDir(TemplateFS, templateDir)
+	if err != nil {
+		return nil, fmt.Errorf("read template dir %q: %w", templateDir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		targetPath := filepath.Join(spec.targetDir, entry.Name())
+		data, err := fs.ReadFile(TemplateFS, templateDir+"/"+entry.Name())
+		if err != nil {
+			return nil, err
+		}
+
+		if existing, err := os.ReadFile(targetPath); err == nil {
+			stale := commandName(existing) != commandName(data)
+			if !stale && !cfg.Force {
+				results = append(results, Result{Path: targetPath, Action: "skipped (already exists)"})
+				continue
+			}
+		}
+
 		if err := os.WriteFile(targetPath, data, 0o644); err != nil {
 			return nil, err
 		}

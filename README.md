@@ -1,5 +1,6 @@
 # dreamland
 
+
 dreamland is a spec-driven agentic SDLC harness. `dreamland init` scaffolds a router agent (Janus) and nine specialist agents into your repository's AI coding tool of choice, wires them to an [OpenSpec](https://github.com/Fission-AI/OpenSpec)-driven change lifecycle (`/opsx:propose` → `/opsx:apply` → `/opsx:archive`), and captures per-turn telemetry so you can see which agents are earning their keep — and turn recurring patterns into project-specific agents over time.
 
 This README covers:

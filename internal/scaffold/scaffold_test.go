@@ -231,14 +231,94 @@ func TestInstall_Cursor_Commands(t *testing.T) {
 	}
 
 	commandsDir := filepath.Join(root, ".cursor", "commands")
-	for _, c := range []string{"route.md", "phantasos.md", "nyx.md", "morpheus.md", "phobetor.md", "baku.md", "iktomi.md", "zhougong.md", "hypnos.md", "mengpo.md"} {
-		if _, err := os.Stat(filepath.Join(commandsDir, c)); err != nil {
-			t.Errorf("missing command file %s: %v", c, err)
+	names := map[string]string{
+		"route.md":     "drmlnd-route",
+		"phantasos.md": "drmlnd-phantasos",
+		"nyx.md":       "drmlnd-nyx",
+		"morpheus.md":  "drmlnd-morpheus",
+		"phobetor.md":  "drmlnd-phobetor",
+		"baku.md":      "drmlnd-baku",
+		"iktomi.md":    "drmlnd-iktomi",
+		"zhougong.md":  "drmlnd-zhougong",
+		"hypnos.md":    "drmlnd-hypnos",
+		"mengpo.md":    "drmlnd-mengpo",
+	}
+	for file, name := range names {
+		data, err := os.ReadFile(filepath.Join(commandsDir, file))
+		if err != nil {
+			t.Errorf("missing command file %s: %v", file, err)
+			continue
+		}
+		if want := "name: " + name; !strings.Contains(string(data), want) {
+			t.Errorf("%s: expected frontmatter %q, got:\n%s", file, want, data)
 		}
 	}
 }
 
-func TestInstall_ClaudeCode_NoCommandsInstalled(t *testing.T) {
+func TestInstall_Cursor_Commands_ReplacesStaleUnprefixedFile(t *testing.T) {
+	root := fakeGitRepo(t)
+	commandsDir := filepath.Join(root, ".cursor", "commands")
+	if err := os.MkdirAll(commandsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a pre-rename install: no frontmatter at all, just the old body.
+	stale := "# Phantasos\n\nDelegate this request to the `janus` agent...\n"
+	if err := os.WriteFile(filepath.Join(commandsDir, "phantasos.md"), []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Cursor"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(commandsDir, "phantasos.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "name: drmlnd-phantasos") {
+		t.Errorf("expected stale file to be overwritten with drmlnd-prefixed frontmatter, got:\n%s", data)
+	}
+}
+
+func TestInstall_Cursor_Commands_SkipsUpToDateFile(t *testing.T) {
+	root := fakeGitRepo(t)
+	commandsDir := filepath.Join(root, ".cursor", "commands")
+	if err := os.MkdirAll(commandsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	current := "---\nname: drmlnd-phantasos\ndescription: custom\n---\n\ncustom body the user edited\n"
+	if err := os.WriteFile(filepath.Join(commandsDir, "phantasos.md"), []byte(current), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := Install(Config{RepoRoot: root, CodingTool: "Cursor"})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(commandsDir, "phantasos.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != current {
+		t.Errorf("expected up-to-date file to be left alone, got:\n%s", data)
+	}
+
+	var found bool
+	for _, r := range results {
+		if strings.HasSuffix(r.Path, filepath.Join("commands", "phantasos.md")) {
+			found = true
+			if r.Action != "skipped (already exists)" {
+				t.Errorf("expected skip action, got %q", r.Action)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected a result entry for phantasos.md")
+	}
+}
+
+func TestInstall_ClaudeCode_NoCursorDirCreated(t *testing.T) {
 	root := fakeGitRepo(t)
 	_, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"})
 	if err != nil {
@@ -247,6 +327,117 @@ func TestInstall_ClaudeCode_NoCommandsInstalled(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(root, ".cursor")); err == nil {
 		t.Error("expected no .cursor directory created for Claude Code install")
+	}
+}
+
+func TestInstall_ClaudeCode_Commands(t *testing.T) {
+	root := fakeGitRepo(t)
+	_, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	commandsDir := filepath.Join(root, ".claude", "commands", "drmlnd")
+	for _, c := range []string{"route.md", "phantasos.md", "nyx.md", "morpheus.md", "phobetor.md", "baku.md", "iktomi.md", "zhougong.md", "hypnos.md", "mengpo.md"} {
+		if _, err := os.Stat(filepath.Join(commandsDir, c)); err != nil {
+			t.Errorf("missing command file %s: %v", c, err)
+		}
+	}
+}
+
+func TestInstall_GitHubCopilot_Commands(t *testing.T) {
+	root := fakeGitRepo(t)
+	_, err := Install(Config{RepoRoot: root, CodingTool: "GitHub Copilot"})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	promptsDir := filepath.Join(root, ".github", "prompts")
+	for _, agent := range []string{"route", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"} {
+		path := filepath.Join(promptsDir, agent+".prompt.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("missing prompt file %s: %v", path, err)
+			continue
+		}
+		if want := "name: drmlnd-" + agent; !strings.Contains(string(data), want) {
+			t.Errorf("%s: expected frontmatter %q, got:\n%s", path, want, data)
+		}
+		if !strings.Contains(string(data), "agent: janus") {
+			t.Errorf("%s: expected frontmatter \"agent: janus\", got:\n%s", path, data)
+		}
+	}
+}
+
+func TestInstall_Kiro_Commands(t *testing.T) {
+	root := fakeGitRepo(t)
+	_, err := Install(Config{RepoRoot: root, CodingTool: "Kiro"})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	steeringDir := filepath.Join(root, ".kiro", "steering")
+	for _, agent := range []string{"route", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"} {
+		path := filepath.Join(steeringDir, "drmlnd-"+agent+".md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("missing steering command file %s: %v", path, err)
+			continue
+		}
+		if want := "name: drmlnd-" + agent; !strings.Contains(string(data), want) {
+			t.Errorf("%s: expected frontmatter %q, got:\n%s", path, want, data)
+		}
+		if !strings.Contains(string(data), "inclusion: manual") {
+			t.Errorf("%s: expected frontmatter \"inclusion: manual\", got:\n%s", path, data)
+		}
+	}
+}
+
+func TestInstall_Antigravity_Commands(t *testing.T) {
+	root := fakeGitRepo(t)
+	_, err := Install(Config{RepoRoot: root, CodingTool: "Antigravity"})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	skillsDir := filepath.Join(root, ".agents", "skills")
+	for _, agent := range []string{"route", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"} {
+		path := filepath.Join(skillsDir, "drmlnd-"+agent+".md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("missing flat command skill file %s: %v", path, err)
+			continue
+		}
+		if want := "name: drmlnd-" + agent; !strings.Contains(string(data), want) {
+			t.Errorf("%s: expected frontmatter %q, got:\n%s", path, want, data)
+		}
+	}
+
+	// The agent personas themselves still install as directory-per-skill (e.g. phantasos/SKILL.md),
+	// alongside — not overwritten by — the flat command files sharing the same parent directory.
+	if _, err := os.Stat(filepath.Join(skillsDir, "phantasos", "SKILL.md")); err != nil {
+		t.Errorf("expected agent persona skill directory to still exist: %v", err)
+	}
+}
+
+func TestInstall_Codex_Commands(t *testing.T) {
+	root := fakeGitRepo(t)
+	_, err := Install(Config{RepoRoot: root, CodingTool: "Codex CLI"})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	skillsDir := filepath.Join(root, ".codex", "skills")
+	for _, agent := range []string{"route", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"} {
+		path := filepath.Join(skillsDir, "drmlnd-"+agent, "SKILL.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("missing codex skill file %s: %v", path, err)
+			continue
+		}
+		if want := "name: drmlnd-" + agent; !strings.Contains(string(data), want) {
+			t.Errorf("%s: expected frontmatter %q, got:\n%s", path, want, data)
+		}
 	}
 }
 
@@ -552,6 +743,27 @@ func TestInstall_GitHubCopilot_MergesHooksFile(t *testing.T) {
 }
 
 // --- Additional tests to improve coverage ---
+
+func TestInstallFlatCommands_WriteFileError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; skip permission test")
+	}
+	root := fakeGitRepo(t)
+
+	commandsDir := filepath.Join(root, ".cursor", "commands")
+	if err := os.MkdirAll(commandsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(commandsDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(commandsDir, 0o755) })
+
+	_, err := Install(Config{RepoRoot: root, CodingTool: "Cursor", Force: true})
+	if err == nil {
+		t.Fatal("expected error when commands dir is unwritable")
+	}
+}
 
 func TestInstallFlatAgents_WriteFileError(t *testing.T) {
 	if os.Getuid() == 0 {
