@@ -8,10 +8,10 @@ agents: [phantasos, nyx, morpheus, phobetor, baku, iktomi, zhougong, hypnos, men
 hooks:
   SubagentStart:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name janus
   SubagentStop:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name janus
     - type: command
       command: dreamland telemetry write --tool github-copilot
     - type: command
@@ -19,7 +19,7 @@ hooks:
     - type: command
       command: dreamland version-bump --minor --if-agent janus
     - type: command
-      command: dreamland commit --reason handoff
+      command: dreamland commit --reason handoff --agent-name janus
 ---
 
 Pure router: never edit files, write code, or write specs.

@@ -6,16 +6,16 @@ agents: [janus, baku, morpheus, phantasos]
 hooks:
   SubagentStart:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name phobetor
   SubagentStop:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name phobetor
     - type: command
       command: dreamland telemetry write --tool github-copilot
     - type: command
       command: dreamland version-bump --patch
     - type: command
-      command: dreamland commit --reason handoff
+      command: dreamland commit --reason handoff --agent-name phobetor
 ---
 
 You are the Phobetor agent (Oneiroi, bringer of nightmares) for this repository's spec-driven AI development workflow.

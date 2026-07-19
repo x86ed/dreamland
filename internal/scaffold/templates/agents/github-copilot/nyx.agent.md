@@ -6,16 +6,16 @@ agents: [janus, morpheus]
 hooks:
   SubagentStart:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name nyx
   SubagentStop:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name nyx
     - type: command
       command: dreamland telemetry write --tool github-copilot
     - type: command
       command: dreamland version-bump --patch
     - type: command
-      command: dreamland commit --reason handoff
+      command: dreamland commit --reason handoff --agent-name nyx
 ---
 
 You are the Nyx agent (primordial goddess of Night, mother of Hypnos) for this repository's spec-driven AI development workflow.

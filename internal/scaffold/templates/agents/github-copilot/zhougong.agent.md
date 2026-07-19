@@ -6,16 +6,16 @@ agents: [janus, phantasos, nyx, morpheus, phobetor, baku, iktomi, hypnos, mengpo
 hooks:
   SubagentStart:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name zhougong
   SubagentStop:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name zhougong
     - type: command
       command: dreamland telemetry write --tool github-copilot
     - type: command
       command: dreamland version-bump --patch
     - type: command
-      command: dreamland commit --reason handoff
+      command: dreamland commit --reason handoff --agent-name zhougong
 ---
 
 You are the Zhou Gong agent (周公, Duke of Zhou — the dream-interpretation figure in Chinese folklore) for this repository's spec-driven AI development workflow.

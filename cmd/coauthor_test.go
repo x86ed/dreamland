@@ -22,15 +22,20 @@ func TestResolveAgentName_EnvVar(t *testing.T) {
 	}
 }
 
-func TestResolveAgentName_FallbackTool(t *testing.T) {
+func TestResolveAgentName_FallbackJanus(t *testing.T) {
 	// Make sure no platform env vars are set.
 	for _, env := range []string{"CLAUDE_AGENT_ID", "CODEX_AGENT_ID", "CURSOR_AGENT_ID", "KIRO_AGENT_ID"} {
 		t.Setenv(env, "")
 	}
 
-	got := resolveAgentName("GitHub Copilot")
-	if got != "GitHub Copilot" {
-		t.Errorf("got %q, want %q", got, "GitHub Copilot")
+	// No env var, but a coding tool is configured: falls back to "janus" (the
+	// implicit entry role before any specialist is dispatched), not the raw
+	// coding-tool name, regardless of which tool is configured.
+	for _, tool := range []string{"Claude Code", "GitHub Copilot", "Cursor"} {
+		got := resolveAgentName(tool)
+		if got != "janus" {
+			t.Errorf("resolveAgentName(%q) = %q, want \"janus\"", tool, got)
+		}
 	}
 }
 
@@ -158,6 +163,116 @@ func TestAppendCoauthorTrailer_ModelNameExtracted(t *testing.T) {
 	}
 }
 
+func TestAppendCodingToolTrailer_NotTruncatedAtSpace(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("feat: something\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	if err := appendCodingToolTrailer(f.Name(), "GitHub Copilot", "@github.com"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(f.Name())
+	if !strings.Contains(string(data), "Co-authored-by: GitHub Copilot <github-copilot@github.com>") {
+		t.Errorf("coding-tool trailer missing or truncated, got:\n%s", string(data))
+	}
+}
+
+func TestAppendCodingToolTrailer_NotDuplicated(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := "feat: something\nCo-authored-by: GitHub Copilot <github-copilot@github.com>\n"
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	if err := appendCodingToolTrailer(f.Name(), "GitHub Copilot", "@github.com"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(f.Name())
+	count := strings.Count(string(data), "Co-authored-by: GitHub Copilot")
+	if count != 1 {
+		t.Errorf("coding-tool trailer duplicated, count = %d", count)
+	}
+}
+
+func TestAppendCodingToolTrailer_EmptyCodingTool(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := "feat: something\n"
+	if _, err := f.WriteString(original); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	if err := appendCodingToolTrailer(f.Name(), "", "@github.com"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(f.Name())
+	if string(data) != original {
+		t.Errorf("file modified when coding tool empty, got:\n%s", string(data))
+	}
+}
+
+func TestAppendBothTrailers_OrderAndIndependentIdempotency(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("feat: something\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	if err := appendCoauthorTrailer(f.Name(), "claude-sonnet-4-6", "@github.com"); err != nil {
+		t.Fatalf("appendCoauthorTrailer: %v", err)
+	}
+	if err := appendCodingToolTrailer(f.Name(), "Claude Code", "@github.com"); err != nil {
+		t.Fatalf("appendCodingToolTrailer: %v", err)
+	}
+
+	data, _ := os.ReadFile(f.Name())
+	content := string(data)
+	modelIdx := strings.Index(content, "Co-authored-by: claude-sonnet-4-6")
+	toolIdx := strings.Index(content, "Co-authored-by: Claude Code")
+	if modelIdx == -1 || toolIdx == -1 {
+		t.Fatalf("expected both trailers present, got:\n%s", content)
+	}
+	if modelIdx >= toolIdx {
+		t.Errorf("expected model trailer before coding-tool trailer, got:\n%s", content)
+	}
+
+	// Re-run both — only the model trailer is "already present" from a hypothetical
+	// prior run; the coding-tool one should append independently without duplicating
+	// the model line, and vice versa is exercised by the dedicated dedup tests above.
+	if err := appendCoauthorTrailer(f.Name(), "claude-sonnet-4-6", "@github.com"); err != nil {
+		t.Fatalf("appendCoauthorTrailer (rerun): %v", err)
+	}
+	if err := appendCodingToolTrailer(f.Name(), "Claude Code", "@github.com"); err != nil {
+		t.Fatalf("appendCodingToolTrailer (rerun): %v", err)
+	}
+	data, _ = os.ReadFile(f.Name())
+	content = string(data)
+	if strings.Count(content, "Co-authored-by: claude-sonnet-4-6") != 1 {
+		t.Errorf("model trailer duplicated after rerun, got:\n%s", content)
+	}
+	if strings.Count(content, "Co-authored-by: Claude Code") != 1 {
+		t.Errorf("coding-tool trailer duplicated after rerun, got:\n%s", content)
+	}
+}
+
 func TestAppendCoauthorTrailer_EmptyModelID(t *testing.T) {
 	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
 	if err != nil {
@@ -282,6 +397,87 @@ func TestRunCoauthor_UsesAgentTypeFromHookPayload(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected git config user.name iktomi, got calls: %v", gitCalls)
+	}
+}
+
+func TestRunCoauthor_AgentNameFlagSkipsStdinRead(t *testing.T) {
+	agentNames := []string{"janus", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"}
+
+	for _, name := range agentNames {
+		t.Run(name, func(t *testing.T) {
+			makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
+
+			// A pipe with nothing written and never closed: if the code attempted the
+			// stdin read despite --agent-name being set, this call would block for the
+			// full hookPayloadReadTimeout. It must not.
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { w.Close(); r.Close() })
+			origStdin := os.Stdin
+			os.Stdin = r
+			t.Cleanup(func() { os.Stdin = origStdin })
+
+			var gitCalls []string
+			stubRunCmd(t, func(_ string, args ...string) (string, error) {
+				gitCalls = append(gitCalls, strings.Join(args, " "))
+				return "", nil
+			})
+
+			origTrailer, origAgentName := coauthorTrailer, coauthorAgentName
+			coauthorTrailer = ""
+			coauthorAgentName = name
+			t.Cleanup(func() { coauthorTrailer = origTrailer; coauthorAgentName = origAgentName })
+
+			start := time.Now()
+			if err := runCoauthor(nil, nil); err != nil {
+				t.Fatalf("runCoauthor: %v", err)
+			}
+			if elapsed := time.Since(start); elapsed >= hookPayloadReadTimeout {
+				t.Errorf("runCoauthor took %s — stdin read was not skipped despite --agent-name=%s", elapsed, name)
+			}
+
+			found := false
+			for _, c := range gitCalls {
+				if c == "config --local user.name "+name {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected git config user.name %s, got calls: %v", name, gitCalls)
+			}
+		})
+	}
+}
+
+func TestRunCoauthor_AgentNameFlagAbsent_FallsBackToExistingChain(t *testing.T) {
+	makeCoauthorRepo(t, config.Config{CodingTool: "GitHub Copilot"})
+	withPipedStdin(t, `{"hook_event_name":"SubagentStop","agent_type":"iktomi"}`)
+
+	var gitCalls []string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		gitCalls = append(gitCalls, strings.Join(args, " "))
+		return "", nil
+	})
+
+	origTrailer, origAgentName := coauthorTrailer, coauthorAgentName
+	coauthorTrailer = ""
+	coauthorAgentName = ""
+	t.Cleanup(func() { coauthorTrailer = origTrailer; coauthorAgentName = origAgentName })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("runCoauthor: %v", err)
+	}
+
+	found := false
+	for _, c := range gitCalls {
+		if c == "config --local user.name iktomi" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected fallback chain to resolve iktomi from hook payload, got calls: %v", gitCalls)
 	}
 }
 

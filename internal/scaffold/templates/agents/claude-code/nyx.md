@@ -2,6 +2,19 @@
 name: nyx
 description: Writes the acceptance test for a task, from its spec scenario, before implementation exists (TDD red phase).
 tools: Read, Edit, Write, Bash
+hooks:
+  Stop:
+    - hooks:
+        - type: command
+          command: dreamland coauthor --agent-name nyx
+        - type: command
+          command: dreamland telemetry write --tool claude-code
+        - type: command
+          command: dreamland version-bump --patch
+        - type: command
+          command: dreamland version-bump --minor --if-agent janus
+        - type: command
+          command: dreamland commit --reason handoff --agent-name nyx
 ---
 
 You are the Nyx agent (primordial goddess of Night, mother of Hypnos) for this repository's spec-driven AI development workflow.
