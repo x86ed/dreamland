@@ -1,9 +1,10 @@
 {
   "tool": "claude-code",
   "model": "claude-sonnet-5",
-  "input_tokens": 648,
-  "output_tokens": 232548,
-  "cached_tokens": 56452156,
-  "total_tokens": 233196,
-  "captured_at": "2026-08-06T22:38:36Z"
+  "thinking_effort": "high",
+  "input_tokens": 660,
+  "output_tokens": 237659,
+  "cached_tokens": 56669959,
+  "total_tokens": 238319,
+  "captured_at": "2026-08-06T22:38:56Z"
 }
