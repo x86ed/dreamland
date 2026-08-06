@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // Config drives a scaffold installation.
@@ -89,7 +90,90 @@ func installCommands(cfg Config) ([]Result, error) {
 	if spec.skillFile != "" {
 		return installSkills(cfg, spec)
 	}
-	return installFlatCommands(cfg, spec)
+	results, err := installFlatCommands(cfg, spec)
+	if err != nil {
+		return nil, err
+	}
+
+	// Bare, unprefixed aliases are additive to the drmlnd-prefixed set above, and are
+	// currently only in scope for Claude Code (see the router-slash-commands capability).
+	if cfg.CodingTool == "Claude Code" {
+		bareResults, err := installBareCommands(cfg, spec, filepath.Join(cfg.RepoRoot, ".claude", "commands"))
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, bareResults...)
+	}
+
+	return results, nil
+}
+
+// bareCommandMarker identifies a command file this scaffolder installed at a bare,
+// unprefixed path. Because bare names aren't namespaced (unlike the drmlnd-prefixed
+// set), a pre-existing file lacking this marker is treated as user-owned, not
+// dreamland-managed, and is never overwritten.
+const bareCommandMarker = "<!-- dreamland-managed: safe to overwrite on `dreamland init` -->"
+
+// bareCommandTargetName maps a drmlnd command template's filename to its bare,
+// unprefixed command filename. The generic route command has no per-agent
+// "force route directly to janus" counterpart to alias (forcing the destination to
+// Janus is exactly what the generic route already does), so it becomes two bare
+// entry points, `dreamland.md` and `janus.md`; every other template file (one per
+// non-router agent) keeps its own name.
+func bareCommandTargetNames(templateFilename string) []string {
+	if templateFilename == "route.md" {
+		return []string{"dreamland.md", "janus.md"}
+	}
+	return []string{templateFilename}
+}
+
+// installBareCommands installs a second, unprefixed command file per template
+// (route.md becomes two: dreamland.md and janus.md) alongside the drmlnd-prefixed
+// set installed by installFlatCommands. A pre-existing target file not carrying
+// bareCommandMarker is left untouched and a warning naming the skipped path is
+// printed to stderr, rather than being silently overwritten.
+func installBareCommands(_ Config, spec platformSpec, bareTargetDir string) ([]Result, error) {
+	if err := os.MkdirAll(bareTargetDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create bare commands dir: %w", err)
+	}
+
+	var results []Result
+	templateDir := "templates/" + spec.templateDir
+	entries, err := fs.ReadDir(TemplateFS, templateDir)
+	if err != nil {
+		return nil, fmt.Errorf("read template dir %q: %w", templateDir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := fs.ReadFile(TemplateFS, templateDir+"/"+entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		// Appended, not prepended: these files open with YAML frontmatter (`---`), which
+		// must stay on line 1 for the platform to parse `name:`/`description:` — a marker
+		// placed before it silently breaks frontmatter parsing instead of erroring.
+		content := append(append([]byte(nil), data...), []byte("\n"+bareCommandMarker+"\n")...)
+
+		for _, targetName := range bareCommandTargetNames(entry.Name()) {
+			targetPath := filepath.Join(bareTargetDir, targetName)
+
+			if existing, err := os.ReadFile(targetPath); err == nil && !strings.Contains(string(existing), bareCommandMarker) {
+				fmt.Fprintf(os.Stderr, "dreamland: skipping %s — pre-existing file not managed by dreamland\n", targetPath)
+				results = append(results, Result{Path: targetPath, Action: "skipped (not dreamland-managed)"})
+				continue
+			}
+
+			if err := os.WriteFile(targetPath, content, 0o644); err != nil {
+				return nil, err
+			}
+			results = append(results, Result{Path: targetPath, Action: "installed"})
+		}
+	}
+
+	return results, nil
 }
 
 // platformSpec maps a coding tool name to its template and target directories.

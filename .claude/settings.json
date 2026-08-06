@@ -46,10 +46,52 @@
       "Bash(/tmp/dreamland-readme-check telemetry *)",
       "Bash(rm -f /tmp/dreamland-readme-check)",
       "Bash(gofmt -l internal/scaffold/*.go)",
-      "Bash(go clean *)"
+      "Bash(go clean *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(python3 -c ' *)",
+      "Bash(openspec spec *)",
+      "Bash(openspec show *)",
+      "Read(//tmp/**)"
     ]
   },
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dreamland version-bump --change-from-command"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dreamland coauthor"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dreamland version-bump"
+          },
+          {
+            "type": "command",
+            "command": "dreamland coauthor"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "",
@@ -57,6 +99,58 @@
           {
             "type": "command",
             "command": "bash scripts/pre-merge-check.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dreamland version-bump --patch"
+          },
+          {
+            "type": "command",
+            "command": "dreamland transition-log"
+          },
+          {
+            "type": "command",
+            "command": "dreamland test"
+          },
+          {
+            "type": "command",
+            "command": "dreamland telemetry write --tool claude-code"
+          },
+          {
+            "type": "command",
+            "command": "dreamland commit --reason turn-complete"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dreamland coauthor"
+          },
+          {
+            "type": "command",
+            "command": "dreamland telemetry write --tool claude-code"
+          },
+          {
+            "type": "command",
+            "command": "dreamland version-bump --patch"
+          },
+          {
+            "type": "command",
+            "command": "dreamland version-bump --minor --if-agent janus"
+          },
+          {
+            "type": "command",
+            "command": "dreamland commit --reason handoff"
           }
         ]
       }

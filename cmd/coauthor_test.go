@@ -235,6 +235,20 @@ func TestAgentNameFromHookPayload_CopilotAgentType(t *testing.T) {
 	}
 }
 
+func TestAgentNameFromHookPayload_ClaudeCodeSubagentType(t *testing.T) {
+	withPipedStdin(t, `{"hook_event_name":"PreToolUse","tool_input":{"subagent_type":"phobetor"}}`)
+	if got := agentNameFromHookPayload(); got != "phobetor" {
+		t.Errorf("got %q, want phobetor", got)
+	}
+}
+
+func TestAgentNameFromHookPayload_AgentTypeTakesPriorityOverSubagentType(t *testing.T) {
+	withPipedStdin(t, `{"agent_type":"morpheus","tool_input":{"subagent_type":"phobetor"}}`)
+	if got := agentNameFromHookPayload(); got != "morpheus" {
+		t.Errorf("got %q, want morpheus", got)
+	}
+}
+
 func TestAgentNameFromHookPayload_NoAgentTypeField(t *testing.T) {
 	withPipedStdin(t, `{"hook_event_name":"Stop","session_id":"s1"}`)
 	if got := agentNameFromHookPayload(); got != "" {
@@ -282,6 +296,150 @@ func TestRunCoauthor_UsesAgentTypeFromHookPayload(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected git config user.name iktomi, got calls: %v", gitCalls)
+	}
+}
+
+func TestRunCoauthor_ClaudeCodeSubagentTypeFromToolInput(t *testing.T) {
+	makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
+	withPipedStdin(t, `{"hook_event_name":"PreToolUse","tool_input":{"subagent_type":"phobetor"}}`)
+
+	var gitCalls []string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		gitCalls = append(gitCalls, strings.Join(args, " "))
+		return "", nil
+	})
+
+	origTrailer := coauthorTrailer
+	coauthorTrailer = ""
+	t.Cleanup(func() { coauthorTrailer = origTrailer })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("runCoauthor: %v", err)
+	}
+
+	found := false
+	for _, c := range gitCalls {
+		if strings.Contains(c, "user.name phobetor") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected git config user.name phobetor, got calls: %v", gitCalls)
+	}
+}
+
+func TestRunCoauthor_ClaudeCodeUnrecognizedSubagentFallsBackToJanus(t *testing.T) {
+	makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
+	withPipedStdin(t, `{"hook_event_name":"PreToolUse","tool_input":{"subagent_type":"not-a-real-agent"}}`)
+
+	var gitCalls []string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		gitCalls = append(gitCalls, strings.Join(args, " "))
+		return "", nil
+	})
+
+	origTrailer := coauthorTrailer
+	coauthorTrailer = ""
+	t.Cleanup(func() { coauthorTrailer = origTrailer })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("runCoauthor: %v", err)
+	}
+
+	for _, c := range gitCalls {
+		if strings.Contains(c, "not-a-real-agent") {
+			t.Fatalf("unrecognized identity leaked into git config (name or email), calls: %v", gitCalls)
+		}
+	}
+	nameFound, emailFound := false, false
+	for _, c := range gitCalls {
+		if strings.Contains(c, "user.name janus") {
+			nameFound = true
+		}
+		if strings.Contains(c, "user.email janus@github.com") {
+			emailFound = true
+		}
+	}
+	if !nameFound {
+		t.Errorf("expected git config user.name janus, got calls: %v", gitCalls)
+	}
+	if !emailFound {
+		t.Errorf("expected git config user.email janus@github.com, got calls: %v", gitCalls)
+	}
+}
+
+func TestRunCoauthor_ClaudeCodeNoPayloadDefaultsToJanus(t *testing.T) {
+	// No stdin payload at all — the plain SessionStart case, before any Task/Agent call.
+	makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
+
+	var gitCalls []string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		gitCalls = append(gitCalls, strings.Join(args, " "))
+		return "", nil
+	})
+
+	origTrailer := coauthorTrailer
+	coauthorTrailer = ""
+	t.Cleanup(func() { coauthorTrailer = origTrailer })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("runCoauthor: %v", err)
+	}
+
+	found := false
+	for _, c := range gitCalls {
+		if strings.Contains(c, "user.name janus") {
+			found = true
+		}
+		if strings.Contains(c, "user.name Claude Code") {
+			t.Fatalf("Claude Code identity defaulted to coding-tool name instead of janus, calls: %v", gitCalls)
+		}
+	}
+	if !found {
+		t.Errorf("expected git config user.name janus by default, got calls: %v", gitCalls)
+	}
+}
+
+func TestRunCoauthor_NonClaudeCodePlatformKeepsCodingToolFallback(t *testing.T) {
+	// Non-Claude-Code platforms are out of scope for this change: the coding-tool-name
+	// fallback must remain unchanged when nothing else resolves.
+	makeCoauthorRepo(t, config.Config{CodingTool: "GitHub Copilot"})
+
+	var gitCalls []string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		gitCalls = append(gitCalls, strings.Join(args, " "))
+		return "", nil
+	})
+
+	origTrailer := coauthorTrailer
+	coauthorTrailer = ""
+	t.Cleanup(func() { coauthorTrailer = origTrailer })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("runCoauthor: %v", err)
+	}
+
+	found := false
+	for _, c := range gitCalls {
+		if strings.Contains(c, "user.name GitHub Copilot") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected git config user.name %q (unchanged fallback), got calls: %v", "GitHub Copilot", gitCalls)
+	}
+}
+
+func TestIsRegisteredAgent(t *testing.T) {
+	for _, name := range []string{"janus", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"} {
+		if !isRegisteredAgent(name) {
+			t.Errorf("%q should be a registered agent", name)
+		}
+	}
+	for _, name := range []string{"", "claude-code", "Claude Code", "dreamland", "not-a-real-agent"} {
+		if isRegisteredAgent(name) {
+			t.Errorf("%q should not be a registered agent", name)
+		}
 	}
 }
 

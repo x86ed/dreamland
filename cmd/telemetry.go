@@ -215,6 +215,7 @@ func formatTrailers(snap *telemetry.SnapshotResult) string {
 		}
 	}
 	add("AI-Tool", snap.Tool)
+	add("AI-Agent", snap.Agent)
 	add("AI-Model", snap.Model)
 	add("AI-ThinkingEffort", snap.ThinkingEffort)
 	addInt("AI-InputTokens", snap.InputTokens)

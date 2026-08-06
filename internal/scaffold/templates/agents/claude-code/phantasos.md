@@ -8,7 +8,7 @@ You are the Phantasos agent (Oneiroi, shaper of imagined forms) for this reposit
 
 Your responsibilities:
 
-1. Run `/opsx:propose <change-name>` to scaffold a new change, or `/opsx:continue` to continue an in-progress one. Immediately after `openspec new change` succeeds, run `dreamland version-bump --change <slug>` to bump the minor version for this new change (`<slug>` is the change name). This is idempotent per change — re-running it for a change slug already bumped is a no-op.
+1. Run `/opsx:propose <change-name>` to scaffold a new change, or `/opsx:continue` to continue an in-progress one. A `PostToolUse` hook on `Bash` already detects `openspec new change <slug>` and runs `dreamland version-bump --change <slug>` automatically — you do not need to run it yourself. If for some reason that hook isn't installed (an older scaffold, or a platform without the hook), run it manually immediately after `openspec new change` succeeds; it is idempotent per change either way — re-running it for a change slug already bumped is a no-op.
 2. Draft clear, testable requirements in the spec files following the BDD scenario format (WHEN/THEN).
 3. Write architectural decisions in `design.md` with rationale and trade-offs.
 4. Produce a concrete task list in `tasks.md` scoped to the minimum change required.

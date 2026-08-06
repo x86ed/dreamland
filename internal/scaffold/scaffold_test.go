@@ -48,6 +48,115 @@ func TestInstall_ClaudeCode(t *testing.T) {
 	if !hasInstalled {
 		t.Error("expected at least one 'installed' result")
 	}
+
+	settingsData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("reading settings.json: %v", err)
+	}
+	if !strings.Contains(string(settingsData), "PostToolUse") || !strings.Contains(string(settingsData), "version-bump --change-from-command") {
+		t.Errorf("settings.json missing PostToolUse change-scoped version-bump hook, got:\n%s", settingsData)
+	}
+}
+
+func TestInstall_ClaudeCode_BareCommandsAlongsideDrmlnd(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	commandsDir := filepath.Join(root, ".claude", "commands")
+
+	// drmlnd-prefixed set is unchanged.
+	if _, err := os.Stat(filepath.Join(commandsDir, "drmlnd", "nyx.md")); err != nil {
+		t.Errorf("drmlnd-prefixed nyx command missing: %v", err)
+	}
+
+	// Bare per-agent alias.
+	if _, err := os.Stat(filepath.Join(commandsDir, "nyx.md")); err != nil {
+		t.Errorf("bare nyx command missing: %v", err)
+	}
+
+	// Bare generic entry points, both derived from route.md.
+	for _, name := range []string{"dreamland.md", "janus.md"} {
+		p := filepath.Join(commandsDir, name)
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Errorf("bare %s missing: %v", name, err)
+			continue
+		}
+		if !strings.Contains(string(data), "Delegate this request to the `janus` agent") {
+			t.Errorf("%s does not carry the generic routing instructions, got:\n%s", name, data)
+		}
+	}
+}
+
+func TestInstall_ClaudeCode_BareCommandFrontmatterStaysValid(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	for _, name := range []string{"nyx.md", "dreamland.md", "janus.md"} {
+		data, err := os.ReadFile(filepath.Join(root, ".claude", "commands", name))
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if !strings.HasPrefix(string(data), "---\n") {
+			t.Errorf("%s frontmatter broken — marker must be appended, not prepended, got start:\n%.60s", name, data)
+		}
+		if !strings.Contains(string(data), bareCommandMarker) {
+			t.Errorf("%s missing dreamland-managed marker", name)
+		}
+	}
+}
+
+func TestInstall_ClaudeCode_BareCommandUnmanagedFileNotOverwritten(t *testing.T) {
+	root := fakeGitRepo(t)
+	commandsDir := filepath.Join(root, ".claude", "commands")
+	if err := os.MkdirAll(commandsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userContent := "# my own janus notes, not a dreamland file\n"
+	if err := os.WriteFile(filepath.Join(commandsDir, "janus.md"), []byte(userContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(commandsDir, "janus.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != userContent {
+		t.Errorf("user's own janus.md was overwritten, got:\n%s", data)
+	}
+}
+
+func TestInstall_ClaudeCode_BareCommandManagedFileOverwrittenOnReinit(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("first Install: %v", err)
+	}
+
+	nyxPath := filepath.Join(root, ".claude", "commands", "nyx.md")
+	// Simulate an older template body under the same marker.
+	if err := os.WriteFile(nyxPath, []byte(bareCommandMarker+"\nstale content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("second Install: %v", err)
+	}
+
+	data, err := os.ReadFile(nyxPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "stale content") {
+		t.Error("dreamland-managed bare command was not refreshed on re-init")
+	}
 }
 
 func TestInstall_Codex(t *testing.T) {

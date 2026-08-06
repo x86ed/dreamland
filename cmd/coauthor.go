@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"dreamland/internal/agentidentity"
 	"dreamland/internal/config"
 	"dreamland/internal/telemetry"
 )
@@ -60,8 +61,16 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 
 	// Default mode: set agent git identity and install the hook.
 	agentName := resolveAgentName(cfg.CodingTool)
-	if hookAgent := agentNameFromHookPayload(); hookAgent != "" {
+	if hookAgent := agentNameFromHookPayload(); hookAgent != "" && isRegisteredAgent(hookAgent) {
 		agentName = hookAgent
+	}
+	// Claude Code has no per-agent env var and no sub-agent identifier on its
+	// SessionStart/Stop/SubagentStop payloads (only on PreToolUse/PostToolUse for the
+	// Task/Agent tool call itself) — so absent a valid hook-resolved identity, the coding
+	// tool name is not a real agent and must not become the git identity. Other platforms
+	// keep the coding-tool-name fallback unchanged.
+	if cfg.CodingTool == "Claude Code" && !isRegisteredAgent(agentName) {
+		agentName = "janus"
 	}
 	agentEmail := config.EmailClean(agentName) + suffix
 
@@ -73,6 +82,13 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 	}
 
 	return installPrepareCommitMsgHook(cwd)
+}
+
+// isRegisteredAgent reports whether name is one of the ten registered dreamland
+// agents — see the session-agent-identity capability for why a candidate identity
+// resolved from a hook payload that isn't in this set must be treated as unresolved.
+func isRegisteredAgent(name string) bool {
+	return agentidentity.IsRegistered(name)
 }
 
 // resolveAgentName returns the agent name from platform env vars or falls back to the coding tool name.
@@ -108,9 +124,12 @@ const hookPayloadReadTimeout = 200 * time.Millisecond
 // hookPayloadReadTimeout, and extracts the acting sub-agent's identity if present.
 // Confirmed from live GitHub Copilot SubagentStart/SubagentStop hook payloads: the field
 // is "agent_type" (e.g. "morpheus", "iktomi") — undocumented but consistently present.
-// SessionStart/Stop payloads (which aren't about a specific sub-agent) don't carry this
-// field, so the existing env-var/coding-tool fallback in resolveAgentName still applies
-// for those. Returns "" whenever no matching payload arrives in time.
+// Claude Code carries no top-level "agent_type" at all; the sub-agent identifier only
+// appears as "tool_input.subagent_type" on the PreToolUse/PostToolUse payload for the
+// Task/Agent tool call itself. SessionStart/Stop/SubagentStop payloads on Claude Code
+// (which aren't about a specific sub-agent, or don't carry the tool call's input) don't
+// carry either field, so the existing env-var/coding-tool fallback in resolveAgentName
+// still applies for those. Returns "" whenever no matching payload arrives in time.
 func agentNameFromHookPayload() string {
 	type result struct {
 		data []byte
@@ -137,10 +156,7 @@ func agentNameFromHookPayload() string {
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return ""
 	}
-	if v, ok := payload["agent_type"].(string); ok && v != "" {
-		return v
-	}
-	return ""
+	return agentidentity.FromPayload(payload)
 }
 
 const prepareCommitMsgContent = "#!/bin/sh\ndreamland coauthor --trailer \"$1\" \"$2\" \"$3\"\n"
