@@ -51,7 +51,8 @@
       "Bash(python3 -c ' *)",
       "Bash(openspec spec *)",
       "Bash(openspec show *)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(git config *)"
     ]
   },
   "hooks": {

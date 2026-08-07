@@ -2,9 +2,9 @@
   "tool": "claude-code",
   "model": "claude-sonnet-5",
   "thinking_effort": "high",
-  "input_tokens": 660,
-  "output_tokens": 237659,
-  "cached_tokens": 56669959,
-  "total_tokens": 238319,
-  "captured_at": "2026-08-06T22:38:56Z"
+  "input_tokens": 674,
+  "output_tokens": 242818,
+  "cached_tokens": 56926529,
+  "total_tokens": 243492,
+  "captured_at": "2026-08-07T01:18:21Z"
 }
