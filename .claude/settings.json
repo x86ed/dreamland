@@ -52,7 +52,10 @@
       "Bash(openspec spec *)",
       "Bash(openspec show *)",
       "Read(//tmp/**)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(cp dreamland *)",
+      "Read(//Users/adamsiegel/.local/bin/**)",
+      "Bash(dreamland coauthor *)"
     ]
   },
   "hooks": {
