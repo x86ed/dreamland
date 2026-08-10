@@ -55,7 +55,11 @@
       "Bash(git config *)",
       "Bash(cp dreamland *)",
       "Read(//Users/adamsiegel/.local/bin/**)",
-      "Bash(dreamland coauthor *)"
+      "Bash(dreamland coauthor *)",
+      "Bash(dreamland telemetry *)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(git tag *)"
     ]
   },
   "hooks": {
