@@ -8,11 +8,9 @@
 
 AgentName resolution tries, in order:
 
-1. A hook stdin payload for the current invocation, checked for an agent identifier in whichever shape the platform actually emits:
+1. A hook stdin payload for the current invocation, read only when `dreamland coauthor` is invoked with `--hook` — a flag set exclusively by dreamland's own scaffold-installed hook-binding templates (every platform: Claude Code, GitHub Copilot, Cursor, Codex, Kiro), never by a human running the command manually. Without `--hook`, stdin is never opened or read at all, so a manual invocation in any terminal returns immediately with no possibility of blocking, regardless of what kind of stdin is attached. With `--hook`, the payload is read synchronously to completion (no timeout) — correct because every hook-binding caller writes its payload and closes its end of the pipe promptly, so the read completes as soon as the real data arrives, however long that legitimately takes, checked for an agent identifier in whichever shape the platform actually emits:
    - GitHub Copilot: top-level `agent_type` (e.g. `"morpheus"`) on `SubagentStart`/`SubagentStop` payloads.
    - Claude Code: `tool_input.subagent_type` (e.g. `"morpheus"`) on the `PreToolUse`/`PostToolUse` payload for the `Task`/`Agent` tool call — Claude Code does not emit a top-level `agent_type` field, and `SessionStart`/`Stop`/`SubagentStop` payloads on Claude Code do not carry a sub-agent identifier at all (only `session_id`/`transcript_path`/`hook_event_name`), so this path only resolves anything on the `PreToolUse`/`PostToolUse` hook for that tool.
-
-   The read of this payload from stdin SHALL be bounded by a timeout (500ms) so the invoking command can never block indefinitely on a payload that never arrives (e.g. an interactive terminal with no piped stdin). A read that times out without any data arriving SHALL be observably distinguished (e.g. a diagnostic written to stderr) from a payload that arrived promptly but legitimately carried no agent identifier (e.g. a `Stop`/`SessionStart` payload on Claude Code, which never carries one) — both still resolve to "no candidate from this step," but only the former logs a diagnostic, so a payload that consistently arrives too late is distinguishable from a hook event that never carries an identity by design.
 2. The platform's current-agent env var, if the platform sets one at runtime (no currently-supported platform does; this path exists for forward compatibility and is not exercised by Claude Code or GitHub Copilot).
 3. The coding tool name in `.dreamland.json`.
 4. If a hook payload resolved a candidate value (step 1) that is not one of the ten registered dreamland agent names (`janus`, `phantasos`, `nyx`, `morpheus`, `phobetor`, `baku`, `iktomi`, `zhougong`, `hypnos`, `mengpo`), that candidate is discarded — treated the same as if step 1 had resolved nothing — rather than used verbatim.
@@ -94,11 +92,21 @@ This hook script intentionally has no `command -v dreamland` guard: if `dreamlan
 - **WHEN** `dreamland coauthor` resolves a candidate AgentName that is not one of the ten registered dreamland agent names (e.g. a malformed or unexpected payload value)
 - **THEN** AgentName falls back to `"janus"` rather than using the unrecognized value verbatim
 
-#### Scenario: Hook payload read timing out is distinguishable from a payload legitimately carrying no identity
+#### Scenario: coauthor without --hook never touches stdin
 
-- **WHEN** `dreamland coauthor` waits the full hook-payload read timeout with no data arriving on stdin at all
-- **THEN** AgentName resolution falls through to step 2 exactly as if no payload had arrived, but a diagnostic is written to stderr noting the read timed out
-- **AND** when a payload arrives promptly but simply has no `agent_type`/`tool_input.subagent_type` field (e.g. a `Stop` payload), resolution falls through the same way with no diagnostic written
+- **WHEN** `dreamland coauthor` runs without the `--hook` flag (a human invoking it directly, in any kind of terminal)
+- **THEN** no read of stdin is attempted, AgentName resolution proceeds directly to step 2, and the command cannot block regardless of what is or isn't attached to stdin
+
+#### Scenario: coauthor --hook flag added to every platform's hook binding
+
+- **WHEN** `dreamland init` completes for Claude Code, GitHub Copilot, Cursor, Codex, or Kiro
+- **THEN** every default-mode `dreamland coauthor` entry in that platform's installed hook-binding file includes `--hook`
+- **AND** `--trailer`-mode invocations (the installed `prepare-commit-msg` git hook) do not include `--hook`, since that code path never reads stdin for an agent-identity payload
+
+#### Scenario: GitHub Copilot identity resolution is unaffected by the --hook gating change
+
+- **WHEN** `dreamland coauthor --hook` runs via GitHub Copilot's `SubagentStart`/`SubagentStop` hook with a payload of `{"agent_type": "iktomi", ...}`
+- **THEN** `git config --local user.name` is set to `"iktomi"`, exactly as it would resolve before this change — only when the payload is read changed, not how it is parsed
 
 #### Scenario: coauthor skips silently outside a git repository
 
@@ -161,7 +169,11 @@ Behavior:
 
 1. If no git repository exists at or above the current working directory, exit 0 silently (a skip, not a failure) — there is nothing for this command to commit to.
 2. Inspect `git status --porcelain`. If there are no staged or unstaged changes, exit 0 silently — no commit is created.
-3. Before staging or committing anything, when `commitReason` is `turn-complete`, consult `.dreamland/last-test-result.json` (written by `dreamland test`, see the modified `test` requirement above). If it records `"status": "fail"` for a `head_sha` matching the repository's current `HEAD`, `dreamland commit` SHALL refuse to create the commit — no `git add`, no `git commit` — and SHALL exit with the blocking code (2). The pending changes remain staged/unstaged, to be picked up by the next successful `dreamland commit` invocation once tests pass. If the record is absent, or its `head_sha` does not match the current `HEAD` (the record does not describe the current tree), this gating step does not apply and `commit` proceeds normally.
+3. Before staging or committing anything, when `commitReason` is `turn-complete`, consult `.dreamland/last-test-result.json` (written by `dreamland test`, see the modified `test` requirement above), and `cfg.TestCommand` from `.dreamland.json`:
+   - If the record exists and records `"status": "fail"` for a `head_sha` matching the repository's current `HEAD`, `dreamland commit` SHALL refuse to create the commit — no `git add`, no `git commit` — and SHALL exit with the blocking code (2). The pending changes remain staged/unstaged, to be picked up by the next successful `dreamland commit` invocation once tests pass.
+   - If the record does not exist at all, and `cfg.TestCommand` is non-empty (a test command is configured for this project), `dreamland commit` SHALL treat this as a broken invariant, not a skip: it SHALL refuse to create the commit and SHALL exit with the blocking code (2), with a message stating that a test command is configured but no result was recorded for this turn and instructing that this should route to `iktomi` to investigate why `dreamland test` did not run or record a result before this commit attempt.
+   - If the record does not exist and `cfg.TestCommand` is empty (no test command configured for this project), this gating step does not apply — there was never an expectation of a result — and `commit` proceeds normally.
+   - If the record exists but its `head_sha` does not match the current `HEAD` (a stale record, not a missing one), this gating step does not apply and `commit` proceeds normally — staleness is treated differently from absence because a stale record at least proves tests ran successfully at some point, while absence (with a test command configured) proves they may not have run this turn at all.
 4. Otherwise, stage all changes (`git add -A`) and run `git commit -m "chore: <reason> checkpoint (<agent-name>)"`, where `<agent-name>` is read from the currently configured `git config --local user.name` (the value `dreamland coauthor`'s identity-resolution logic, per the modified `coauthor` requirement above, most recently set) — not independently re-resolved from the current invocation's own hook payload or env vars, since `commit` may run at a different lifecycle event (e.g. `Stop`) than the `coauthor` invocation that last set identity (e.g. `PreToolUse`/`SubagentStop`), which would see a different payload shape and could resolve a different value. If `git config --local user.name` is unset (e.g. `coauthor` has genuinely never run in this repository), `<agent-name>` falls back to the same resolution logic `coauthor` uses.
 5. Because this shells out to `git commit`, the already-installed `prepare-commit-msg` hook fires normally and appends the Co-authored-by trailer and token-usage report (see the modified `coauthor` requirement) to the commit message — `dreamland commit` does not duplicate that logic.
 6. A failure in `git add -A` or `git commit` itself (distinct from the test-gating refusal in step 3) is a genuine, blocking failure — exit code 2 — since the entire purpose of this command is to guarantee a commit exists for every turn/handoff.
@@ -187,6 +199,16 @@ The scaffold installer SHALL bind `dreamland commit --reason turn-complete` to C
 
 - **WHEN** `dreamland commit --reason turn-complete` runs and `.dreamland/last-test-result.json` records a `head_sha` that does not match the current `HEAD`
 - **THEN** the gating step in behavior item 3 does not apply, and the commit proceeds normally per the other scenarios
+
+#### Scenario: Commit refused and routed to iktomi when a configured test command recorded no result
+
+- **WHEN** `dreamland commit --reason turn-complete` runs, `cfg.TestCommand` is non-empty, and no `.dreamland/last-test-result.json` file exists at all
+- **THEN** no `git add` or `git commit` is run, `dreamland commit` exits with the blocking code (2), and the error message states that a test command is configured but no result was recorded, instructing that this routes to `iktomi` for investigation
+
+#### Scenario: Missing test-result record does not gate a commit when no test command is configured
+
+- **WHEN** `dreamland commit --reason turn-complete` runs, `cfg.TestCommand` is empty (or `.dreamland.json` is absent), and no `.dreamland/last-test-result.json` file exists
+- **THEN** the gating step in behavior item 3 does not apply, and the commit proceeds normally
 
 #### Scenario: Commit subject and git author never diverge
 
