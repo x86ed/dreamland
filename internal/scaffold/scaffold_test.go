@@ -306,6 +306,40 @@ func TestInstall_Antigravity(t *testing.T) {
 	}
 }
 
+func TestInstall_EveryPlatformCoauthorHookIncludesHookFlag(t *testing.T) {
+	cases := []struct {
+		codingTool string
+		hookPath   []string
+	}{
+		{"Claude Code", []string{".claude", "settings.json"}},
+		{"GitHub Copilot", []string{".github", "hooks", "dreamland-hooks.json"}},
+		{"Cursor", []string{".cursor", "hooks.json"}},
+		{"Codex CLI", []string{".codex", "hooks.json"}},
+		{"Kiro", []string{".kiro", "agent.json"}},
+	}
+	for _, c := range cases {
+		t.Run(c.codingTool, func(t *testing.T) {
+			root := fakeGitRepo(t)
+			if _, err := Install(Config{RepoRoot: root, CodingTool: c.codingTool}); err != nil {
+				t.Fatalf("Install: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(append([]string{root}, c.hookPath...)...))
+			if err != nil {
+				t.Fatalf("reading installed hook file: %v", err)
+			}
+			content := string(data)
+			count := strings.Count(content, `"dreamland coauthor`)
+			if count == 0 {
+				t.Fatalf("%s: expected at least one dreamland coauthor hook entry, found none in:\n%s", c.codingTool, content)
+			}
+			hookedCount := strings.Count(content, `"dreamland coauthor --hook`)
+			if hookedCount != count {
+				t.Errorf("%s: expected all %d dreamland coauthor hook-binding entries to include --hook, only %d did:\n%s", c.codingTool, count, hookedCount, content)
+			}
+		})
+	}
+}
+
 func TestInstall_GitHubCopilot_AgentScopedHooks(t *testing.T) {
 	root := fakeGitRepo(t)
 	_, err := Install(Config{RepoRoot: root, CodingTool: "GitHub Copilot"})

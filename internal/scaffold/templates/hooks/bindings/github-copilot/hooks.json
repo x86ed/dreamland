@@ -17,9 +17,8 @@
     "Stop": [
       {"type": "command", "command": "dreamland version-bump --patch", "timeout": 30},
       {"type": "command", "command": "dreamland transition-log", "timeout": 30},
-      {"type": "command", "command": "dreamland test", "timeout": 60},
       {"type": "command", "command": "dreamland telemetry write --tool github-copilot", "timeout": 30},
-      {"type": "command", "command": "dreamland commit --reason turn-complete", "timeout": 30}
+      {"type": "command", "command": "dreamland test-and-commit --reason turn-complete", "timeout": 60}
     ]
   }
 }

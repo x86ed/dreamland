@@ -178,7 +178,7 @@ Behavior:
 5. Because this shells out to `git commit`, the already-installed `prepare-commit-msg` hook fires normally and appends the Co-authored-by trailer and token-usage report (see the modified `coauthor` requirement) to the commit message — `dreamland commit` does not duplicate that logic.
 6. A failure in `git add -A` or `git commit` itself (distinct from the test-gating refusal in step 3) is a genuine, blocking failure — exit code 2 — since the entire purpose of this command is to guarantee a commit exists for every turn/handoff.
 
-The scaffold installer SHALL bind `dreamland commit --reason turn-complete` to Claude Code's `Stop` event (alongside the existing end-of-turn commands) and `dreamland commit --reason handoff` to Claude Code's `SubagentStop` event (alongside `dreamland coauthor` and `dreamland telemetry write --tool claude-code`, per the requirement above). On platforms without a `SubagentStop`-equivalent event, only the `Stop`-bound `--reason turn-complete` invocation applies; handoff commits on those platforms rely on the same agent-driven convention described in the requirement above for `coauthor`/`telemetry write`.
+On any platform whose `Stop`-equivalent hook binding chains `dreamland test` immediately before `dreamland commit --reason turn-complete`, the scaffold installer SHALL bind `dreamland test-and-commit --reason turn-complete` (see the added `dreamland test-and-commit` requirement below) in place of that pair, instead of the two commands separately — this closes a race where the hook runner does not guarantee `test` finishes writing `.dreamland/last-test-result.json` before a separately-dispatched `commit` reads it. `dreamland commit --reason handoff` is bound to Claude Code's `SubagentStop` event unchanged (alongside `dreamland coauthor` and `dreamland telemetry write --tool claude-code`, per the requirement above) — no platform binds `test` under its `SubagentStop`-equivalent event, and the test-gating step in behavior item 3 above only applies to `commitReason == "turn-complete"`, so the race does not apply to handoff commits. On platforms without a `SubagentStop`-equivalent event, only the `Stop`-bound `test-and-commit --reason turn-complete` invocation applies; handoff commits on those platforms rely on the same agent-driven convention described in the requirement above for `coauthor`/`telemetry write`.
 
 #### Scenario: Commit created when a turn completes with pending changes
 
@@ -220,11 +220,11 @@ The scaffold installer SHALL bind `dreamland commit --reason turn-complete` to C
 - **WHEN** a sub-agent's turn ends via `SubagentStop` and `git status --porcelain` shows pending changes
 - **THEN** `dreamland commit --reason handoff` stages and commits those changes with subject `chore: handoff checkpoint (<outgoing-agent-name>)` before Janus regains control
 
-#### Scenario: Claude Code settings.json binds dreamland commit to Stop and SubagentStop
+#### Scenario: Claude Code settings.json binds test-and-commit to Stop and commit to SubagentStop
 
 - **WHEN** `dreamland init` completes with "Claude Code" selected
-- **THEN** `.claude/settings.json` contains `dreamland commit --reason turn-complete` under the `Stop` event key
-- **AND** contains `dreamland commit --reason handoff` under the `SubagentStop` event key
+- **THEN** `.claude/settings.json` contains `dreamland test-and-commit --reason turn-complete` under the `Stop` event key, and does not contain a separate `dreamland test` entry followed by `dreamland commit --reason turn-complete`
+- **AND** contains `dreamland commit --reason handoff` under the `SubagentStop` event key, unchanged
 
 #### Scenario: commit skips silently outside a git repository
 
@@ -238,6 +238,23 @@ The scaffold installer SHALL bind `dreamland commit --reason turn-complete` to C
 
 ## ADDED Requirements
 
+### Requirement: dreamland test-and-commit runs test then commit in one process to remove the Stop-hook race
+
+`dreamland` SHALL expose `dreamland test-and-commit --reason <turn-complete|handoff>`, which runs the same logic as `dreamland test` followed by the same logic as `dreamland commit --reason <reason>`, within a single process and a single invocation. If the test step returns an error, that error SHALL be written to stderr and execution SHALL still proceed to the commit step (which, per the modified `commit` requirement above, will itself observe the just-written `.dreamland/last-test-result.json` and refuse to commit when appropriate) — `test-and-commit`'s own exit code and final error SHALL be those of the commit step.
+
+This exists because a `Stop`-equivalent hook binding that runs `dreamland test` and `dreamland commit --reason turn-complete` as two separately hook-bound commands does not have a documented guarantee that the first finishes writing `.dreamland/last-test-result.json` before the second reads it — confirmed empirically, not merely theoretically, when this exact pair produced a false "no result recorded" refusal on an ordinary turn where `test` had in fact run and was about to record a failure. Running both steps as one process removes the race structurally: there is no second process for a hook runner to schedule concurrently against.
+
+#### Scenario: A failing test step still leads to commit's own refusal, not a separate ambiguous failure
+
+- **WHEN** `dreamland test-and-commit --reason turn-complete` runs, source files changed, and the configured `test_command` fails
+- **THEN** the test failure is written to `.dreamland/last-test-result.json` and to stderr, and the subsequent commit step observes that record for the current `HEAD` and refuses to commit, exactly as `dreamland commit --reason turn-complete` would given that same record
+- **AND** `dreamland test-and-commit` exits with the blocking code (2)
+
+#### Scenario: A passing test step allows the commit step to proceed
+
+- **WHEN** `dreamland test-and-commit --reason turn-complete` runs, source files changed, and the configured `test_command` succeeds
+- **THEN** `.dreamland/last-test-result.json` records `"status": "pass"` for the current `HEAD`, and the commit step stages and commits pending changes exactly as `dreamland commit --reason turn-complete` would given that record
+
 ### Requirement: Hook-invoked commands distinguish blocking failures from advisory skips via exit code
 
 `dreamland` SHALL exit with code 2 — the only code Claude Code's hook lifecycle treats as blocking a `PreToolUse`/`Stop`/`SubagentStop` transition — when `coauthor`, `commit`, or `test` (the three commands the audit identified as having a genuine failure mode with real consequences) encounter a genuine, unrecoverable failure, as detailed in each command's own requirement above. Every other error from any other command, and every already-existing skip condition on these three commands, SHALL continue to exit 1 (advisory, unchanged default) or 0 (silent skip) exactly as before this change — this requirement narrows to the three named commands, not a blanket change to every command's error handling.
@@ -246,7 +263,7 @@ This is implemented as a single dispatch point in `Execute()` (the CLI's top-lev
 
 #### Scenario: A blocking failure exits with code 2
 
-- **WHEN** `dreamland coauthor`, `dreamland commit`, or `dreamland test` (on an actual test-command failure) encounters the genuine failure condition described in its own requirement
+- **WHEN** `dreamland coauthor`, `dreamland commit`, `dreamland test` (on an actual test-command failure), or `dreamland test-and-commit` (which inherits its exit code from the commit step, per its own requirement) encounters the genuine failure condition described in its own requirement
 - **THEN** the process exits with code 2
 
 #### Scenario: A skip condition still exits 0

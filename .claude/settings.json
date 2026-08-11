@@ -59,7 +59,18 @@
       "Bash(dreamland telemetry *)",
       "Bash(echo \"exit:$?\")",
       "Bash(echo \"EXIT:$?\")",
-      "Bash(git tag *)"
+      "Bash(git tag *)",
+      "Bash(echo \"BUILD_EXIT:$?\")",
+      "Bash(echo \"VET_EXIT:$?\")",
+      "Bash(git check-ignore *)",
+      "Bash(./dreamland test *)",
+      "Bash(echo \"TEST_EXIT:$?\")",
+      "Bash(./dreamland commit *)",
+      "Bash(echo \"COMMIT_EXIT:$?\")",
+      "Bash(cp /tmp/dreamland-json-backup.json .dreamland.json)",
+      "Bash(rm -f /tmp/dreamland-json-backup.json)",
+      "Bash(echo \"BUILD:$?\")",
+      "Bash(echo \"VET:$?\")"
     ]
   },
   "hooks": {
@@ -123,15 +134,11 @@
           },
           {
             "type": "command",
-            "command": "dreamland test"
-          },
-          {
-            "type": "command",
             "command": "dreamland telemetry write --tool claude-code"
           },
           {
             "type": "command",
-            "command": "dreamland commit --reason turn-complete"
+            "command": "dreamland test-and-commit --reason turn-complete"
           }
         ]
       }
