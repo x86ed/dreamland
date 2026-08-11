@@ -76,7 +76,7 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 		return errors.New("at most one of --major, --minor, --patch, --version may be specified")
 	}
 
-	if vbIfAgent != "" && agentNameFromHookPayload() != vbIfAgent {
+	if vbIfAgent != "" && agentNameFromHookPayloadFrom(os.Stdin) != vbIfAgent {
 		return nil // hook fired for a different agent — silent no-op
 	}
 
@@ -187,12 +187,6 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// bashHookStdinReadTimeout bounds how long changeSlugFromBashHookStdin waits for a hook
-// payload before giving up — same rationale as coauthor's hookPayloadReadTimeout: this
-// command runs from a PostToolUse hook that pipes its payload near-instantly, but must
-// never hang if invoked directly in an interactive terminal with no payload incoming.
-const bashHookStdinReadTimeout = 200 * time.Millisecond
-
 // openspecNewChangeRe matches the two `openspec` CLI shapes that create a new change,
 // capturing the change slug (optionally double-quoted).
 var openspecNewChangeRe = regexp.MustCompile(`openspec\s+(?:new\s+change|change\s+create)\s+"?([A-Za-z0-9][A-Za-z0-9._-]*)"?`)
@@ -200,28 +194,12 @@ var openspecNewChangeRe = regexp.MustCompile(`openspec\s+(?:new\s+change|change\
 // changeSlugFromBashHookStdin reads a Claude Code PostToolUse hook payload (matcher:
 // Bash) from r and extracts the change slug if the completed command matches
 // `openspec new change <slug>` / `openspec change create <slug>`. Returns ok=false if
-// the payload doesn't arrive in time, isn't valid JSON, has no tool_input.command, or
-// the command doesn't match — all silent-no-op cases, since this hook fires for every
-// Bash call, not just the one that creates a new change.
+// the payload isn't valid JSON, has no tool_input.command, or the command doesn't
+// match — all silent-no-op cases, since this hook fires for every Bash call, not just
+// the one that creates a new change.
 func changeSlugFromBashHookStdin(r io.Reader) (string, bool) {
-	type result struct {
-		data []byte
-		err  error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		data, err := io.ReadAll(io.LimitReader(r, 1<<16))
-		ch <- result{data, err}
-	}()
-
-	var data []byte
-	select {
-	case res := <-ch:
-		if res.err != nil || len(res.data) == 0 {
-			return "", false
-		}
-		data = res.data
-	case <-time.After(bashHookStdinReadTimeout):
+	data, err := io.ReadAll(io.LimitReader(r, 1<<16))
+	if err != nil || len(data) == 0 {
 		return "", false
 	}
 

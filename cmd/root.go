@@ -17,12 +17,17 @@ var (
 	currentConfig *config.Config
 )
 
-// loadConfig is rootCmd's PersistentPreRunE: loads .dreamland.json if present.
+// loadConfig is rootCmd's PersistentPreRunE: loads .dreamland.json if present
+// and performs a binary freshness check.
 func loadConfig(_ *cobra.Command, _ []string) error {
 	cwd, err := osGetwd()
 	if err != nil {
 		return err
 	}
+
+	// Check for binary staleness (advisory, non-blocking)
+	checkBinaryFreshness(cwd)
+
 	cfg, err := config.Load(cwd)
 	if err != nil {
 		// No git repo or other load error — treat as no config.
@@ -38,9 +43,12 @@ func GetConfig() *config.Config {
 	return currentConfig
 }
 
-// Execute runs the root CLI command and exits with code 1 on error.
+// Execute runs the root CLI command and exits appropriately based on error type.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
+		if IsBlocking(err) {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 }

@@ -2,14 +2,14 @@
   "hooks": {
     "SessionStart": [
       {"type": "command", "command": "dreamland version-bump", "timeout": 30},
-      {"type": "command", "command": "dreamland coauthor", "timeout": 30},
+      {"type": "command", "command": "dreamland coauthor --hook", "timeout": 30},
       {"type": "command", "command": "dreamland otel-receiver", "timeout": 10}
     ],
     "SubagentStart": [
-      {"type": "command", "command": "dreamland coauthor", "timeout": 30}
+      {"type": "command", "command": "dreamland coauthor --hook", "timeout": 30}
     ],
     "SubagentStop": [
-      {"type": "command", "command": "dreamland coauthor", "timeout": 30},
+      {"type": "command", "command": "dreamland coauthor --hook", "timeout": 30},
       {"type": "command", "command": "dreamland telemetry write --tool github-copilot", "timeout": 30},
       {"type": "command", "command": "dreamland version-bump --patch", "timeout": 30},
       {"type": "command", "command": "dreamland commit --reason handoff", "timeout": 30}

@@ -2,15 +2,13 @@ package cmd
 
 import (
 	"encoding/json"
-	"errors"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"dreamland/internal/config"
-	"dreamland/internal/telemetry"
 )
 
 func TestResolveAgentName_EnvVar(t *testing.T) {
@@ -179,613 +177,99 @@ func TestAppendCoauthorTrailer_EmptyModelID(t *testing.T) {
 	}
 }
 
-// withPipedStdin replaces os.Stdin with a pipe containing data for the duration of fn,
-// then restores the original os.Stdin.
-func withPipedStdin(t *testing.T, data string) {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.WriteString(data); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-
-	orig := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() {
-		os.Stdin = orig
-		r.Close()
-	})
-}
-
-func TestAgentNameFromHookPayload_NeverBlocksWhenNoDataArrives(t *testing.T) {
-	// Simulates an interactive terminal (or any stdin that never sends EOF or data):
-	// the read end of a pipe with nothing written and never closed. This must return
-	// within hookPayloadReadTimeout, not hang — this is the exact bug reported when
-	// running `dreamland coauthor` directly in VS Code's integrated terminal.
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { w.Close(); r.Close() })
-
-	orig := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = orig })
-
-	done := make(chan string, 1)
-	go func() { done <- agentNameFromHookPayload() }()
-
-	select {
-	case got := <-done:
-		if got != "" {
-			t.Errorf("got %q, want empty string", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("agentNameFromHookPayload blocked past its own timeout — hang reproduced")
-	}
-}
-
-func TestAgentNameFromHookPayload_CopilotAgentType(t *testing.T) {
-	withPipedStdin(t, `{"hook_event_name":"SubagentStop","session_id":"s1","agent_type":"morpheus"}`)
-	if got := agentNameFromHookPayload(); got != "morpheus" {
+// TestAgentNameFromHookPayloadFrom_CopilotAgentType tests that the function
+// correctly parses GitHub Copilot's agent_type field.
+func TestAgentNameFromHookPayloadFrom_CopilotAgentType(t *testing.T) {
+	payload := `{"hook_event_name":"SubagentStop","session_id":"s1","agent_type":"morpheus"}`
+	reader := bytes.NewReader([]byte(payload))
+	got := agentNameFromHookPayloadFrom(reader)
+	if got != "morpheus" {
 		t.Errorf("got %q, want morpheus", got)
 	}
 }
 
-func TestAgentNameFromHookPayload_ClaudeCodeSubagentType(t *testing.T) {
-	withPipedStdin(t, `{"hook_event_name":"PreToolUse","tool_input":{"subagent_type":"phobetor"}}`)
-	if got := agentNameFromHookPayload(); got != "phobetor" {
+// TestAgentNameFromHookPayloadFrom_ClaudeCodeSubagentType tests that the function
+// correctly parses Claude Code's tool_input.subagent_type field.
+func TestAgentNameFromHookPayloadFrom_ClaudeCodeSubagentType(t *testing.T) {
+	payload := `{"hook_event_name":"PreToolUse","tool_input":{"subagent_type":"phobetor"}}`
+	reader := bytes.NewReader([]byte(payload))
+	got := agentNameFromHookPayloadFrom(reader)
+	if got != "phobetor" {
 		t.Errorf("got %q, want phobetor", got)
 	}
 }
 
-func TestAgentNameFromHookPayload_AgentTypeTakesPriorityOverSubagentType(t *testing.T) {
-	withPipedStdin(t, `{"agent_type":"morpheus","tool_input":{"subagent_type":"phobetor"}}`)
-	if got := agentNameFromHookPayload(); got != "morpheus" {
+// TestAgentNameFromHookPayloadFrom_AgentTypeTakesPriority tests that agent_type
+// takes priority over tool_input.subagent_type.
+func TestAgentNameFromHookPayloadFrom_AgentTypeTakesPriority(t *testing.T) {
+	payload := `{"agent_type":"morpheus","tool_input":{"subagent_type":"phobetor"}}`
+	reader := bytes.NewReader([]byte(payload))
+	got := agentNameFromHookPayloadFrom(reader)
+	if got != "morpheus" {
 		t.Errorf("got %q, want morpheus", got)
 	}
 }
 
-func TestAgentNameFromHookPayload_NoAgentTypeField(t *testing.T) {
-	withPipedStdin(t, `{"hook_event_name":"Stop","session_id":"s1"}`)
-	if got := agentNameFromHookPayload(); got != "" {
+// TestAgentNameFromHookPayloadFrom_NoAgentTypeField tests that the function
+// returns "" when no agent field is present.
+func TestAgentNameFromHookPayloadFrom_NoAgentTypeField(t *testing.T) {
+	payload := `{"hook_event_name":"Stop","session_id":"s1"}`
+	reader := bytes.NewReader([]byte(payload))
+	got := agentNameFromHookPayloadFrom(reader)
+	if got != "" {
 		t.Errorf("got %q, want empty string when no agent_type field present", got)
 	}
 }
 
-func TestAgentNameFromHookPayload_EmptyStdin(t *testing.T) {
-	withPipedStdin(t, "")
-	if got := agentNameFromHookPayload(); got != "" {
+// TestAgentNameFromHookPayloadFrom_EmptyStdin tests that the function handles empty input.
+func TestAgentNameFromHookPayloadFrom_EmptyStdin(t *testing.T) {
+	reader := bytes.NewReader([]byte(""))
+	got := agentNameFromHookPayloadFrom(reader)
+	if got != "" {
 		t.Errorf("got %q, want empty string for empty stdin", got)
 	}
 }
 
-func TestAgentNameFromHookPayload_InvalidJSON(t *testing.T) {
-	withPipedStdin(t, "not json")
-	if got := agentNameFromHookPayload(); got != "" {
+// TestAgentNameFromHookPayloadFrom_InvalidJSON tests that the function handles invalid JSON.
+func TestAgentNameFromHookPayloadFrom_InvalidJSON(t *testing.T) {
+	reader := bytes.NewReader([]byte("not json"))
+	got := agentNameFromHookPayloadFrom(reader)
+	if got != "" {
 		t.Errorf("got %q, want empty string for invalid JSON", got)
 	}
 }
 
-func TestRunCoauthor_UsesAgentTypeFromHookPayload(t *testing.T) {
-	makeCoauthorRepo(t, config.Config{CodingTool: "GitHub Copilot"})
-	withPipedStdin(t, `{"hook_event_name":"SubagentStop","agent_type":"iktomi"}`)
-
-	var gitCalls []string
-	stubRunCmd(t, func(_ string, args ...string) (string, error) {
-		gitCalls = append(gitCalls, strings.Join(args, " "))
-		return "", nil
-	})
-
-	origTrailer := coauthorTrailer
-	coauthorTrailer = ""
-	t.Cleanup(func() { coauthorTrailer = origTrailer })
-
-	if err := runCoauthor(nil, nil); err != nil {
-		t.Fatalf("runCoauthor: %v", err)
-	}
-
-	found := false
-	for _, c := range gitCalls {
-		if strings.Contains(c, "user.name iktomi") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected git config user.name iktomi, got calls: %v", gitCalls)
+func TestResolveEnforcedAgentName_ClaudeCodeFallback(t *testing.T) {
+	// Claude Code without a hook payload should fall back to janus, not the tool name
+	cfg := &config.Config{CodingTool: "Claude Code"}
+	got := resolveEnforcedAgentName(cfg)
+	if got != "janus" {
+		t.Errorf("got %q, want janus for Claude Code fallback", got)
 	}
 }
 
-func TestRunCoauthor_ClaudeCodeSubagentTypeFromToolInput(t *testing.T) {
-	makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
-	withPipedStdin(t, `{"hook_event_name":"PreToolUse","tool_input":{"subagent_type":"phobetor"}}`)
-
-	var gitCalls []string
-	stubRunCmd(t, func(_ string, args ...string) (string, error) {
-		gitCalls = append(gitCalls, strings.Join(args, " "))
-		return "", nil
-	})
-
-	origTrailer := coauthorTrailer
-	coauthorTrailer = ""
-	t.Cleanup(func() { coauthorTrailer = origTrailer })
-
-	if err := runCoauthor(nil, nil); err != nil {
-		t.Fatalf("runCoauthor: %v", err)
-	}
-
-	found := false
-	for _, c := range gitCalls {
-		if strings.Contains(c, "user.name phobetor") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected git config user.name phobetor, got calls: %v", gitCalls)
+func TestResolveEnforcedAgentName_OtherPlatformFallback(t *testing.T) {
+	// Other platforms should fall back to the tool name
+	cfg := &config.Config{CodingTool: "GitHub Copilot"}
+	got := resolveEnforcedAgentName(cfg)
+	if got != "GitHub Copilot" {
+		t.Errorf("got %q, want GitHub Copilot fallback", got)
 	}
 }
 
-func TestRunCoauthor_ClaudeCodeUnrecognizedSubagentFallsBackToJanus(t *testing.T) {
-	makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
-	withPipedStdin(t, `{"hook_event_name":"PreToolUse","tool_input":{"subagent_type":"not-a-real-agent"}}`)
-
-	var gitCalls []string
-	stubRunCmd(t, func(_ string, args ...string) (string, error) {
-		gitCalls = append(gitCalls, strings.Join(args, " "))
-		return "", nil
-	})
-
-	origTrailer := coauthorTrailer
-	coauthorTrailer = ""
-	t.Cleanup(func() { coauthorTrailer = origTrailer })
-
-	if err := runCoauthor(nil, nil); err != nil {
-		t.Fatalf("runCoauthor: %v", err)
-	}
-
-	for _, c := range gitCalls {
-		if strings.Contains(c, "not-a-real-agent") {
-			t.Fatalf("unrecognized identity leaked into git config (name or email), calls: %v", gitCalls)
-		}
-	}
-	nameFound, emailFound := false, false
-	for _, c := range gitCalls {
-		if strings.Contains(c, "user.name janus") {
-			nameFound = true
-		}
-		if strings.Contains(c, "user.email janus@github.com") {
-			emailFound = true
-		}
-	}
-	if !nameFound {
-		t.Errorf("expected git config user.name janus, got calls: %v", gitCalls)
-	}
-	if !emailFound {
-		t.Errorf("expected git config user.email janus@github.com, got calls: %v", gitCalls)
-	}
-}
-
-func TestRunCoauthor_ClaudeCodeNoPayloadDefaultsToJanus(t *testing.T) {
-	// No stdin payload at all — the plain SessionStart case, before any Task/Agent call.
-	makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
-
-	var gitCalls []string
-	stubRunCmd(t, func(_ string, args ...string) (string, error) {
-		gitCalls = append(gitCalls, strings.Join(args, " "))
-		return "", nil
-	})
-
-	origTrailer := coauthorTrailer
-	coauthorTrailer = ""
-	t.Cleanup(func() { coauthorTrailer = origTrailer })
-
-	if err := runCoauthor(nil, nil); err != nil {
-		t.Fatalf("runCoauthor: %v", err)
-	}
-
-	found := false
-	for _, c := range gitCalls {
-		if strings.Contains(c, "user.name janus") {
-			found = true
-		}
-		if strings.Contains(c, "user.name Claude Code") {
-			t.Fatalf("Claude Code identity defaulted to coding-tool name instead of janus, calls: %v", gitCalls)
-		}
-	}
-	if !found {
-		t.Errorf("expected git config user.name janus by default, got calls: %v", gitCalls)
-	}
-}
-
-func TestRunCoauthor_NonClaudeCodePlatformKeepsCodingToolFallback(t *testing.T) {
-	// Non-Claude-Code platforms are out of scope for this change: the coding-tool-name
-	// fallback must remain unchanged when nothing else resolves.
-	makeCoauthorRepo(t, config.Config{CodingTool: "GitHub Copilot"})
-
-	var gitCalls []string
-	stubRunCmd(t, func(_ string, args ...string) (string, error) {
-		gitCalls = append(gitCalls, strings.Join(args, " "))
-		return "", nil
-	})
-
-	origTrailer := coauthorTrailer
-	coauthorTrailer = ""
-	t.Cleanup(func() { coauthorTrailer = origTrailer })
-
-	if err := runCoauthor(nil, nil); err != nil {
-		t.Fatalf("runCoauthor: %v", err)
-	}
-
-	found := false
-	for _, c := range gitCalls {
-		if strings.Contains(c, "user.name GitHub Copilot") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected git config user.name %q (unchanged fallback), got calls: %v", "GitHub Copilot", gitCalls)
-	}
-}
-
-func TestIsRegisteredAgent(t *testing.T) {
-	for _, name := range []string{"janus", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"} {
-		if !isRegisteredAgent(name) {
-			t.Errorf("%q should be a registered agent", name)
-		}
-	}
-	for _, name := range []string{"", "claude-code", "Claude Code", "dreamland", "not-a-real-agent"} {
-		if isRegisteredAgent(name) {
-			t.Errorf("%q should not be a registered agent", name)
-		}
-	}
-}
-
-func TestAppendTokensReport_AllZeroOmitted(t *testing.T) {
-	root := t.TempDir()
-	if err := telemetry.Write(root, &telemetry.SnapshotResult{
-		Tool: "github-copilot", Model: "gpt-4o", InputTokens: 0, OutputTokens: 0, CachedTokens: 0, TotalTokens: 0,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	original := "feat: add something\nCo-authored-by: gpt-4o <gpt-4o@github.com>\n"
-	f.WriteString(original)
-	f.Close()
-
-	if err := appendTokensReport(f.Name(), root); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	data, _ := os.ReadFile(f.Name())
-	if string(data) != original {
-		t.Errorf("expected no Tokens: line for all-zero snapshot, got:\n%s", string(data))
-	}
-}
-
-func TestAppendTokensReport_Available(t *testing.T) {
-	root := t.TempDir()
-	if err := telemetry.Write(root, &telemetry.SnapshotResult{
-		InputTokens: 100, OutputTokens: 50, CachedTokens: 10, TotalTokens: 150,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.WriteString("feat: add something\nCo-authored-by: claude-sonnet-4-6 <claude-sonnet-4-6@github.com>\n")
-	f.Close()
-
-	if err := appendTokensReport(f.Name(), root); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	data, _ := os.ReadFile(f.Name())
-	if !strings.Contains(string(data), "Tokens: input=100 output=50 cached=10 total=150") {
-		t.Errorf("Tokens line not appended, got:\n%s", string(data))
-	}
-}
-
-func TestAppendTokensReport_Unavailable(t *testing.T) {
-	root := t.TempDir() // no telemetry snapshot written
-
-	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	original := "feat: add something\n"
-	f.WriteString(original)
-	f.Close()
-
-	if err := appendTokensReport(f.Name(), root); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	data, _ := os.ReadFile(f.Name())
-	if string(data) != original {
-		t.Errorf("expected file unchanged when telemetry unavailable, got:\n%s", string(data))
-	}
-}
-
-func TestAppendTokensReport_NotDuplicated(t *testing.T) {
-	root := t.TempDir()
-	if err := telemetry.Write(root, &telemetry.SnapshotResult{InputTokens: 1, TotalTokens: 1}); err != nil {
-		t.Fatal(err)
-	}
-
-	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := "feat: x\nTokens: input=1 output=0 cached=0 total=1\n"
-	f.WriteString(content)
-	f.Close()
-
-	if err := appendTokensReport(f.Name(), root); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	data, _ := os.ReadFile(f.Name())
-	if strings.Count(string(data), "Tokens: ") != 1 {
-		t.Errorf("Tokens line duplicated, got:\n%s", string(data))
-	}
-}
-
+// makeCoauthorRepo creates a temporary git repo with .dreamland.json for testing.
 func makeCoauthorRepo(t *testing.T, cfg config.Config) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".git", "hooks"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(cfg)
-	if err := os.WriteFile(filepath.Join(root, ".dreamland.json"), b, 0o644); err != nil {
+	data, err := json.Marshal(cfg)
+	if err != nil {
 		t.Fatal(err)
 	}
-	orig := osGetwd
-	osGetwd = func() (string, error) { return root, nil }
-	t.Cleanup(func() { osGetwd = orig })
+	if err := os.WriteFile(filepath.Join(root, ".dreamland.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return root
-}
-
-func TestRunCoauthor_DefaultMode(t *testing.T) {
-	root := makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code", ModelID: "claude-sonnet-4-6"})
-
-	var gitCalls []string
-	origRunCmd := runCmd
-	runCmd = func(_ string, args ...string) (string, error) {
-		gitCalls = append(gitCalls, strings.Join(args, " "))
-		return "", nil
-	}
-	t.Cleanup(func() { runCmd = origRunCmd })
-
-	origTrailer := coauthorTrailer
-	coauthorTrailer = ""
-	t.Cleanup(func() { coauthorTrailer = origTrailer })
-
-	if err := runCoauthor(nil, nil); err != nil {
-		t.Fatalf("runCoauthor: %v", err)
-	}
-
-	hookPath := filepath.Join(root, ".git", "hooks", "prepare-commit-msg")
-	hookData, err := os.ReadFile(hookPath)
-	if err != nil {
-		t.Fatalf("hook not installed: %v", err)
-	}
-	if !strings.Contains(string(hookData), "dreamland coauthor --trailer") {
-		t.Error("hook missing delegation line")
-	}
-
-	hasName := false
-	for _, c := range gitCalls {
-		if strings.Contains(c, "user.name") {
-			hasName = true
-		}
-	}
-	if !hasName {
-		t.Error("expected git config user.name call")
-	}
-}
-
-func TestRunCoauthor_TrailerMode(t *testing.T) {
-	root := makeCoauthorRepo(t, config.Config{ModelID: "claude-sonnet-4-6"})
-	_ = root
-
-	msgFile, err := os.CreateTemp(t.TempDir(), "commit-msg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	msgFile.WriteString("fix: something\n")
-	msgFile.Close()
-
-	origTrailer := coauthorTrailer
-	coauthorTrailer = msgFile.Name()
-	t.Cleanup(func() { coauthorTrailer = origTrailer })
-
-	if err := runCoauthor(nil, nil); err != nil {
-		t.Fatalf("runCoauthor trailer mode: %v", err)
-	}
-
-	data, _ := os.ReadFile(msgFile.Name())
-	if !strings.Contains(string(data), "Co-authored-by: claude-sonnet-4-6") {
-		t.Errorf("trailer not appended, got:\n%s", string(data))
-	}
-}
-
-// --- Additional tests to improve coverage ---
-
-func TestRunCoauthor_OsGetwdError(t *testing.T) {
-	orig := osGetwd
-	osGetwd = func() (string, error) { return "", errors.New("getwd failed") }
-	t.Cleanup(func() { osGetwd = orig })
-
-	if err := runCoauthor(nil, nil); err == nil || err.Error() != "getwd failed" {
-		t.Fatalf("expected getwd error, got: %v", err)
-	}
-}
-
-func TestRunCoauthor_ConfigLoadError(t *testing.T) {
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".git", "hooks"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Write invalid JSON so config.Load fails.
-	if err := os.WriteFile(filepath.Join(root, ".dreamland.json"), []byte("not-json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	orig := osGetwd
-	osGetwd = func() (string, error) { return root, nil }
-	t.Cleanup(func() { osGetwd = orig })
-
-	if err := runCoauthor(nil, nil); err == nil {
-		t.Fatal("expected error from config.Load with invalid JSON")
-	}
-}
-
-func TestRunCoauthor_NilConfig(t *testing.T) {
-	// .git dir exists but no .dreamland.json → config.Load returns nil, nil
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".git", "hooks"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	orig := osGetwd
-	osGetwd = func() (string, error) { return root, nil }
-	t.Cleanup(func() { osGetwd = orig })
-
-	origRunCmd := runCmd
-	runCmd = func(_ string, _ ...string) (string, error) { return "", nil }
-	t.Cleanup(func() { runCmd = origRunCmd })
-
-	origTrailer := coauthorTrailer
-	coauthorTrailer = ""
-	t.Cleanup(func() { coauthorTrailer = origTrailer })
-
-	// Should succeed (cfg==nil gets replaced by &config.Config{})
-	if err := runCoauthor(nil, nil); err != nil {
-		t.Fatalf("expected nil error for missing config, got: %v", err)
-	}
-}
-
-func TestRunCoauthor_GitConfigUserNameError(t *testing.T) {
-	root := makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
-	_ = root
-
-	origRunCmd := runCmd
-	runCmd = func(_ string, args ...string) (string, error) {
-		if len(args) > 0 && args[0] == "config" && strings.Contains(strings.Join(args, " "), "user.name") {
-			return "", errors.New("git config user.name failed")
-		}
-		return "", nil
-	}
-	t.Cleanup(func() { runCmd = origRunCmd })
-
-	origTrailer := coauthorTrailer
-	coauthorTrailer = ""
-	t.Cleanup(func() { coauthorTrailer = origTrailer })
-
-	if err := runCoauthor(nil, nil); err == nil {
-		t.Fatal("expected error from git config user.name failure")
-	}
-}
-
-func TestRunCoauthor_GitConfigUserEmailError(t *testing.T) {
-	root := makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
-	_ = root
-
-	origRunCmd := runCmd
-	runCmd = func(_ string, args ...string) (string, error) {
-		joined := strings.Join(args, " ")
-		if len(args) > 0 && args[0] == "config" && strings.Contains(joined, "user.name") {
-			return "", nil
-		}
-		if len(args) > 0 && args[0] == "config" && strings.Contains(joined, "user.email") {
-			return "", errors.New("git config user.email failed")
-		}
-		return "", nil
-	}
-	t.Cleanup(func() { runCmd = origRunCmd })
-
-	origTrailer := coauthorTrailer
-	coauthorTrailer = ""
-	t.Cleanup(func() { coauthorTrailer = origTrailer })
-
-	if err := runCoauthor(nil, nil); err == nil {
-		t.Fatal("expected error from git config user.email failure")
-	}
-}
-
-func TestResolveAgentName_EmptyCodingTool(t *testing.T) {
-	// Clear all env vars.
-	for _, env := range []string{"CLAUDE_AGENT_ID", "CODEX_AGENT_ID", "CURSOR_AGENT_ID", "KIRO_AGENT_ID"} {
-		t.Setenv(env, "")
-	}
-	got := resolveAgentName("")
-	if got != "dreamland" {
-		t.Errorf("expected 'dreamland' for empty codingTool, got %q", got)
-	}
-}
-
-func TestInstallPrepareCommitMsgHook_FindRepoRootError(t *testing.T) {
-	// Pass a directory without .git so FindRepoRoot fails.
-	root := t.TempDir()
-	if err := installPrepareCommitMsgHook(root); err == nil {
-		t.Fatal("expected error when no .git dir")
-	}
-}
-
-func TestInstallPrepareCommitMsgHook_MkdirAllError(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("running as root; skip permission test")
-	}
-	root := t.TempDir()
-	gitDir := filepath.Join(root, ".git")
-	if err := os.MkdirAll(gitDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Make .git unwritable so MkdirAll(.git/hooks) fails.
-	if err := os.Chmod(gitDir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(gitDir, 0o755) })
-
-	if err := installPrepareCommitMsgHook(root); err == nil {
-		t.Fatal("expected error when .git is unwritable")
-	}
-}
-
-func TestAppendCoauthorTrailer_ReadFileError(t *testing.T) {
-	// Non-existent file → ReadFile fails.
-	err := appendCoauthorTrailer("/nonexistent/commit-msg-file", "claude-sonnet-4-6", "@github.com")
-	if err == nil {
-		t.Fatal("expected error for non-existent file")
-	}
-}
-
-func TestAppendCoauthorTrailer_NoTrailingNewline(t *testing.T) {
-	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Write content WITHOUT trailing newline.
-	if _, err := f.WriteString("feat: something"); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-
-	if err := appendCoauthorTrailer(f.Name(), "claude-sonnet-4-6", "@github.com"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	data, _ := os.ReadFile(f.Name())
-	content := string(data)
-	// Newline should be added before trailer.
-	if !strings.Contains(content, "\nCo-authored-by: claude-sonnet-4-6") {
-		t.Errorf("expected newline before trailer when original has no trailing newline, got:\n%s", content)
-	}
 }

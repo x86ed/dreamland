@@ -1260,3 +1260,23 @@ func TestWriteBranchBumps_WriteError(t *testing.T) {
 		t.Fatal("expected error when writing to unwritable directory")
 	}
 }
+
+// withPipedStdin replaces os.Stdin with a pipe containing data for the test.
+func withPipedStdin(t *testing.T, data string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString(data); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	orig := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = orig
+		r.Close()
+	})
+}

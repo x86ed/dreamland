@@ -32,18 +32,19 @@ func TestRunCommit_GetwdError(t *testing.T) {
 	}
 }
 
-func TestRunCommit_ConfigLoadError(t *testing.T) {
+func TestRunCommit_NoOpOutsideGitRepo(t *testing.T) {
 	orig := commitReason
 	commitReason = "turn-complete"
 	t.Cleanup(func() { commitReason = orig })
 
-	root := t.TempDir() // not a git repo, so config.Load fails via FindRepoRoot
+	root := t.TempDir() // not a git repo, so FindRepoRoot fails
 	origGetwd := osGetwd
 	osGetwd = func() (string, error) { return root, nil }
 	t.Cleanup(func() { osGetwd = origGetwd })
 
-	if err := runCommit(nil, nil); err == nil {
-		t.Fatal("expected error when config.Load fails")
+	// Should skip (return nil) outside git repo, not error
+	if err := runCommit(nil, nil); err != nil {
+		t.Fatalf("expected nil (skip) when outside git repo, got error: %v", err)
 	}
 }
 
@@ -51,7 +52,10 @@ func TestRunCommit_GitStatusError(t *testing.T) {
 	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
 
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
-		return "", errors.New("git status failed")
+		if len(args) > 0 && args[0] == "status" {
+			return "", errors.New("git status failed")
+		}
+		return "", nil
 	})
 
 	orig := commitReason
@@ -139,7 +143,7 @@ func TestRunCommit_NoOpOnCleanTree(t *testing.T) {
 }
 
 func TestRunCommit_CommitsOnDirtyTree(t *testing.T) {
-	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
+	makeVersionBumpRepo(t, config.Config{CodingTool: "GitHub Copilot"})
 
 	var calls []string
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
@@ -175,7 +179,7 @@ func TestRunCommit_CommitsOnDirtyTree(t *testing.T) {
 	if !commitCalled {
 		t.Error("expected 'git commit' call")
 	}
-	if !strings.Contains(commitMsg, "chore: handoff checkpoint (Claude Code)") {
+	if !strings.Contains(commitMsg, "chore: handoff checkpoint (GitHub Copilot)") {
 		t.Errorf("unexpected commit message: %q", commitMsg)
 	}
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -101,6 +102,18 @@ func TestFindRepoRoot_NoGit(t *testing.T) {
 	_, err := FindRepoRoot(dir)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestFindRepoRoot_ErrNoGitRepoSentinel verifies that FindRepoRoot returns the ErrNoGitRepo sentinel.
+func TestFindRepoRoot_ErrNoGitRepoSentinel(t *testing.T) {
+	dir := t.TempDir()
+	_, err := FindRepoRoot(dir)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrNoGitRepo) {
+		t.Errorf("expected errors.Is(err, ErrNoGitRepo) to be true, but got false for error: %v", err)
 	}
 }
 

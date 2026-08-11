@@ -80,7 +80,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "dreamland coauthor"
+            "command": "dreamland coauthor --hook"
           }
         ]
       }
@@ -95,7 +95,7 @@
           },
           {
             "type": "command",
-            "command": "dreamland coauthor"
+            "command": "dreamland coauthor --hook"
           }
         ]
       }
@@ -142,7 +142,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "dreamland coauthor"
+            "command": "dreamland coauthor --hook"
           },
           {
             "type": "command",
