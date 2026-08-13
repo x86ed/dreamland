@@ -3,9 +3,9 @@
   "agent": "janus",
   "model": "claude-sonnet-5",
   "thinking_effort": "high",
-  "input_tokens": 3807,
-  "output_tokens": 2212997,
-  "cached_tokens": 244622442,
-  "total_tokens": 2216804,
-  "captured_at": "2026-08-11T21:37:13Z"
+  "input_tokens": 3859,
+  "output_tokens": 2248970,
+  "cached_tokens": 246048261,
+  "total_tokens": 2252829,
+  "captured_at": "2026-08-13T19:47:08Z"
 }
