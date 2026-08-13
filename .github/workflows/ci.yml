@@ -35,6 +35,7 @@ jobs:
       - name: Run tests
         run: bash scripts/pre-merge-check.sh run_tests
         env:
+          MERGE_CHECK: "1"
           COVERAGE_OUT: coverage.out
       - uses: actions/upload-artifact@v4
         with:
