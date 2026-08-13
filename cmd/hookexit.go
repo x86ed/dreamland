@@ -9,6 +9,8 @@ import "errors"
 // transition-log, telemetry write) are not affected.
 type blockingError struct{ err error }
 
+// Blocking wraps err so Execute exits with code 2 instead of the default 1.
+// Returns nil when err is nil.
 func Blocking(err error) error {
 	if err == nil {
 		return nil
@@ -19,6 +21,7 @@ func Blocking(err error) error {
 func (e *blockingError) Error() string { return e.err.Error() }
 func (e *blockingError) Unwrap() error { return e.err }
 
+// IsBlocking reports whether err (or one it wraps) was produced by Blocking.
 func IsBlocking(err error) bool {
 	var be *blockingError
 	return errors.As(err, &be)

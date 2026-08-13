@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"testing"
@@ -29,6 +30,30 @@ func TestExecuteUnknownFlag(t *testing.T) {
 	err := cmd.Run()
 	if err == nil {
 		t.Fatal("expected non-zero exit but got nil")
+	}
+}
+
+// TestExecuteBlockingError verifies Execute calls os.Exit(2) when the command
+// returns a Blocking error (e.g. `commit --reason` validation failure).
+// Uses a subprocess so the os.Exit does not kill the test process.
+func TestExecuteBlockingError(t *testing.T) {
+	if os.Getenv("DREAMLAND_TEST_BLOCKING_EXIT") == "1" {
+		os.Args = []string{"dreamland", "commit", "--reason=bogus"}
+		Execute()
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=TestExecuteBlockingError")
+	cmd.Env = append(os.Environ(), "DREAMLAND_TEST_BLOCKING_EXIT=1")
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if err == nil {
+		t.Fatal("expected non-zero exit but got nil")
+	}
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected *exec.ExitError, got %T: %v", err, err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Errorf("exit code = %d, want 2 for a Blocking error", exitErr.ExitCode())
 	}
 }
 
