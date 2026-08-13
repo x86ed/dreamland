@@ -554,6 +554,37 @@ func TestInitForceFlag(t *testing.T) {
 	}
 }
 
+func TestInitEmailSuffix_EmptyFallsBackToDefault(t *testing.T) {
+	root := makeGitRepo(t)
+
+	orig := wizardRunner
+	wizardRunner = stubWizard(&wizardResult{
+		repoRoot:       root,
+		tool:           "Kiro",
+		language:       "Go",
+		testCommand:    "go test ./...",
+		versionCommand: "go version",
+	}, nil)
+	t.Cleanup(func() { wizardRunner = orig })
+
+	origSuffix := emailSuffixFlag
+	emailSuffixFlag = ""
+	t.Cleanup(func() { emailSuffixFlag = origSuffix })
+
+	if _, err := runInitWithBuf(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cwd, _ := os.Getwd()
+	cfg, _ := config.Load(cwd)
+	if cfg == nil {
+		t.Fatal("expected config")
+	}
+	if cfg.EmailSuffix != "@github.com" {
+		t.Errorf("EmailSuffix = %q, want default @github.com when flag is empty", cfg.EmailSuffix)
+	}
+}
+
 func TestInitEmailSuffix(t *testing.T) {
 	root := makeGitRepo(t)
 

@@ -3,6 +3,8 @@ package cmd
 import (
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -93,6 +95,47 @@ func TestRunOtelReceiver_ExecutableLookupFailsFallsBackToDreamland(t *testing.T)
 	// environment, so Start() fails — runOtelReceiver must swallow that error.
 	if err := runOtelReceiver(nil, nil); err != nil {
 		t.Errorf("expected best-effort nil error even when child fails to start, got: %v", err)
+	}
+}
+
+func TestRunOtelReceiver_NilConfig(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// No .dreamland.json — cfg will be nil, exercising the fallback to &config.Config{}.
+
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	origForeground := otelReceiverForeground
+	otelReceiverForeground = false
+	t.Cleanup(func() { otelReceiverForeground = origForeground })
+
+	origExe := osExecutable
+	osExecutable = func() (string, error) { return "/bin/echo", nil }
+	t.Cleanup(func() { osExecutable = origExe })
+
+	if err := runOtelReceiver(nil, nil); err != nil {
+		t.Errorf("unexpected error with nil config: %v", err)
+	}
+}
+
+func TestRunOtelReceiver_ForegroundListenAndServeFails(t *testing.T) {
+	root := makeCoauthorRepo(t, config.Config{
+		CodingTool: "GitHub Copilot",
+		// Not a bindable address: ListenAndServe should fail immediately instead of blocking.
+		OtelEndpoint: "http://256.0.0.1:4318",
+	})
+	_ = root
+
+	origForeground := otelReceiverForeground
+	otelReceiverForeground = true
+	t.Cleanup(func() { otelReceiverForeground = origForeground })
+
+	if err := runOtelReceiver(nil, nil); err == nil {
+		t.Fatal("expected error from ListenAndServe on an unbindable address")
 	}
 }
 
