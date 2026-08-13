@@ -44,10 +44,31 @@ branch_guard() {
 # ---------------------------------------------------------------------------
 run_tests() {
   echo "==> Running unit tests..."
-  if ! go test ./... 2>&1; then
+
+  # When COVERAGE_OUT is set (CI), capture a coverage profile from this same run
+  # instead of making check_coverage recompile and re-run the whole suite a second
+  # time in a separate job — that redundant second build was the CI job that kept
+  # timing out on a cold cache.
+  if [[ -n "${COVERAGE_OUT:-}" ]]; then
+    local coverpkgs
+    coverpkgs=$(non_main_coverpkgs)
+    if ! go test -coverprofile="$COVERAGE_OUT" -coverpkg="$coverpkgs" ./... 2>&1; then
+      fail "Unit tests failed. Fix the failures above before merging."
+    fi
+  elif ! go test ./... 2>&1; then
     fail "Unit tests failed. Fix the failures above before merging."
   fi
   pass "All tests pass."
+}
+
+# non_main_coverpkgs lists every non-main package's import path, comma-joined, for
+# use as go test's -coverpkg. Entry-point main() is not unit-testable by convention
+# and would otherwise drag the aggregate down.
+non_main_coverpkgs() {
+  local coverpkgs
+  coverpkgs=$(go list -f '{{if ne .Name "main"}}{{.ImportPath}}{{end}}' ./... \
+    2>/dev/null | tr '\n' ',')
+  echo "${coverpkgs%,}"
 }
 
 # ---------------------------------------------------------------------------
@@ -56,40 +77,45 @@ run_tests() {
 check_coverage() {
   echo "==> Checking test coverage..."
 
-  # Measure coverage only for non-main packages; entry-point main() is not
-  # unit-testable by convention and would otherwise drag the aggregate down.
-  local coverpkgs
-  coverpkgs=$(go list -f '{{if ne .Name "main"}}{{.ImportPath}}{{end}}' ./... \
-    2>/dev/null | tr '\n' ',')
-  coverpkgs="${coverpkgs%,}"
+  local coverfile
 
-  if [[ -z "$coverpkgs" ]]; then
-    warn "No non-main packages found; skipping coverage check."
-    return
+  if [[ -n "${COVERAGE_PROFILE:-}" ]]; then
+    # CI passes down the profile run_tests already captured (see COVERAGE_OUT in
+    # run_tests) — analyze it directly instead of recompiling and re-running the
+    # whole suite a second time, which is what made this job time out on a cold
+    # cache.
+    coverfile="$COVERAGE_PROFILE"
+    if [[ ! -s "$coverfile" ]]; then
+      fail "COVERAGE_PROFILE=$coverfile is missing or empty."
+    fi
+  else
+    local coverpkgs
+    coverpkgs=$(non_main_coverpkgs)
+    if [[ -z "$coverpkgs" ]]; then
+      warn "No non-main packages found; skipping coverage check."
+      return
+    fi
+
+    local testlog
+    coverfile=$(mktemp /tmp/dreamland-cov.XXXXXX)
+    testlog=$(mktemp /tmp/dreamland-cov-log.XXXXXX)
+    trap 'rm -f "$coverfile" "$testlog"' RETURN
+
+    local test_status=0
+    go test -timeout=15m -coverprofile="$coverfile" -coverpkg="$coverpkgs" ./... > "$testlog" 2>&1 || test_status=$?
+
+    if [[ "$test_status" -ne 0 ]]; then
+      echo "  go test exited $test_status; last 40 lines of output:" >&2
+      tail -40 "$testlog" >&2
+      warn "go test reported failures during the coverage run — check output above."
+    fi
   fi
-
-  local coverfile testlog
-  coverfile=$(mktemp /tmp/dreamland-cov.XXXXXX)
-  testlog=$(mktemp /tmp/dreamland-cov-log.XXXXXX)
-  trap 'rm -f "$coverfile" "$testlog"' RETURN
-
-  # -timeout slightly above the 10m default to give a cold-cache CI build (-coverpkg
-  # spans every package, forcing full cgo recompilation) enough headroom to finish.
-  local test_status=0
-  go test -timeout=15m -coverprofile="$coverfile" -coverpkg="$coverpkgs" ./... > "$testlog" 2>&1 || test_status=$?
 
   # --- Aggregate coverage ---
   local total_line
   total_line=$(go tool cover -func="$coverfile" 2>/dev/null | grep '^total:' || true)
   if [[ -z "$total_line" ]]; then
-    echo "  go test exited $test_status; last 40 lines of output:" >&2
-    tail -40 "$testlog" >&2
     fail "Could not determine total coverage — no coverage data produced."
-  fi
-  if [[ "$test_status" -ne 0 ]]; then
-    echo "  go test exited $test_status (coverage data was still produced); last 40 lines:" >&2
-    tail -40 "$testlog" >&2
-    warn "go test reported failures during the coverage run — check output above."
   fi
   local total
   total=$(echo "$total_line" | awk '{print $NF}' | tr -d '%')
