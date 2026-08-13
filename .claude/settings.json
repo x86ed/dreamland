@@ -71,7 +71,13 @@
       "Bash(rm -f /tmp/dreamland-json-backup.json)",
       "Bash(echo \"BUILD:$?\")",
       "Bash(echo \"VET:$?\")",
-      "Bash(go env *)"
+      "Bash(go env *)",
+      "Bash(awk '{n=split\\($0,a,\" \"\\); if \\(a[n]==\"0\"\\) print $0}')",
+      "Bash(MERGE_CHECK=1 bash scripts/pre-merge-check.sh check_coverage)",
+      "Bash(rm -f /private/tmp/claude-501/-Users-adamsiegel-Workspace-git-dreamland/0cf79e38-5fd3-4fd7-b954-b7b81a9c71ba/scratchpad/cover*.out /private/tmp/claude-501/-Users-adamsiegel-Workspace-git-dreamland/0cf79e38-5fd3-4fd7-b954-b7b81a9c71ba/scratchpad/testout.txt *)"
+    ],
+    "additionalDirectories": [
+      "/private/tmp/claude-501/-Users-adamsiegel-Workspace-git-dreamland/0cf79e38-5fd3-4fd7-b954-b7b81a9c71ba/scratchpad"
     ]
   },
   "hooks": {

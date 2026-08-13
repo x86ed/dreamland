@@ -7,7 +7,35 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
+
+// withTemplateFS temporarily swaps the package-level TemplateFS seam (already
+// exported as an fs.FS interface var for this purpose) so tests can simulate
+// missing/unreadable template files without touching the real embedded
+// templates. Restored automatically via t.Cleanup.
+func withTemplateFS(t *testing.T, fsys fs.FS) {
+	t.Helper()
+	orig := TemplateFS
+	TemplateFS = fsys
+	t.Cleanup(func() { TemplateFS = orig })
+}
+
+// failReadFS wraps an fstest.MapFS so that fs.ReadDir still lists files
+// normally (via the promoted MapFS.ReadDir), but fs.ReadFile on failPath
+// returns an error — simulating a directory listing that succeeds while a
+// specific file read fails.
+type failReadFS struct {
+	fstest.MapFS
+	failPath string
+}
+
+func (f failReadFS) ReadFile(name string) ([]byte, error) {
+	if name == f.failPath {
+		return nil, &fs.PathError{Op: "read", Path: name, Err: fs.ErrPermission}
+	}
+	return f.MapFS.ReadFile(name)
+}
 
 func fakeGitRepo(t *testing.T) string {
 	t.Helper()
@@ -1187,5 +1215,338 @@ func TestBindAntigravity_Force(t *testing.T) {
 	}
 	if result.Action != "installed (forced)" {
 		t.Errorf("expected 'installed (forced)', got: %q", result.Action)
+	}
+}
+
+// --- Further coverage: error branches reachable via the TemplateFS seam,
+// direct calls to unexported helpers, and filesystem permission tricks. ---
+
+func TestInstall_BindHooksError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; skip permission test")
+	}
+	root := fakeGitRepo(t)
+	// Pre-create settings.json as a directory so bindClaudeCode's
+	// atomicJSONMerge fails reading it as a file.
+	if err := os.MkdirAll(filepath.Join(root, ".claude", "settings.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"})
+	if err == nil {
+		t.Fatal("expected error when bindHooks fails")
+	}
+}
+
+func TestInstallCommands_UnknownTool(t *testing.T) {
+	results, err := installCommands(Config{CodingTool: "Bogus"})
+	if err != nil {
+		t.Errorf("expected nil error for unknown tool, got %v", err)
+	}
+	if results != nil {
+		t.Errorf("expected nil results for unknown tool, got %v", results)
+	}
+}
+
+func TestInstall_ClaudeCode_BareCommandsWriteError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; skip permission test")
+	}
+	root := fakeGitRepo(t)
+	commandsDir := filepath.Join(root, ".claude", "commands")
+	drmlndDir := filepath.Join(commandsDir, "drmlnd")
+	if err := os.MkdirAll(drmlndDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(commandsDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(commandsDir, 0o755) })
+
+	_, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"})
+	if err == nil {
+		t.Fatal("expected error when bare command file cannot be written")
+	}
+}
+
+func TestInstallBareCommands_MkdirError(t *testing.T) {
+	root := t.TempDir()
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bareTargetDir := filepath.Join(blocker, "commands")
+	_, err := installBareCommands(Config{}, platformSpec{}, bareTargetDir)
+	if err == nil {
+		t.Fatal("expected mkdir error")
+	}
+}
+
+func TestInstallBareCommands_ReadDirError(t *testing.T) {
+	withTemplateFS(t, fstest.MapFS{})
+	root := t.TempDir()
+	_, err := installBareCommands(Config{}, platformSpec{templateDir: "commands/nonexistent"}, filepath.Join(root, "commands"))
+	if err == nil {
+		t.Fatal("expected read dir error")
+	}
+}
+
+func TestInstallBareCommands_SkipsDirectories(t *testing.T) {
+	withTemplateFS(t, fstest.MapFS{
+		"templates/commands/fake/a.md":        &fstest.MapFile{Data: []byte("---\nname: a\n---\nbody")},
+		"templates/commands/fake/subdir/b.md": &fstest.MapFile{Data: []byte("nested")},
+	})
+	root := t.TempDir()
+	bareTargetDir := filepath.Join(root, "commands")
+	results, err := installBareCommands(Config{}, platformSpec{templateDir: "commands/fake"}, bareTargetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result (subdir entry skipped), got %d: %+v", len(results), results)
+	}
+}
+
+func TestInstallBareCommands_ReadFileError(t *testing.T) {
+	mapFS := fstest.MapFS{"templates/commands/fake/a.md": &fstest.MapFile{Data: []byte("content")}}
+	withTemplateFS(t, failReadFS{MapFS: mapFS, failPath: "templates/commands/fake/a.md"})
+	root := t.TempDir()
+	_, err := installBareCommands(Config{}, platformSpec{templateDir: "commands/fake"}, filepath.Join(root, "commands"))
+	if err == nil {
+		t.Fatal("expected read file error")
+	}
+}
+
+func TestInstallFlatAgents_MkdirError(t *testing.T) {
+	root := t.TempDir()
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := platformSpec{templateDir: "agents/fake", targetDir: filepath.Join(blocker, "agents")}
+	_, err := installFlatAgents(Config{}, spec)
+	if err == nil {
+		t.Fatal("expected mkdir error")
+	}
+}
+
+func TestInstallFlatAgents_ReadDirError(t *testing.T) {
+	withTemplateFS(t, fstest.MapFS{})
+	root := t.TempDir()
+	spec := platformSpec{templateDir: "agents/nonexistent", targetDir: filepath.Join(root, "agents")}
+	_, err := installFlatAgents(Config{}, spec)
+	if err == nil {
+		t.Fatal("expected read dir error")
+	}
+}
+
+func TestInstallFlatAgents_SkipsDirectories(t *testing.T) {
+	withTemplateFS(t, fstest.MapFS{
+		"templates/agents/fake/a.md":        &fstest.MapFile{Data: []byte("content")},
+		"templates/agents/fake/subdir/b.md": &fstest.MapFile{Data: []byte("nested")},
+	})
+	root := t.TempDir()
+	spec := platformSpec{templateDir: "agents/fake", targetDir: filepath.Join(root, "agents")}
+	results, err := installFlatAgents(Config{RepoRoot: root}, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result (subdir entry skipped), got %d: %+v", len(results), results)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "agents", "subdir")); !os.IsNotExist(statErr) {
+		t.Error("subdir entry should not have been installed as a file")
+	}
+}
+
+func TestInstallFlatAgents_ReadFileError(t *testing.T) {
+	mapFS := fstest.MapFS{"templates/agents/fake/a.md": &fstest.MapFile{Data: []byte("content")}}
+	withTemplateFS(t, failReadFS{MapFS: mapFS, failPath: "templates/agents/fake/a.md"})
+	root := t.TempDir()
+	spec := platformSpec{templateDir: "agents/fake", targetDir: filepath.Join(root, "agents")}
+	_, err := installFlatAgents(Config{RepoRoot: root}, spec)
+	if err == nil {
+		t.Fatal("expected read file error")
+	}
+}
+
+func TestInstallFlatCommands_MkdirError(t *testing.T) {
+	root := t.TempDir()
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := platformSpec{templateDir: "commands/fake", targetDir: filepath.Join(blocker, "commands")}
+	_, err := installFlatCommands(Config{}, spec)
+	if err == nil {
+		t.Fatal("expected mkdir error")
+	}
+}
+
+func TestInstallFlatCommands_ReadDirError(t *testing.T) {
+	withTemplateFS(t, fstest.MapFS{})
+	root := t.TempDir()
+	spec := platformSpec{templateDir: "commands/nonexistent", targetDir: filepath.Join(root, "commands")}
+	_, err := installFlatCommands(Config{}, spec)
+	if err == nil {
+		t.Fatal("expected read dir error")
+	}
+}
+
+func TestInstallFlatCommands_SkipsDirectories(t *testing.T) {
+	withTemplateFS(t, fstest.MapFS{
+		"templates/commands/fake/a.md":        &fstest.MapFile{Data: []byte("---\nname: a\n---\nbody")},
+		"templates/commands/fake/subdir/b.md": &fstest.MapFile{Data: []byte("nested")},
+	})
+	root := t.TempDir()
+	spec := platformSpec{templateDir: "commands/fake", targetDir: filepath.Join(root, "commands")}
+	results, err := installFlatCommands(Config{RepoRoot: root}, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result (subdir entry skipped), got %d: %+v", len(results), results)
+	}
+}
+
+func TestInstallFlatCommands_ReadFileError(t *testing.T) {
+	mapFS := fstest.MapFS{"templates/commands/fake/a.md": &fstest.MapFile{Data: []byte("content")}}
+	withTemplateFS(t, failReadFS{MapFS: mapFS, failPath: "templates/commands/fake/a.md"})
+	root := t.TempDir()
+	spec := platformSpec{templateDir: "commands/fake", targetDir: filepath.Join(root, "commands")}
+	_, err := installFlatCommands(Config{RepoRoot: root}, spec)
+	if err == nil {
+		t.Fatal("expected read file error")
+	}
+}
+
+func TestInstallSkills_TargetDirMkdirError(t *testing.T) {
+	root := t.TempDir()
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := platformSpec{templateDir: "agents/fake", targetDir: filepath.Join(blocker, "skills"), skillFile: "SKILL.md"}
+	_, err := installSkills(Config{}, spec)
+	if err == nil {
+		t.Fatal("expected mkdir error")
+	}
+}
+
+func TestInstallSkills_ReadDirError(t *testing.T) {
+	withTemplateFS(t, fstest.MapFS{})
+	root := t.TempDir()
+	spec := platformSpec{templateDir: "agents/nonexistent", targetDir: filepath.Join(root, "skills"), skillFile: "SKILL.md"}
+	_, err := installSkills(Config{}, spec)
+	if err == nil {
+		t.Fatal("expected read dir error")
+	}
+}
+
+func TestInstallSkills_SkipsStrayFiles(t *testing.T) {
+	withTemplateFS(t, fstest.MapFS{
+		"templates/agents/fakeskill/skillA/SKILL.md": &fstest.MapFile{Data: []byte("content")},
+		"templates/agents/fakeskill/strayfile.md":    &fstest.MapFile{Data: []byte("stray")},
+	})
+	root := t.TempDir()
+	spec := platformSpec{templateDir: "agents/fakeskill", targetDir: filepath.Join(root, "skills"), skillFile: "SKILL.md"}
+	results, err := installSkills(Config{RepoRoot: root}, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result (stray file skipped), got %d: %+v", len(results), results)
+	}
+}
+
+func TestInstallSkills_SkillDirMkdirError(t *testing.T) {
+	withTemplateFS(t, fstest.MapFS{
+		"templates/agents/fakeskill/skillA/SKILL.md": &fstest.MapFile{Data: []byte("content")},
+	})
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A regular file named "skillA" blocks MkdirAll from creating the skill directory.
+	if err := os.WriteFile(filepath.Join(targetDir, "skillA"), []byte("blocker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := platformSpec{templateDir: "agents/fakeskill", targetDir: targetDir, skillFile: "SKILL.md"}
+	_, err := installSkills(Config{RepoRoot: root}, spec)
+	if err == nil {
+		t.Fatal("expected mkdir error for skill dir")
+	}
+}
+
+func TestInstallSkills_ReadFileError(t *testing.T) {
+	mapFS := fstest.MapFS{"templates/agents/fakeskill/skillA/SKILL.md": &fstest.MapFile{Data: []byte("content")}}
+	withTemplateFS(t, failReadFS{MapFS: mapFS, failPath: "templates/agents/fakeskill/skillA/SKILL.md"})
+	root := t.TempDir()
+	spec := platformSpec{templateDir: "agents/fakeskill", targetDir: filepath.Join(root, "skills"), skillFile: "SKILL.md"}
+	_, err := installSkills(Config{RepoRoot: root}, spec)
+	if err == nil {
+		t.Fatal("expected read file error")
+	}
+}
+
+func TestBindHooks_UnknownTool(t *testing.T) {
+	_, err := bindHooks(Config{CodingTool: "Bogus"})
+	if err == nil {
+		t.Fatal("expected error for unknown coding tool")
+	}
+}
+
+func TestBindHooks_TemplateReadError(t *testing.T) {
+	withTemplateFS(t, fstest.MapFS{})
+	root := t.TempDir()
+	_, err := bindHooks(Config{RepoRoot: root, CodingTool: "Claude Code"})
+	if err == nil {
+		t.Fatal("expected error reading hook binding template")
+	}
+}
+
+func TestDeepMerge_ScalarOverwrite(t *testing.T) {
+	dst := map[string]interface{}{"theme": "dark", "count": float64(1)}
+	src := map[string]interface{}{"theme": "light"}
+	deepMerge(dst, src)
+	if dst["theme"] != "light" {
+		t.Errorf("expected scalar value overwritten to %q, got %v", "light", dst["theme"])
+	}
+	if dst["count"] != float64(1) {
+		t.Errorf("unrelated key should be untouched, got %v", dst["count"])
+	}
+}
+
+func TestBindAntigravity_MkdirError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// A regular file at ~/.gemini blocks MkdirAll from creating the plugin dir.
+	if err := os.WriteFile(filepath.Join(home, ".gemini"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := bindAntigravity("", []byte(`{"key":"val"}`), false)
+	if err == nil {
+		t.Fatal("expected mkdir error")
+	}
+}
+
+func TestBindAntigravity_WriteFileError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; skip permission test")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	pluginDir := filepath.Join(home, ".gemini", "antigravity-cli", "plugins", "dreamland")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(pluginDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(pluginDir, 0o755) })
+
+	_, err := bindAntigravity("", []byte(`{"key":"val"}`), false)
+	if err == nil {
+		t.Fatal("expected write file error")
 	}
 }

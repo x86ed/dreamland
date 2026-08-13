@@ -3,12 +3,14 @@ package cmd
 import (
 	"encoding/json"
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"dreamland/internal/config"
+	"dreamland/internal/telemetry"
 )
 
 func TestResolveAgentName_EnvVar(t *testing.T) {
@@ -272,4 +274,380 @@ func makeCoauthorRepo(t *testing.T, cfg config.Config) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+// --- runCoauthor tests ---
+
+// withCoauthorFlags saves/restores the coauthor command's package-level flags.
+func withCoauthorFlags(t *testing.T, trailer string, hook bool) {
+	t.Helper()
+	origTrailer, origHook := coauthorTrailer, coauthorHook
+	coauthorTrailer, coauthorHook = trailer, hook
+	t.Cleanup(func() { coauthorTrailer, coauthorHook = origTrailer, origHook })
+}
+
+func TestRunCoauthor_GetwdError(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	orig := osGetwd
+	osGetwd = func() (string, error) { return "", errors.New("getwd failed") }
+	t.Cleanup(func() { osGetwd = orig })
+
+	if err := runCoauthor(nil, nil); err == nil {
+		t.Fatal("expected error when osGetwd fails")
+	}
+}
+
+func TestRunCoauthor_NoOpOutsideGitRepo(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	root := t.TempDir() // not a git repo
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("expected nil (skip) outside git repo, got: %v", err)
+	}
+}
+
+func TestRunCoauthor_ConfigLoadError(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Make .dreamland.json a directory so config.Load fails with a non-ErrNoGitRepo error.
+	if err := os.Mkdir(filepath.Join(root, ".dreamland.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	if err := runCoauthor(nil, nil); err == nil {
+		t.Fatal("expected error from config.Load")
+	}
+}
+
+func TestRunCoauthor_NilConfig_DefaultMode(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// No .dreamland.json written — cfg will be nil, exercising the fallback.
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	for _, env := range []string{"CLAUDE_AGENT_ID", "CODEX_AGENT_ID", "CURSOR_AGENT_ID", "KIRO_AGENT_ID"} {
+		t.Setenv(env, "")
+	}
+
+	stubRunCmd(t, func(_ string, _ ...string) (string, error) { return "", nil })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	hookPath := filepath.Join(root, ".git", "hooks", "prepare-commit-msg")
+	if _, err := os.Stat(hookPath); err != nil {
+		t.Errorf("expected hook to be installed: %v", err)
+	}
+}
+
+func TestRunCoauthor_DefaultMode_GitConfigNameError(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	root := makeCoauthorRepo(t, config.Config{CodingTool: "GitHub Copilot"})
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		if len(args) > 1 && args[0] == "config" && len(args) > 2 && args[2] == "user.name" {
+			return "", errors.New("git config user.name failed")
+		}
+		return "", nil
+	})
+
+	if err := runCoauthor(nil, nil); err == nil {
+		t.Fatal("expected error when git config user.name fails")
+	}
+}
+
+func TestRunCoauthor_DefaultMode_GitConfigEmailError(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	root := makeCoauthorRepo(t, config.Config{CodingTool: "GitHub Copilot"})
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		if len(args) > 2 && args[0] == "config" && args[2] == "user.email" {
+			return "", errors.New("git config user.email failed")
+		}
+		return "", nil
+	})
+
+	if err := runCoauthor(nil, nil); err == nil {
+		t.Fatal("expected error when git config user.email fails")
+	}
+}
+
+func TestRunCoauthor_DefaultMode_InstallHookError(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	root := t.TempDir()
+	// Make .git a *file*, not a directory: config.Load/FindRepoRoot still find it (os.Stat
+	// succeeds on a file too), but installPrepareCommitMsgHook's MkdirAll(.git/hooks) will
+	// fail because ".git" is not a directory.
+	if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: elsewhere"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	stubRunCmd(t, func(_ string, _ ...string) (string, error) { return "", nil })
+
+	if err := runCoauthor(nil, nil); err == nil {
+		t.Fatal("expected error when installPrepareCommitMsgHook fails")
+	}
+}
+
+func TestRunCoauthor_DefaultMode_HookFlagResolvesAgent(t *testing.T) {
+	withCoauthorFlags(t, "", true)
+	root := makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	oldStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString(`{"agent_type":"morpheus"}`); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin; r.Close() })
+
+	var configuredName string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		if len(args) > 2 && args[0] == "config" && args[2] == "user.name" {
+			configuredName = args[3]
+		}
+		return "", nil
+	})
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if configuredName != "morpheus" {
+		t.Errorf("expected agent identity morpheus from hook payload, got %q", configuredName)
+	}
+}
+
+func TestRunCoauthor_TrailerMode_Success(t *testing.T) {
+	withCoauthorFlags(t, "", false) // trailer path set below with actual file
+	root := makeCoauthorRepo(t, config.Config{ModelID: "claude-sonnet-4-6"})
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	msgFile := filepath.Join(root, "COMMIT_EDITMSG")
+	if err := os.WriteFile(msgFile, []byte("feat: something\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coauthorTrailer = msgFile
+	t.Cleanup(func() { coauthorTrailer = "" })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(msgFile)
+	if !strings.Contains(string(data), "Co-authored-by: claude-sonnet-4-6") {
+		t.Errorf("expected trailer appended, got:\n%s", data)
+	}
+}
+
+func TestRunCoauthor_TrailerMode_AppendError(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	root := makeCoauthorRepo(t, config.Config{ModelID: "claude-sonnet-4-6"})
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	coauthorTrailer = filepath.Join(root, "does-not-exist.txt")
+	t.Cleanup(func() { coauthorTrailer = "" })
+
+	if err := runCoauthor(nil, nil); err == nil {
+		t.Fatal("expected error when the commit-msg file doesn't exist")
+	}
+}
+
+// --- installPrepareCommitMsgHook additional branches ---
+
+func TestInstallPrepareCommitMsgHook_FindRepoRootError(t *testing.T) {
+	root := t.TempDir() // not a git repo
+	if err := installPrepareCommitMsgHook(root); err == nil {
+		t.Fatal("expected error when repoDir is not a git repository")
+	}
+}
+
+func TestInstallPrepareCommitMsgHook_MkdirAllError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Block .git/hooks with a regular file so MkdirAll(.git/hooks) fails.
+	if err := os.WriteFile(filepath.Join(root, ".git", "hooks"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installPrepareCommitMsgHook(root); err == nil {
+		t.Fatal("expected error when .git/hooks is blocked by a file")
+	}
+}
+
+// --- appendCoauthorTrailer additional branches ---
+
+func TestAppendCoauthorTrailer_ReadFileError(t *testing.T) {
+	err := appendCoauthorTrailer(filepath.Join(t.TempDir(), "missing.txt"), "claude-sonnet-4-6", "@github.com")
+	if err == nil {
+		t.Fatal("expected error for missing commit-msg file")
+	}
+}
+
+func TestAppendCoauthorTrailer_NoTrailingNewline(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "commit-msg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("feat: no trailing newline"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	if err := appendCoauthorTrailer(f.Name(), "claude-sonnet-4-6", "@github.com"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(f.Name())
+	if !strings.Contains(string(data), "feat: no trailing newline\nCo-authored-by:") {
+		t.Errorf("expected newline inserted before trailer, got:\n%q", data)
+	}
+}
+
+// --- appendTokensReport tests ---
+
+func TestAppendTokensReport_NoSnapshot(t *testing.T) {
+	root := t.TempDir()
+	msgFile := filepath.Join(root, "COMMIT_EDITMSG")
+	if err := os.WriteFile(msgFile, []byte("feat: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := appendTokensReport(msgFile, root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(msgFile)
+	if strings.Contains(string(data), "Tokens:") {
+		t.Errorf("expected no Tokens line when no snapshot exists, got:\n%s", data)
+	}
+}
+
+func TestAppendTokensReport_AllZero(t *testing.T) {
+	root := t.TempDir()
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{Tool: "claude-code"}); err != nil {
+		t.Fatal(err)
+	}
+	msgFile := filepath.Join(root, "COMMIT_EDITMSG")
+	if err := os.WriteFile(msgFile, []byte("feat: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := appendTokensReport(msgFile, root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(msgFile)
+	if strings.Contains(string(data), "Tokens:") {
+		t.Errorf("expected no Tokens line for all-zero snapshot, got:\n%s", data)
+	}
+}
+
+func TestAppendTokensReport_ReadFileError(t *testing.T) {
+	root := t.TempDir()
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{Tool: "claude-code", InputTokens: 100}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := appendTokensReport(filepath.Join(root, "missing.txt"), root)
+	if err == nil {
+		t.Fatal("expected error when commit-msg file doesn't exist")
+	}
+}
+
+func TestAppendTokensReport_Idempotent(t *testing.T) {
+	root := t.TempDir()
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{Tool: "claude-code", InputTokens: 100}); err != nil {
+		t.Fatal(err)
+	}
+	msgFile := filepath.Join(root, "COMMIT_EDITMSG")
+	original := "feat: x\nTokens: input=999 output=0 cached=0 total=999\n"
+	if err := os.WriteFile(msgFile, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := appendTokensReport(msgFile, root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(msgFile)
+	if string(data) != original {
+		t.Errorf("expected file unchanged (idempotent), got:\n%s", data)
+	}
+}
+
+func TestAppendTokensReport_AppendsWithTrailingNewline(t *testing.T) {
+	root := t.TempDir()
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{Tool: "claude-code", InputTokens: 100, OutputTokens: 20}); err != nil {
+		t.Fatal(err)
+	}
+	msgFile := filepath.Join(root, "COMMIT_EDITMSG")
+	if err := os.WriteFile(msgFile, []byte("feat: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := appendTokensReport(msgFile, root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(msgFile)
+	if !strings.Contains(string(data), "Tokens: input=100 output=20") {
+		t.Errorf("expected Tokens line appended, got:\n%s", data)
+	}
+}
+
+func TestAppendTokensReport_AppendsWithoutTrailingNewline(t *testing.T) {
+	root := t.TempDir()
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{Tool: "claude-code", InputTokens: 5, OutputTokens: 1}); err != nil {
+		t.Fatal(err)
+	}
+	msgFile := filepath.Join(root, "COMMIT_EDITMSG")
+	if err := os.WriteFile(msgFile, []byte("feat: no newline at end"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := appendTokensReport(msgFile, root); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(msgFile)
+	if !strings.Contains(string(data), "feat: no newline at end\nTokens: input=5 output=1") {
+		t.Errorf("expected newline inserted before Tokens line, got:\n%q", data)
+	}
 }
