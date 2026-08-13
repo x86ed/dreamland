@@ -123,13 +123,21 @@ func TestRunOtelReceiver_NilConfig(t *testing.T) {
 }
 
 func TestRunOtelReceiver_ForegroundListenAndServeFails(t *testing.T) {
+	// Occupy a real port ourselves first, so ListenAndServe hits a genuine "address
+	// already in use" — deterministic on every platform/resolver. Earlier attempts
+	// used a malformed address ("256.0.0.1", then an out-of-range port) hoping
+	// net.Listen would reject it synchronously; both instead got silently accepted
+	// by the CI runner's (Linux/cgo) resolver, leaving ListenAndServe's Accept()
+	// loop blocked forever — a real hang that ran until go test's own timeout.
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { occupied.Close() })
+
 	root := makeCoauthorRepo(t, config.Config{
-		CodingTool: "GitHub Copilot",
-		// Port out of the valid 0-65535 range: net.Listen rejects it synchronously
-		// (no DNS lookup involved), so ListenAndServe fails immediately instead of
-		// blocking. A malformed *host* (e.g. "256.0.0.1") is not reliable here — some
-		// resolvers happily bind it, leaving the server listening forever in Accept().
-		OtelEndpoint: "http://localhost:999999",
+		CodingTool:   "GitHub Copilot",
+		OtelEndpoint: "http://" + occupied.Addr().String(),
 	})
 	_ = root
 
