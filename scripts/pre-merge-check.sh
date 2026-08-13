@@ -73,11 +73,10 @@ check_coverage() {
   testlog=$(mktemp /tmp/dreamland-cov-log.XXXXXX)
   trap 'rm -f "$coverfile" "$testlog"' RETURN
 
-  # -timeout well above the 10m default: -coverpkg spans every package, so a cold
-  # build cache (fresh CI runner) pays full cgo recompilation cost before any test
-  # runs, and 10m was observed to expire mid-run and silently truncate the profile.
+  # -timeout slightly above the 10m default to give a cold-cache CI build (-coverpkg
+  # spans every package, forcing full cgo recompilation) enough headroom to finish.
   local test_status=0
-  go test -timeout=25m -coverprofile="$coverfile" -coverpkg="$coverpkgs" ./... > "$testlog" 2>&1 || test_status=$?
+  go test -timeout=15m -coverprofile="$coverfile" -coverpkg="$coverpkgs" ./... > "$testlog" 2>&1 || test_status=$?
 
   # --- Aggregate coverage ---
   local total_line

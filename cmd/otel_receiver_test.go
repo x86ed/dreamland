@@ -125,8 +125,11 @@ func TestRunOtelReceiver_NilConfig(t *testing.T) {
 func TestRunOtelReceiver_ForegroundListenAndServeFails(t *testing.T) {
 	root := makeCoauthorRepo(t, config.Config{
 		CodingTool: "GitHub Copilot",
-		// Not a bindable address: ListenAndServe should fail immediately instead of blocking.
-		OtelEndpoint: "http://256.0.0.1:4318",
+		// Port out of the valid 0-65535 range: net.Listen rejects it synchronously
+		// (no DNS lookup involved), so ListenAndServe fails immediately instead of
+		// blocking. A malformed *host* (e.g. "256.0.0.1") is not reliable here — some
+		// resolvers happily bind it, leaving the server listening forever in Accept().
+		OtelEndpoint: "http://localhost:999999",
 	})
 	_ = root
 
