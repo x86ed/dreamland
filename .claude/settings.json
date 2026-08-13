@@ -70,7 +70,8 @@
       "Bash(cp /tmp/dreamland-json-backup.json .dreamland.json)",
       "Bash(rm -f /tmp/dreamland-json-backup.json)",
       "Bash(echo \"BUILD:$?\")",
-      "Bash(echo \"VET:$?\")"
+      "Bash(echo \"VET:$?\")",
+      "Bash(go env *)"
     ]
   },
   "hooks": {
