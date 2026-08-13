@@ -68,17 +68,29 @@ check_coverage() {
     return
   fi
 
-  local coverfile
+  local coverfile testlog
   coverfile=$(mktemp /tmp/dreamland-cov.XXXXXX)
-  trap 'rm -f "$coverfile"' RETURN
+  testlog=$(mktemp /tmp/dreamland-cov-log.XXXXXX)
+  trap 'rm -f "$coverfile" "$testlog"' RETURN
 
-  go test -coverprofile="$coverfile" -coverpkg="$coverpkgs" ./... > /dev/null 2>&1 || true
+  # -timeout well above the 10m default: -coverpkg spans every package, so a cold
+  # build cache (fresh CI runner) pays full cgo recompilation cost before any test
+  # runs, and 10m was observed to expire mid-run and silently truncate the profile.
+  go test -timeout=25m -coverprofile="$coverfile" -coverpkg="$coverpkgs" ./... > "$testlog" 2>&1
+  local test_status=$?
 
   # --- Aggregate coverage ---
   local total_line
-  total_line=$(go tool cover -func="$coverfile" | grep '^total:' || true)
+  total_line=$(go tool cover -func="$coverfile" 2>/dev/null | grep '^total:' || true)
   if [[ -z "$total_line" ]]; then
+    echo "  go test exited $test_status; last 40 lines of output:" >&2
+    tail -40 "$testlog" >&2
     fail "Could not determine total coverage — no coverage data produced."
+  fi
+  if [[ "$test_status" -ne 0 ]]; then
+    echo "  go test exited $test_status (coverage data was still produced); last 40 lines:" >&2
+    tail -40 "$testlog" >&2
+    warn "go test reported failures during the coverage run — check output above."
   fi
   local total
   total=$(echo "$total_line" | awk '{print $NF}' | tr -d '%')
