@@ -1,4 +1,5 @@
 {
+  "statusLine": {"type": "command", "command": "dreamland statusline"},
   "hooks": {
     "SessionStart": [
       {
@@ -13,7 +14,8 @@
       {
         "matcher": "Task|Agent",
         "hooks": [
-          {"type": "command", "command": "dreamland coauthor --hook"}
+          {"type": "command", "command": "dreamland coauthor --hook"},
+          {"type": "command", "command": "dreamland agent-status --start"}
         ]
       }
     ],
@@ -22,6 +24,12 @@
         "matcher": "Bash",
         "hooks": [
           {"type": "command", "command": "dreamland version-bump --change-from-command"}
+        ]
+      },
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {"type": "command", "command": "dreamland agent-status --stop"}
         ]
       }
     ],

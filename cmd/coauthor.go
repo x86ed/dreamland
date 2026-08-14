@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -142,13 +141,8 @@ func resolveAgentName(codingTool string) string {
 // carry either field, so the existing env-var/coding-tool fallback in resolveAgentName
 // still applies for those. Returns "" whenever no matching payload is found.
 func agentNameFromHookPayloadFrom(r io.Reader) string {
-	data, err := io.ReadAll(io.LimitReader(r, 1<<16))
-	if err != nil || len(data) == 0 {
-		return ""
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(data, &payload); err != nil {
+	payload := readHookPayload(r)
+	if payload == nil {
 		return ""
 	}
 	return agentidentity.FromPayload(payload)

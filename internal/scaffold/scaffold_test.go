@@ -86,6 +86,63 @@ func TestInstall_ClaudeCode(t *testing.T) {
 	}
 }
 
+func TestInstall_ClaudeCode_AgentStatusAndStatusline(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	settingsPath := filepath.Join(root, ".claude", "settings.json")
+	settingsData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("reading settings.json: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(settingsData, &settings); err != nil {
+		t.Fatalf("settings.json is not valid JSON: %v", err)
+	}
+
+	if !strings.Contains(string(settingsData), `"dreamland agent-status --start"`) {
+		t.Errorf("settings.json missing agent-status --start, got:\n%s", settingsData)
+	}
+	if !strings.Contains(string(settingsData), `"dreamland agent-status --stop"`) {
+		t.Errorf("settings.json missing agent-status --stop, got:\n%s", settingsData)
+	}
+
+	statusLine, ok := settings["statusLine"].(map[string]any)
+	if !ok {
+		t.Fatalf("settings.json missing statusLine key, got:\n%s", settingsData)
+	}
+	if statusLine["command"] != "dreamland statusline" {
+		t.Errorf("statusLine.command = %v, want %q", statusLine["command"], "dreamland statusline")
+	}
+}
+
+func TestInstall_GitHubCopilot_NoAgentStatusOrStatusline(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "GitHub Copilot"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		if strings.Contains(string(data), "agent-status") || strings.Contains(string(data), "statusLine") {
+			t.Errorf("%s unexpectedly contains agent-status/statusLine — Claude-Code-only feature", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking %s: %v", root, err)
+	}
+}
+
 func TestInstall_ClaudeCode_BareCommandsAlongsideDrmlnd(t *testing.T) {
 	root := fakeGitRepo(t)
 	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
