@@ -11,6 +11,9 @@ import (
 
 const filename = ".dreamland.json"
 
+// ErrNoGitRepo is a sentinel error indicating no git repository was found.
+var ErrNoGitRepo = errors.New("no git repository found in any parent directory")
+
 // Config holds the project-level settings persisted by `dreamland init`.
 type Config struct {
 	CodingTool         string `json:"coding_tool"`
@@ -48,7 +51,7 @@ func FindRepoRoot(dir string) (string, error) {
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return "", errors.New("no git repository found in any parent directory")
+			return "", ErrNoGitRepo
 		}
 		current = parent
 	}

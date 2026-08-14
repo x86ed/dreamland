@@ -1,10 +1,12 @@
 # BEGIN dreamland-telemetry
 COMMIT_MSG_FILE="$1"
-if command -v dreamland >/dev/null 2>&1; then
-  TRAILERS="$(dreamland telemetry snapshot --format trailers 2>/dev/null)"
-  if [ -n "$TRAILERS" ]; then
-    printf '\n%s' "$TRAILERS" >> "$COMMIT_MSG_FILE"
-  fi
+if ! command -v dreamland >/dev/null 2>&1; then
+  echo "dreamland: not found on PATH — commit blocked (bypass with 'git commit --no-verify')" >&2
+  exit 1
+fi
+TRAILERS="$(dreamland telemetry snapshot --format trailers 2>/dev/null)"
+if [ -n "$TRAILERS" ]; then
+  printf '\n%s' "$TRAILERS" >> "$COMMIT_MSG_FILE"
 fi
 exit 0
 # END dreamland-telemetry

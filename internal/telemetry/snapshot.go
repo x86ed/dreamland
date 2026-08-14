@@ -14,6 +14,7 @@ const sessionFile = ".dreamland-session.json"
 // SnapshotResult is the normalized session telemetry snapshot written after each AI turn.
 type SnapshotResult struct {
 	Tool           string `json:"tool"`
+	Agent          string `json:"agent,omitempty"`
 	Model          string `json:"model"`
 	ThinkingEffort string `json:"thinking_effort,omitempty"`
 	InputTokens    int64  `json:"input_tokens"`

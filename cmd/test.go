@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -33,6 +36,9 @@ func runTest(_ *cobra.Command, _ []string) error {
 	}
 	cfg, err := config.Load(cwd)
 	if err != nil {
+		if errors.Is(err, config.ErrNoGitRepo) {
+			return nil // skip outside git repo
+		}
 		return err
 	}
 	if cfg == nil || cfg.TestCommand == "" {
@@ -50,7 +56,12 @@ func runTest(_ *cobra.Command, _ []string) error {
 	}
 
 	if !hasMatchingFiles(out, exts) {
-		return nil
+		return nil // no source changes, skip test and don't record result
+	}
+
+	repoRoot, err := config.FindRepoRoot(cwd)
+	if err != nil {
+		return fmt.Errorf("failed to find repo root: %w", err)
 	}
 
 	parts := strings.Fields(cfg.TestCommand)
@@ -58,9 +69,23 @@ func runTest(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 	c := exec.Command(parts[0], parts[1:]...)
-	c.Stdout = nil
-	c.Stderr = nil
-	return c.Run()
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+
+	err = c.Run()
+	if err != nil {
+		// Test failed: record failure and return blocking error
+		if writeErr := writeLastTestResult(repoRoot, "fail"); writeErr != nil {
+			return Blocking(fmt.Errorf("test failed and could not record result: %w (test error: %v)", writeErr, err))
+		}
+		return Blocking(err)
+	}
+
+	// Test passed: record success
+	if writeErr := writeLastTestResult(repoRoot, "pass"); writeErr != nil {
+		return Blocking(fmt.Errorf("test passed but could not record result: %w", writeErr))
+	}
+	return nil
 }
 
 func hasMatchingFiles(gitStatus string, exts []string) bool {

@@ -125,6 +125,22 @@ func TestWrite_ReadError(t *testing.T) {
 	}
 }
 
+func TestWrite_MkdirAllError(t *testing.T) {
+	// repoRoot itself doesn't exist yet, and its parent is read-only, so Read
+	// succeeds (missing file is not-exist), but MkdirAll(repoRoot) then fails
+	// trying to create the missing leaf directory.
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(parent, 0o755) })
+	repoRoot := filepath.Join(parent, "child")
+	err := Write(repoRoot, &SnapshotResult{Tool: "test"})
+	if err == nil {
+		t.Error("expected error when repoRoot must be created under a read-only parent")
+	}
+}
+
 func TestRegister(t *testing.T) {
 	const name = "test-register-tool"
 	orig := Registry[name]

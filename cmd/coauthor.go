@@ -2,15 +2,16 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
+	"dreamland/internal/agentidentity"
 	"dreamland/internal/config"
 	"dreamland/internal/telemetry"
 )
@@ -21,13 +22,24 @@ var coauthorCmd = &cobra.Command{
 	RunE:  runCoauthor,
 }
 
+<<<<<<< HEAD
 var coauthorTrailer string
 var coauthorAgentName string
+=======
+var (
+	coauthorTrailer string
+	coauthorHook    bool
+)
+>>>>>>> origin/main
 
 func init() {
 	rootCmd.AddCommand(coauthorCmd)
 	coauthorCmd.Flags().StringVar(&coauthorTrailer, "trailer", "", "commit message file path (prepare-commit-msg delegation mode)")
+<<<<<<< HEAD
 	coauthorCmd.Flags().StringVar(&coauthorAgentName, "agent-name", "", "explicit agent name, takes precedence over env var / hook payload lookup")
+=======
+	coauthorCmd.Flags().BoolVar(&coauthorHook, "hook", false, "set only by dreamland's own hook-binding templates; gates stdin read for hook payload")
+>>>>>>> origin/main
 }
 
 func runCoauthor(cmd *cobra.Command, args []string) error {
@@ -37,7 +49,10 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 	}
 	cfg, err := config.Load(cwd)
 	if err != nil {
-		return err
+		if errors.Is(err, config.ErrNoGitRepo) {
+			return nil // skip outside git repo
+		}
+		return Blocking(err)
 	}
 	if cfg == nil {
 		cfg = &config.Config{}
@@ -64,23 +79,56 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 	}
 
 	// Default mode: set agent git identity and install the hook.
+<<<<<<< HEAD
 	agentName := coauthorAgentName
 	if agentName == "" {
 		agentName = resolveAgentName(cfg.CodingTool)
 		if hookAgent := agentNameFromHookPayload(); hookAgent != "" {
+=======
+	agentName := resolveEnforcedAgentName(cfg)
+	if coauthorHook {
+		// --hook flag set: read hook payload from stdin (only when invoked by hook templates)
+		if hookAgent := agentNameFromHookPayloadFrom(os.Stdin); hookAgent != "" && isRegisteredAgent(hookAgent) {
+>>>>>>> origin/main
 			agentName = hookAgent
 		}
 	}
 	agentEmail := config.EmailClean(agentName) + suffix
 
 	if _, err := gitExec("config", "--local", "user.name", agentName); err != nil {
-		return fmt.Errorf("git config user.name: %w", err)
+		return Blocking(fmt.Errorf("git config user.name: %w", err))
 	}
 	if _, err := gitExec("config", "--local", "user.email", agentEmail); err != nil {
-		return fmt.Errorf("git config user.email: %w", err)
+		return Blocking(fmt.Errorf("git config user.email: %w", err))
 	}
 
-	return installPrepareCommitMsgHook(cwd)
+	if err := installPrepareCommitMsgHook(cwd); err != nil {
+		return Blocking(err)
+	}
+	return nil
+}
+
+// isRegisteredAgent reports whether name is one of the ten registered dreamland
+// agents — see the session-agent-identity capability for why a candidate identity
+// resolved from a hook payload that isn't in this set must be treated as unresolved.
+func isRegisteredAgent(name string) bool {
+	return agentidentity.IsRegistered(name)
+}
+
+// resolveEnforcedAgentName returns the correct agent name using the full resolution
+// sequence: hook payload (if --hook set), env vars, coding tool fallback, or janus for Claude Code.
+// Extracted so it can be shared between coauthor and commit.
+func resolveEnforcedAgentName(cfg *config.Config) string {
+	agentName := resolveAgentName(cfg.CodingTool)
+	// Claude Code has no per-agent env var and no sub-agent identifier on its
+	// SessionStart/Stop/SubagentStop payloads (only on PreToolUse/PostToolUse for the
+	// Task/Agent tool call itself) — so absent a valid hook-resolved identity, the coding
+	// tool name is not a real agent and must not become the git identity. Other platforms
+	// keep the coding-tool-name fallback unchanged.
+	if cfg.CodingTool == "Claude Code" && !isRegisteredAgent(agentName) {
+		agentName = "janus"
+	}
+	return agentName
 }
 
 // resolveAgentName returns the agent name from platform env vars or falls back to
@@ -108,54 +156,28 @@ func resolveAgentName(codingTool string) string {
 	return "dreamland"
 }
 
-// hookPayloadReadTimeout bounds how long agentNameFromHookPayload waits for a hook
-// payload before giving up. Stdin-type detection (os.ModeCharDevice) is not reliable
-// enough on its own to rule out blocking forever — VS Code's integrated terminal (and
-// other pty-backed shells) does not reliably present stdin the way a plain interactive
-// terminal does, so a bare Stat() check let `dreamland coauthor` hang indefinitely when
-// run directly in that terminal. A hard timeout guarantees this function can never block
-// its caller, regardless of what stdin actually is; a real hook payload arrives near-
-// instantly (the parent process writes it and closes/moves on immediately), so 200ms is
-// generous for the legitimate case and negligible for the interactive/no-payload case.
-const hookPayloadReadTimeout = 200 * time.Millisecond
-
-// agentNameFromHookPayload reads a JSON hook payload from stdin, if one arrives within
-// hookPayloadReadTimeout, and extracts the acting sub-agent's identity if present.
+// agentNameFromHookPayloadFrom reads a JSON hook payload from the provided reader and
+// extracts the acting sub-agent's identity if present. It does a synchronous read to EOF
+// with no timeout (correct because hook-binding callers always write and close promptly).
 // Confirmed from live GitHub Copilot SubagentStart/SubagentStop hook payloads: the field
 // is "agent_type" (e.g. "morpheus", "iktomi") — undocumented but consistently present.
-// SessionStart/Stop payloads (which aren't about a specific sub-agent) don't carry this
-// field, so the existing env-var/coding-tool fallback in resolveAgentName still applies
-// for those. Returns "" whenever no matching payload arrives in time.
-func agentNameFromHookPayload() string {
-	type result struct {
-		data []byte
-		err  error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<16))
-		ch <- result{data, err}
-	}()
-
-	var data []byte
-	select {
-	case res := <-ch:
-		if res.err != nil || len(res.data) == 0 {
-			return ""
-		}
-		data = res.data
-	case <-time.After(hookPayloadReadTimeout):
-		return "" // nothing arrived in time — never block the caller
+// Claude Code carries no top-level "agent_type" at all; the sub-agent identifier only
+// appears as "tool_input.subagent_type" on the PreToolUse/PostToolUse payload for the
+// Task/Agent tool call itself. SessionStart/Stop/SubagentStop payloads on Claude Code
+// (which aren't about a specific sub-agent, or don't carry the tool call's input) don't
+// carry either field, so the existing env-var/coding-tool fallback in resolveAgentName
+// still applies for those. Returns "" whenever no matching payload is found.
+func agentNameFromHookPayloadFrom(r io.Reader) string {
+	data, err := io.ReadAll(io.LimitReader(r, 1<<16))
+	if err != nil || len(data) == 0 {
+		return ""
 	}
 
 	var payload map[string]any
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return ""
 	}
-	if v, ok := payload["agent_type"].(string); ok && v != "" {
-		return v
-	}
-	return ""
+	return agentidentity.FromPayload(payload)
 }
 
 const prepareCommitMsgContent = "#!/bin/sh\ndreamland coauthor --trailer \"$1\" \"$2\" \"$3\"\n"

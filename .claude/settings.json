@@ -46,10 +46,78 @@
       "Bash(/tmp/dreamland-readme-check telemetry *)",
       "Bash(rm -f /tmp/dreamland-readme-check)",
       "Bash(gofmt -l internal/scaffold/*.go)",
-      "Bash(go clean *)"
+      "Bash(go clean *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(python3 -c ' *)",
+      "Bash(openspec spec *)",
+      "Bash(openspec show *)",
+      "Read(//tmp/**)",
+      "Bash(git config *)",
+      "Bash(cp dreamland *)",
+      "Read(//Users/adamsiegel/.local/bin/**)",
+      "Bash(dreamland coauthor *)",
+      "Bash(dreamland telemetry *)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(git tag *)",
+      "Bash(echo \"BUILD_EXIT:$?\")",
+      "Bash(echo \"VET_EXIT:$?\")",
+      "Bash(git check-ignore *)",
+      "Bash(./dreamland test *)",
+      "Bash(echo \"TEST_EXIT:$?\")",
+      "Bash(./dreamland commit *)",
+      "Bash(echo \"COMMIT_EXIT:$?\")",
+      "Bash(cp /tmp/dreamland-json-backup.json .dreamland.json)",
+      "Bash(rm -f /tmp/dreamland-json-backup.json)",
+      "Bash(echo \"BUILD:$?\")",
+      "Bash(echo \"VET:$?\")",
+      "Bash(go env *)",
+      "Bash(awk '{n=split\\($0,a,\" \"\\); if \\(a[n]==\"0\"\\) print $0}')",
+      "Bash(MERGE_CHECK=1 bash scripts/pre-merge-check.sh check_coverage)",
+      "Bash(rm -f /private/tmp/claude-501/-Users-adamsiegel-Workspace-git-dreamland/0cf79e38-5fd3-4fd7-b954-b7b81a9c71ba/scratchpad/cover*.out /private/tmp/claude-501/-Users-adamsiegel-Workspace-git-dreamland/0cf79e38-5fd3-4fd7-b954-b7b81a9c71ba/scratchpad/testout.txt *)"
+    ],
+    "additionalDirectories": [
+      "/private/tmp/claude-501/-Users-adamsiegel-Workspace-git-dreamland/0cf79e38-5fd3-4fd7-b954-b7b81a9c71ba/scratchpad"
     ]
   },
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dreamland version-bump --change-from-command"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dreamland coauthor --hook"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dreamland version-bump"
+          },
+          {
+            "type": "command",
+            "command": "dreamland coauthor --hook"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "",
@@ -57,6 +125,54 @@
           {
             "type": "command",
             "command": "bash scripts/pre-merge-check.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dreamland version-bump --patch"
+          },
+          {
+            "type": "command",
+            "command": "dreamland transition-log"
+          },
+          {
+            "type": "command",
+            "command": "dreamland telemetry write --tool claude-code"
+          },
+          {
+            "type": "command",
+            "command": "dreamland test-and-commit --reason turn-complete"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dreamland coauthor --hook"
+          },
+          {
+            "type": "command",
+            "command": "dreamland telemetry write --tool claude-code"
+          },
+          {
+            "type": "command",
+            "command": "dreamland version-bump --patch"
+          },
+          {
+            "type": "command",
+            "command": "dreamland version-bump --minor --if-agent janus"
+          },
+          {
+            "type": "command",
+            "command": "dreamland commit --reason handoff"
           }
         ]
       }

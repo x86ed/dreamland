@@ -5,7 +5,7 @@
         "matcher": "",
         "hooks": [
           {"type": "command", "command": "dreamland version-bump"},
-          {"type": "command", "command": "dreamland coauthor"}
+          {"type": "command", "command": "dreamland coauthor --hook"}
         ]
       }
     ],

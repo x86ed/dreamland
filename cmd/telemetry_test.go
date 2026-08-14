@@ -163,6 +163,69 @@ func TestFormatTrailers_OmitsZeroFields(t *testing.T) {
 	if !strings.Contains(out, "AI-Tool: cursor") {
 		t.Error("AI-Tool should be present")
 	}
+	if strings.Contains(out, "AI-Agent") {
+		t.Error("AI-Agent should be omitted when empty")
+	}
+}
+
+func TestFormatTrailers_IncludesAgent(t *testing.T) {
+	snap := &telemetry.SnapshotResult{
+		Tool:  "claude-code",
+		Agent: "phobetor",
+		Model: "claude-sonnet-5",
+	}
+	out := formatTrailers(snap)
+	if !strings.Contains(out, "AI-Agent: phobetor") {
+		t.Errorf("AI-Agent trailer not present, got:\n%s", out)
+	}
+}
+
+func TestTelemetryWriteClaudeCode_AgentFromSubagentType(t *testing.T) {
+	root := telemetryGitRepo(t)
+	rootCmd.SetIn(strings.NewReader(`{"tool_input":{"subagent_type":"phobetor"}}`))
+	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	if _, _, err := execCLI(t, "telemetry", "write", "--tool", "claude-code"); err != nil {
+		t.Fatalf("expected success: %v", err)
+	}
+	snap, err := telemetry.Read(root)
+	if err != nil || snap == nil {
+		t.Fatalf("expected snapshot to be written, err=%v snap=%v", err, snap)
+	}
+	if snap.Agent != "phobetor" {
+		t.Errorf("got Agent=%q, want phobetor", snap.Agent)
+	}
+}
+
+func TestTelemetryWriteClaudeCode_AgentDefaultsToJanus(t *testing.T) {
+	root := telemetryGitRepo(t)
+	rootCmd.SetIn(strings.NewReader(`{}`))
+	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	if _, _, err := execCLI(t, "telemetry", "write", "--tool", "claude-code"); err != nil {
+		t.Fatalf("expected success: %v", err)
+	}
+	snap, err := telemetry.Read(root)
+	if err != nil || snap == nil {
+		t.Fatalf("expected snapshot to be written, err=%v snap=%v", err, snap)
+	}
+	if snap.Agent != "janus" {
+		t.Errorf("got Agent=%q, want janus", snap.Agent)
+	}
+}
+
+func TestTelemetryWriteClaudeCode_UnrecognizedAgentFallsBackToJanus(t *testing.T) {
+	root := telemetryGitRepo(t)
+	rootCmd.SetIn(strings.NewReader(`{"tool_input":{"subagent_type":"not-a-real-agent"}}`))
+	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	if _, _, err := execCLI(t, "telemetry", "write", "--tool", "claude-code"); err != nil {
+		t.Fatalf("expected success: %v", err)
+	}
+	snap, err := telemetry.Read(root)
+	if err != nil || snap == nil {
+		t.Fatalf("expected snapshot to be written, err=%v snap=%v", err, snap)
+	}
+	if snap.Agent != "janus" {
+		t.Errorf("got Agent=%q, want janus (unrecognized value must not leak through)", snap.Agent)
+	}
 }
 
 func TestTelemetryWriteKnownToolCLI(t *testing.T) {
