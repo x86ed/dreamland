@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func makeGitDir(t *testing.T) string {
@@ -154,6 +155,57 @@ func TestUninstallCommitMsgHook_NoEndMarker(t *testing.T) {
 	// Remaining is just "#!/bin/sh" — file should be deleted.
 	if _, err := os.Stat(filepath.Join(hooksDir, "commit-msg")); !os.IsNotExist(err) {
 		t.Error("hook file should be removed when only shebang remains")
+	}
+}
+
+func TestInstallCommitMsgHook_GitDirIsFile(t *testing.T) {
+	root := t.TempDir()
+	// ".git" as a regular file blocks MkdirAll from creating ".git/hooks".
+	if err := os.WriteFile(filepath.Join(root, ".git"), []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := InstallCommitMsgHook(root)
+	if err == nil {
+		t.Error("expected error when .git is a regular file (hooks dir cannot be created)")
+	}
+}
+
+func TestInstallCommitMsgHook_TemplateReadError(t *testing.T) {
+	orig := TemplateFS
+	TemplateFS = fstest.MapFS{}
+	t.Cleanup(func() { TemplateFS = orig })
+
+	root := makeGitDir(t)
+	err := InstallCommitMsgHook(root)
+	if err == nil {
+		t.Error("expected error when commit-msg template cannot be read")
+	}
+}
+
+func TestUninstallCommitMsgHook_NoFile(t *testing.T) {
+	root := makeGitDir(t)
+	// No commit-msg hook was ever installed; target doesn't exist.
+	if err := UninstallCommitMsgHook(root); err != nil {
+		t.Fatalf("expected nil error for absent hook file, got: %v", err)
+	}
+}
+
+func TestUninstallCommitMsgHook_NoBeginMarker(t *testing.T) {
+	root := makeGitDir(t)
+	content := "#!/bin/sh\necho unrelated hook\n"
+	target := filepath.Join(root, ".git", "hooks", "commit-msg")
+	if err := os.WriteFile(target, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := UninstallCommitMsgHook(root); err != nil {
+		t.Fatalf("expected nil error when block marker absent, got: %v", err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != content {
+		t.Errorf("file without dreamland block should be left unchanged, got:\n%s", data)
 	}
 }
 

@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -32,18 +34,19 @@ func TestRunCommit_GetwdError(t *testing.T) {
 	}
 }
 
-func TestRunCommit_ConfigLoadError(t *testing.T) {
+func TestRunCommit_NoOpOutsideGitRepo(t *testing.T) {
 	orig := commitReason
 	commitReason = "turn-complete"
 	t.Cleanup(func() { commitReason = orig })
 
-	root := t.TempDir() // not a git repo, so config.Load fails via FindRepoRoot
+	root := t.TempDir() // not a git repo, so FindRepoRoot fails
 	origGetwd := osGetwd
 	osGetwd = func() (string, error) { return root, nil }
 	t.Cleanup(func() { osGetwd = origGetwd })
 
-	if err := runCommit(nil, nil); err == nil {
-		t.Fatal("expected error when config.Load fails")
+	// Should skip (return nil) outside git repo, not error
+	if err := runCommit(nil, nil); err != nil {
+		t.Fatalf("expected nil (skip) when outside git repo, got error: %v", err)
 	}
 }
 
@@ -51,7 +54,10 @@ func TestRunCommit_GitStatusError(t *testing.T) {
 	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
 
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
-		return "", errors.New("git status failed")
+		if len(args) > 0 && args[0] == "status" {
+			return "", errors.New("git status failed")
+		}
+		return "", nil
 	})
 
 	orig := commitReason
@@ -139,7 +145,7 @@ func TestRunCommit_NoOpOnCleanTree(t *testing.T) {
 }
 
 func TestRunCommit_CommitsOnDirtyTree(t *testing.T) {
-	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
+	makeVersionBumpRepo(t, config.Config{CodingTool: "GitHub Copilot"})
 
 	var calls []string
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
@@ -175,7 +181,136 @@ func TestRunCommit_CommitsOnDirtyTree(t *testing.T) {
 	if !commitCalled {
 		t.Error("expected 'git commit' call")
 	}
-	if !strings.Contains(commitMsg, "chore: handoff checkpoint (Claude Code)") {
+	if !strings.Contains(commitMsg, "chore: handoff checkpoint (GitHub Copilot)") {
 		t.Errorf("unexpected commit message: %q", commitMsg)
+	}
+}
+
+func TestRunCommit_NilConfig(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// No .dreamland.json — cfg will be nil, so no test-result gating applies.
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "status" {
+			return "", nil // clean tree
+		}
+		return "", nil
+	})
+
+	orig2 := commitReason
+	commitReason = "turn-complete"
+	t.Cleanup(func() { commitReason = orig2 })
+
+	if err := runCommit(nil, nil); err != nil {
+		t.Fatalf("unexpected error with nil config: %v", err)
+	}
+}
+
+func TestRunCommit_ConfigLoadError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Malformed JSON so config.Load fails with a non-ErrNoGitRepo error.
+	if err := os.WriteFile(filepath.Join(root, ".dreamland.json"), []byte("not-json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	origReason := commitReason
+	commitReason = "turn-complete"
+	t.Cleanup(func() { commitReason = origReason })
+
+	if err := runCommit(nil, nil); err == nil {
+		t.Fatal("expected error from config.Load with invalid JSON")
+	}
+}
+
+func TestRunCommit_ReadLastTestResultError(t *testing.T) {
+	root := makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code", TestCommand: "go test ./..."})
+
+	// Corrupt the last-test-result.json so readLastTestResult fails to unmarshal.
+	dreamlandDir := filepath.Join(root, ".dreamland")
+	if err := os.MkdirAll(dreamlandDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dreamlandDir, "last-test-result.json"), []byte("not-json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stubRunCmd(t, func(_ string, _ ...string) (string, error) { return "", nil })
+
+	orig := commitReason
+	commitReason = "turn-complete"
+	t.Cleanup(func() { commitReason = orig })
+
+	if err := runCommit(nil, nil); err == nil {
+		t.Fatal("expected error when readLastTestResult fails")
+	}
+}
+
+func TestRunCommit_TestResultMissing_Blocking(t *testing.T) {
+	// TestCommand configured but no last-test-result.json recorded at all.
+	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code", TestCommand: "go test ./..."})
+
+	stubRunCmd(t, func(_ string, _ ...string) (string, error) { return "", nil })
+
+	orig := commitReason
+	commitReason = "turn-complete"
+	t.Cleanup(func() { commitReason = orig })
+
+	err := runCommit(nil, nil)
+	if err == nil {
+		t.Fatal("expected blocking error when no test result is recorded")
+	}
+	if !strings.Contains(err.Error(), "no result recorded") {
+		t.Errorf("expected 'no result recorded' in error, got: %v", err)
+	}
+}
+
+func TestRunCommit_TestFailed_HeadMismatch_Blocking(t *testing.T) {
+	root := makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code", TestCommand: "go test ./..."})
+
+	if err := writeLastTestResult(root, "fail"); err != nil {
+		t.Fatal(err)
+	}
+
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "rev-parse" {
+			return "", errors.New("git rev-parse HEAD failed")
+		}
+		return "", nil
+	})
+
+	orig := commitReason
+	commitReason = "turn-complete"
+	t.Cleanup(func() { commitReason = orig })
+
+	err := runCommit(nil, nil)
+	if err == nil {
+		t.Fatal("expected error when git rev-parse HEAD fails")
+	}
+}
+
+func TestCurrentGitIdentityName_UsesConfiguredGitIdentity(t *testing.T) {
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		if len(args) >= 4 && args[0] == "config" && args[3] == "user.name" {
+			return "morpheus\n", nil
+		}
+		return "", nil
+	})
+
+	cfg := &config.Config{CodingTool: "GitHub Copilot"}
+	got := currentGitIdentityName(cfg)
+	if got != "morpheus" {
+		t.Errorf("got %q, want morpheus (from git config)", got)
 	}
 }

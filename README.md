@@ -25,7 +25,7 @@ There's no `go install`-able path yet — `go.mod` declares `module dreamland`, 
 ```sh
 git clone <this-repo-url>
 cd dreamland
-go build -o dreamland .
+go build -o dreamland -ldflags "-X dreamland/cmd.buildCommit=$(git rev-parse HEAD)" .
 ```
 
 Put the resulting binary on your `PATH`, then run the interactive wizard from the root of the repository you want to scaffold:

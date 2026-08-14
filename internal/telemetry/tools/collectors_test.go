@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -427,6 +428,56 @@ func TestCopilotCollector_NoDebugCaptureOnRealTokens(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl")); !os.IsNotExist(err) {
 		t.Error("expected no debug capture file when real tokens were extracted")
 	}
+}
+
+func TestCaptureDebugPayload_NilCfgOrEmptyRepoRoot(t *testing.T) {
+	// Must not panic and must not write anything when cfg is nil or RepoRoot is empty.
+	captureDebugPayload(nil, []byte(`{}`), "", nil)
+	captureDebugPayload(&config.Config{}, []byte(`{}`), "", nil)
+}
+
+func TestCaptureDebugPayload_ParseErrorRecorded(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{RepoRoot: root}
+
+	captureDebugPayload(cfg, []byte(`{"session_id":"s1"}`), "", errors.New("boom: parse failed"))
+
+	data, err := os.ReadFile(filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl"))
+	if err != nil {
+		t.Fatalf("expected debug capture file, got error: %v", err)
+	}
+	if !strings.Contains(string(data), "parse_error") || !strings.Contains(string(data), "boom: parse failed") {
+		t.Errorf("debug capture missing parse_error, got: %s", data)
+	}
+}
+
+func TestCaptureDebugPayload_MarshalError(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{RepoRoot: root}
+
+	// Invalid JSON bytes as the raw hook payload: json.RawMessage embeds them
+	// verbatim, and json.Marshal validates/compacts that raw content, so this
+	// makes the top-level json.Marshal(entry) call fail.
+	captureDebugPayload(cfg, []byte("not valid json"), "", nil)
+
+	if _, err := os.Stat(filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl")); !os.IsNotExist(err) {
+		t.Error("expected no debug capture file to be written when marshaling the entry fails")
+	}
+}
+
+func TestCaptureDebugPayload_OpenFileFails(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{RepoRoot: root}
+
+	// Pre-create the debug log path as a directory: MkdirAll(parent) succeeds
+	// (already exists), but OpenFile on the log path itself fails (EISDIR).
+	debugPath := filepath.Join(root, ".dreamland", "copilot-hook-debug.jsonl")
+	if err := os.MkdirAll(debugPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Must not panic; captureDebugPayload is best-effort and swallows the error.
+	captureDebugPayload(cfg, []byte(`{}`), "", nil)
 }
 
 func TestCopilotCollector_MissingTranscript(t *testing.T) {

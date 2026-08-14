@@ -337,6 +337,35 @@ func TestDefaultWizardRunner_ExistingDeclined(t *testing.T) {
 	}
 }
 
+func TestDefaultWizardRunner_NoGitRepo_UsesCwdAsRepoRoot(t *testing.T) {
+	restore := stubHuhFormRunner(nil)
+	defer restore()
+
+	// Chdir somewhere with no .git ancestor so config.FindRepoRoot fails inside
+	// defaultWizardRunner, exercising the "detectedRoot = cwd" fallback.
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	var buf bytes.Buffer
+	res, err := defaultWizardRunner(nil, &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Resolve symlinks (e.g. macOS /tmp -> /private/tmp) before comparing.
+	wantRoot, _ := filepath.EvalSymlinks(dir)
+	gotRoot, _ := filepath.EvalSymlinks(res.repoRoot)
+	if gotRoot != wantRoot {
+		t.Errorf("repoRoot = %q, want cwd fallback %q", res.repoRoot, dir)
+	}
+}
+
 func TestDefaultWizardRunner_ConfirmFormError(t *testing.T) {
 	restore := stubHuhFormRunner(errors.New("ctrl-c"))
 	defer restore()
@@ -525,6 +554,37 @@ func TestInitForceFlag(t *testing.T) {
 	}
 }
 
+func TestInitEmailSuffix_EmptyFallsBackToDefault(t *testing.T) {
+	root := makeGitRepo(t)
+
+	orig := wizardRunner
+	wizardRunner = stubWizard(&wizardResult{
+		repoRoot:       root,
+		tool:           "Kiro",
+		language:       "Go",
+		testCommand:    "go test ./...",
+		versionCommand: "go version",
+	}, nil)
+	t.Cleanup(func() { wizardRunner = orig })
+
+	origSuffix := emailSuffixFlag
+	emailSuffixFlag = ""
+	t.Cleanup(func() { emailSuffixFlag = origSuffix })
+
+	if _, err := runInitWithBuf(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cwd, _ := os.Getwd()
+	cfg, _ := config.Load(cwd)
+	if cfg == nil {
+		t.Fatal("expected config")
+	}
+	if cfg.EmailSuffix != "@github.com" {
+		t.Errorf("EmailSuffix = %q, want default @github.com when flag is empty", cfg.EmailSuffix)
+	}
+}
+
 func TestInitEmailSuffix(t *testing.T) {
 	root := makeGitRepo(t)
 
@@ -583,6 +643,12 @@ func TestInitVersionBumpCommandSet(t *testing.T) {
 	}
 	if cfg.ModelID != "codex-1" {
 		t.Errorf("ModelID = %q, want codex-1", cfg.ModelID)
+	}
+}
+
+func TestValidatePathExists_Empty(t *testing.T) {
+	if err := validatePathExists(""); err == nil {
+		t.Error("expected error for empty path")
 	}
 }
 

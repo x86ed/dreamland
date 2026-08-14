@@ -503,6 +503,108 @@ func TestRunVersionBump_ChangeScoped_NoDoubleBump(t *testing.T) {
 	}
 }
 
+func TestChangeSlugFromBashHookStdin_NewChangeMatch(t *testing.T) {
+	slug, ok := changeSlugFromBashHookStdin(strings.NewReader(`{"tool_input":{"command":"openspec new change \"add-auth\""}}`))
+	if !ok || slug != "add-auth" {
+		t.Errorf("got slug=%q ok=%v, want add-auth/true", slug, ok)
+	}
+}
+
+func TestChangeSlugFromBashHookStdin_ChangeCreateMatch(t *testing.T) {
+	slug, ok := changeSlugFromBashHookStdin(strings.NewReader(`{"tool_input":{"command":"openspec change create foo-bar"}}`))
+	if !ok || slug != "foo-bar" {
+		t.Errorf("got slug=%q ok=%v, want foo-bar/true", slug, ok)
+	}
+}
+
+func TestChangeSlugFromBashHookStdin_UnrelatedCommandNoMatch(t *testing.T) {
+	slug, ok := changeSlugFromBashHookStdin(strings.NewReader(`{"tool_input":{"command":"go test ./..."}}`))
+	if ok {
+		t.Errorf("expected no match, got slug=%q", slug)
+	}
+}
+
+func TestChangeSlugFromBashHookStdin_InvalidJSON(t *testing.T) {
+	slug, ok := changeSlugFromBashHookStdin(strings.NewReader("not json"))
+	if ok {
+		t.Errorf("expected no match for invalid JSON, got slug=%q", slug)
+	}
+}
+
+func TestRunVersionBump_ChangeFromCommand_DetectsSlug(t *testing.T) {
+	root := makeVersionBumpRepo(t, config.Config{})
+
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.Contains(joined, "describe"):
+			return "v1.0.0\n", nil
+		case strings.Contains(joined, "diff"):
+			return "M main.go\n", nil
+		}
+		return "", nil
+	})
+
+	origFlags := [6]interface{}{vbMajor, vbMinor, vbPatch, vbVersion, vbChange, vbChangeFromCommand}
+	vbMajor, vbMinor, vbPatch, vbVersion, vbChange, vbChangeFromCommand = false, false, false, "", "", true
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion, vbChange, vbChangeFromCommand =
+			origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string), origFlags[4].(string), origFlags[5].(bool)
+	})
+
+	versionBumpCmd.SetIn(strings.NewReader(`{"tool_input":{"command":"openspec new change \"add-auth\""}}`))
+	t.Cleanup(func() { versionBumpCmd.SetIn(nil) })
+
+	if err := runVersionBump(versionBumpCmd, nil); err != nil {
+		t.Fatalf("runVersionBump: %v", err)
+	}
+
+	bumpsFile := filepath.Join(root, ".dreamland", "change-bumps")
+	data, err := os.ReadFile(bumpsFile)
+	if err != nil {
+		t.Fatalf("change-bumps not written: %v", err)
+	}
+	var bumps map[string]branchBumpEntry
+	if err := json.Unmarshal(data, &bumps); err != nil {
+		t.Fatalf("change-bumps invalid JSON: %v", err)
+	}
+	if _, ok := bumps["add-auth"]; !ok {
+		t.Error("change-bumps missing add-auth entry detected from Bash command")
+	}
+}
+
+func TestRunVersionBump_ChangeFromCommand_UnrelatedBashCallIsNoOp(t *testing.T) {
+	root := makeVersionBumpRepo(t, config.Config{})
+
+	var tagCalled bool
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "tag" {
+			tagCalled = true
+		}
+		return "", nil
+	})
+
+	origFlags := [6]interface{}{vbMajor, vbMinor, vbPatch, vbVersion, vbChange, vbChangeFromCommand}
+	vbMajor, vbMinor, vbPatch, vbVersion, vbChange, vbChangeFromCommand = false, false, false, "", "", true
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion, vbChange, vbChangeFromCommand =
+			origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string), origFlags[4].(string), origFlags[5].(bool)
+	})
+
+	versionBumpCmd.SetIn(strings.NewReader(`{"tool_input":{"command":"go test ./..."}}`))
+	t.Cleanup(func() { versionBumpCmd.SetIn(nil) })
+
+	if err := runVersionBump(versionBumpCmd, nil); err != nil {
+		t.Fatalf("expected silent no-op, got error: %v", err)
+	}
+	if tagCalled {
+		t.Error("expected no version bump for an unrelated Bash command")
+	}
+	if _, err := os.ReadFile(filepath.Join(root, ".dreamland", "change-bumps")); !os.IsNotExist(err) {
+		t.Error("expected no change-bumps file to be created for an unrelated Bash command")
+	}
+}
+
 func TestRunChangeBump_PerformBumpError(t *testing.T) {
 	makeVersionBumpRepo(t, config.Config{})
 
@@ -1157,4 +1259,24 @@ func TestWriteBranchBumps_WriteError(t *testing.T) {
 	if err := writeBranchBumps(path, bumps); err == nil {
 		t.Fatal("expected error when writing to unwritable directory")
 	}
+}
+
+// withPipedStdin replaces os.Stdin with a pipe containing data for the test.
+func withPipedStdin(t *testing.T, data string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString(data); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	orig := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = orig
+		r.Close()
+	})
 }

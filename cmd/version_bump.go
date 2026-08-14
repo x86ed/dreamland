@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -29,6 +31,8 @@ var (
 	vbVersion  string
 	vbChange   string
 	vbIfAgent  string
+
+	vbChangeFromCommand bool
 )
 
 func init() {
@@ -40,6 +44,7 @@ func init() {
 	versionBumpCmd.Flags().StringVar(&vbVersion, "version", "", "set explicit version (e.g. v1.2.3)")
 	versionBumpCmd.Flags().StringVar(&vbChange, "change", "", "change slug: bump minor once per OpenSpec change (independent of the branch marker)")
 	versionBumpCmd.Flags().StringVar(&vbIfAgent, "if-agent", "", "only run if the hook payload's agent_type matches this name (silent no-op otherwise)")
+	versionBumpCmd.Flags().BoolVar(&vbChangeFromCommand, "change-from-command", false, "detect an openspec change slug from the hook payload's Bash tool_input.command on stdin and bump minor for it (silent no-op if no match) — for PostToolUse hook binding")
 }
 
 // branchBumpEntry is one entry in the .dreamland/branch-bumps JSON object.
@@ -49,6 +54,14 @@ type branchBumpEntry struct {
 }
 
 func runVersionBump(cmd *cobra.Command, _ []string) error {
+	if vbChangeFromCommand {
+		slug, ok := changeSlugFromBashHookStdin(cmd.InOrStdin())
+		if !ok {
+			return nil // hook fired for a Bash call unrelated to `openspec new change` — silent no-op
+		}
+		vbChange = slug
+	}
+
 	// Validate: at most one of major/minor/patch/version.
 	explicit := 0
 	for _, b := range []bool{vbMajor, vbMinor, vbPatch} {
@@ -63,7 +76,7 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 		return errors.New("at most one of --major, --minor, --patch, --version may be specified")
 	}
 
-	if vbIfAgent != "" && agentNameFromHookPayload() != vbIfAgent {
+	if vbIfAgent != "" && agentNameFromHookPayloadFrom(os.Stdin) != vbIfAgent {
 		return nil // hook fired for a different agent — silent no-op
 	}
 
@@ -172,6 +185,38 @@ func runVersionBump(cmd *cobra.Command, _ []string) error {
 	}
 
 	return nil
+}
+
+// openspecNewChangeRe matches the two `openspec` CLI shapes that create a new change,
+// capturing the change slug (optionally double-quoted).
+var openspecNewChangeRe = regexp.MustCompile(`openspec\s+(?:new\s+change|change\s+create)\s+"?([A-Za-z0-9][A-Za-z0-9._-]*)"?`)
+
+// changeSlugFromBashHookStdin reads a Claude Code PostToolUse hook payload (matcher:
+// Bash) from r and extracts the change slug if the completed command matches
+// `openspec new change <slug>` / `openspec change create <slug>`. Returns ok=false if
+// the payload isn't valid JSON, has no tool_input.command, or the command doesn't
+// match — all silent-no-op cases, since this hook fires for every Bash call, not just
+// the one that creates a new change.
+func changeSlugFromBashHookStdin(r io.Reader) (string, bool) {
+	data, err := io.ReadAll(io.LimitReader(r, 1<<16))
+	if err != nil || len(data) == 0 {
+		return "", false
+	}
+
+	var payload struct {
+		ToolInput struct {
+			Command string `json:"command"`
+		} `json:"tool_input"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", false
+	}
+
+	m := openspecNewChangeRe.FindStringSubmatch(payload.ToolInput.Command)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
 }
 
 // runChangeBump bumps minor once per OpenSpec change slug, tracked in

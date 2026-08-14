@@ -3,7 +3,7 @@
   "hooks": {
     "sessionStart": [
       {"type": "command", "command": "dreamland version-bump"},
-      {"type": "command", "command": "dreamland coauthor"}
+      {"type": "command", "command": "dreamland coauthor --hook"}
     ],
     "stop": [
       {"type": "command", "command": "dreamland version-bump --patch"},

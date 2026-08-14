@@ -34,6 +34,14 @@ jobs:
           MERGE_CHECK: "1"
       - name: Run tests
         run: bash scripts/pre-merge-check.sh run_tests
+        env:
+          MERGE_CHECK: "1"
+          COVERAGE_OUT: coverage.out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-profile
+          path: coverage.out
+          retention-days: 1
 
   coverage:
     name: Coverage
@@ -45,10 +53,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-profile
       - name: Check coverage thresholds
         run: bash scripts/pre-merge-check.sh check_coverage
         env:
           MERGE_CHECK: "1"
+          COVERAGE_PROFILE: coverage.out
 
   godoc:
     name: Godoc

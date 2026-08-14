@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"dreamland/internal/config"
 )
@@ -404,6 +405,106 @@ func TestInstallOtelEnv_Antigravity_PreservesExisting(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "SessionStart") {
 		t.Error("SessionStart should be added")
+	}
+}
+
+func TestRenderOtelEnvScript_ReadFileError(t *testing.T) {
+	orig := TemplateFS
+	TemplateFS = fstest.MapFS{}
+	t.Cleanup(func() { TemplateFS = orig })
+
+	_, err := RenderOtelEnvScript("Claude Code", "http://localhost:4317")
+	if err == nil {
+		t.Error("expected error when template file cannot be read")
+	}
+}
+
+func TestInstallClaudeOtelEnv_RenderError(t *testing.T) {
+	orig := TemplateFS
+	TemplateFS = fstest.MapFS{}
+	t.Cleanup(func() { TemplateFS = orig })
+
+	root := t.TempDir()
+	installClaudeOtelEnv(root, "http://localhost:4317")
+	if _, err := os.Stat(filepath.Join(root, ".claude", "scripts", "dreamland-otel-env.sh")); !os.IsNotExist(err) {
+		t.Error("script should not be created when template read fails")
+	}
+}
+
+func TestInstallCursorOtelEnv_RenderError(t *testing.T) {
+	orig := TemplateFS
+	TemplateFS = fstest.MapFS{}
+	t.Cleanup(func() { TemplateFS = orig })
+
+	root := t.TempDir()
+	installCursorOtelEnv(root, "http://localhost:4317")
+	if _, err := os.Stat(filepath.Join(root, ".cursor", "hooks", "dreamland-otel-env.sh")); !os.IsNotExist(err) {
+		t.Error("script should not be created when template read fails")
+	}
+}
+
+func TestInstallKiroOtelEnv_RenderError(t *testing.T) {
+	orig := TemplateFS
+	TemplateFS = fstest.MapFS{}
+	t.Cleanup(func() { TemplateFS = orig })
+
+	root := t.TempDir()
+	installKiroOtelEnv(root, "http://localhost:4317")
+	if _, err := os.Stat(filepath.Join(root, ".kiro", "hooks", "dreamland-otel-env.sh")); !os.IsNotExist(err) {
+		t.Error("script should not be created when template read fails")
+	}
+}
+
+func TestInstallAntigravityOtelEnv_AtomicJSONMergeError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; skip permission test")
+	}
+	root := t.TempDir()
+	agentsDir := filepath.Join(root, ".agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hooksPath := filepath.Join(agentsDir, "hooks.json")
+	if err := os.WriteFile(hooksPath, []byte("{}"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(hooksPath, 0o644) })
+
+	cfg := testCfg("Antigravity", "http://localhost:4317")
+	// Error is logged to stderr, not returned; this exercises the
+	// atomicJSONMerge-error branch inside installAntigravityOtelEnv.
+	if err := InstallOtelEnv(root, cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMergeVscodeSettings_ReadFileError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; skip permission test")
+	}
+	root := t.TempDir()
+	vscodeDir := filepath.Join(root, ".vscode")
+	if err := os.MkdirAll(vscodeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsFile := filepath.Join(vscodeDir, "settings.json")
+	if err := os.WriteFile(settingsFile, []byte("{}"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(settingsFile, 0o644) })
+
+	err := MergeVscodeSettings(root, map[string]any{"key": "val"})
+	if err == nil {
+		t.Error("expected error when settings.json is unreadable")
+	}
+}
+
+func TestMergeVscodeSettings_MarshalError(t *testing.T) {
+	root := t.TempDir()
+	// A channel value cannot be JSON-marshaled, forcing MarshalIndent to fail.
+	err := MergeVscodeSettings(root, map[string]any{"bad": make(chan int)})
+	if err == nil {
+		t.Error("expected error when patch contains an unmarshalable value")
 	}
 }
 

@@ -5,7 +5,7 @@
         "matcher": "",
         "hooks": [
           {"type": "command", "command": "dreamland version-bump"},
-          {"type": "command", "command": "dreamland coauthor"}
+          {"type": "command", "command": "dreamland coauthor --hook"}
         ]
       }
     ],
@@ -13,7 +13,15 @@
       {
         "matcher": "Task|Agent",
         "hooks": [
-          {"type": "command", "command": "dreamland coauthor"}
+          {"type": "command", "command": "dreamland coauthor --hook"}
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": "dreamland version-bump --change-from-command"}
         ]
       }
     ],
@@ -21,7 +29,7 @@
       {
         "matcher": "",
         "hooks": [
-          {"type": "command", "command": "dreamland coauthor"},
+          {"type": "command", "command": "dreamland coauthor --hook"},
           {"type": "command", "command": "dreamland telemetry write --tool claude-code"},
           {"type": "command", "command": "dreamland version-bump --patch"},
           {"type": "command", "command": "dreamland version-bump --minor --if-agent janus"},
@@ -35,9 +43,8 @@
         "hooks": [
           {"type": "command", "command": "dreamland version-bump --patch"},
           {"type": "command", "command": "dreamland transition-log"},
-          {"type": "command", "command": "dreamland test"},
           {"type": "command", "command": "dreamland telemetry write --tool claude-code"},
-          {"type": "command", "command": "dreamland commit --reason turn-complete"}
+          {"type": "command", "command": "dreamland test-and-commit --reason turn-complete"}
         ]
       }
     ]

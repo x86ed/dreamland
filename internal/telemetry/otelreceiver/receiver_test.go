@@ -349,6 +349,20 @@ func TestLogRequest_MkdirFails(t *testing.T) {
 	resp.Body.Close()
 }
 
+func TestLogRequest_OpenFileFails(t *testing.T) {
+	root := t.TempDir()
+	// Pre-create the log file's path as a directory, so MkdirAll(parent) succeeds
+	// (already exists) but OpenFile on the log path itself fails (EISDIR).
+	logPath := filepath.Join(root, ".dreamland", "otel-receiver.log")
+	if err := os.MkdirAll(logPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/traces", nil)
+	// Must not panic; logRequest is best-effort and swallows the error.
+	logRequest(root, req, "note", 0, 0)
+}
+
 func TestReadSessionUsage_UnmarshalError(t *testing.T) {
 	root := t.TempDir()
 	path := sessionPath(root, "sess-corrupt")

@@ -3,7 +3,7 @@
   "hooks": {
     "agentSpawn": [
       {"command": "dreamland version-bump"},
-      {"command": "dreamland coauthor"}
+      {"command": "dreamland coauthor --hook"}
     ],
     "stop": [
       {"command": "dreamland version-bump --patch"},

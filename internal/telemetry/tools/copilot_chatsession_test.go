@@ -3,6 +3,7 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -157,6 +158,20 @@ func TestFindChatSessionFile_BadGlobPatternSkipped(t *testing.T) {
 	// exercising the continue-on-error branch across every storage root.
 	if _, err := findChatSessionFile("["); err == nil {
 		t.Fatal("expected error for a session ID producing an invalid glob pattern")
+	}
+}
+
+func TestVscodeWorkspaceStorageRoots_HomeDirError(t *testing.T) {
+	// On unix, os.UserHomeDir() reads $HOME directly with no fallback: an empty
+	// HOME makes it return an error, which vscodeWorkspaceStorageRoots turns
+	// into a nil root list.
+	t.Setenv("HOME", "")
+	if runtime.GOOS == "windows" {
+		t.Skip("os.UserHomeDir uses USERPROFILE on windows, not HOME")
+	}
+	roots := vscodeWorkspaceStorageRoots()
+	if roots != nil {
+		t.Errorf("expected nil roots when $HOME is unset, got %v", roots)
 	}
 }
 
