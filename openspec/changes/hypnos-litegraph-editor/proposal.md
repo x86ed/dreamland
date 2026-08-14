@@ -4,9 +4,9 @@ The agent/skill/hook graph (ten agents, six platform templates, Janus's routing 
 
 ## What Changes
 
-- Add a local web server, launched via slash command, that renders every agent, skill, and hook as a litegraph.js node graph, with edges for Janus routing links, skill/hook attachments, and hand-off targets.
-- Add `/hypnos-interactive`: opens the graph in editable mode. Node/edge edits in the browser (move, connect, detach, create, delete) write back to the six-platform template files and Janus's routing tables — the same target files `hypnos`/`mengpo`/janus-router-agent scaffolding already own — so the graph is a UI over those files, not a separate store.
-- Add `/hypnos-view`: opens the same graph read-only, rendering current repo state (including in-flight OpenSpec change/task status) for observing work as it happens, with no write path.
+- Add a new `dreamland hypnos-serve` CLI subcommand, built into the `dreamland` binary alongside the existing `cmd/` subcommands (`init`, `serve`, `commit`, ...), that hosts a local `127.0.0.1`-only web server rendering every agent, skill, and hook as a litegraph.js node graph, with edges for Janus routing links, skill/hook attachments, and hand-off targets. No separate server process, script, or install step — it ships in the same binary `dreamland init` already installs.
+- Add `/hypnos-interactive`: a slash command whose only job is to invoke `dreamland hypnos-serve --mode=interactive` and open the printed URL, opening the graph in editable mode. Node/edge edits in the browser (move, connect, detach, create, delete) write back to the six-platform template files and Janus's routing tables — the same target files `hypnos`/`mengpo`/janus-router-agent scaffolding already own — so the graph is a UI over those files, not a separate store.
+- Add `/hypnos-view`: a slash command that invokes `dreamland hypnos-serve --mode=view`, opening the same graph read-only, rendering current repo state (including in-flight OpenSpec change/task status) for observing work as it happens, with no write path.
 - Editor writes route through the existing per-platform scaffold writers (the same code `dreamland init`/`hypnos` use) so a change made in the graph is reflected in Claude Code, Cursor, Codex, Kiro, Antigravity, and GitHub Copilot templates without manual per-platform edits.
 - Creating/attaching/detaching a skill or agent from the editor SHALL go through the same validation and file layout as the `hypnos`/`mengpo` agents (tool-tier rules, per-platform file conventions) rather than writing ad hoc content.
 
@@ -21,7 +21,7 @@ The agent/skill/hook graph (ten agents, six platform templates, Janus's routing 
 
 ## Impact
 
-- New: a local HTTP server (embedded in the `dreamland` binary, alongside existing `cmd/` subcommands) serving a litegraph.js single-page app.
-- New: `/hypnos-interactive` and `/hypnos-view` slash-command templates across all six platforms (`internal/scaffold/templates/commands/*`), following the existing per-platform command conventions in `router-slash-commands`.
+- New: `cmd/hypnosserve.go` — a `dreamland hypnos-serve` subcommand compiled into the `dreamland` binary, hosting the local HTTP server (view/interactive modes) and serving a litegraph.js single-page app.
+- New: `/hypnos-interactive` and `/hypnos-view` slash-command templates across all six platforms (`internal/scaffold/templates/commands/*`), following the existing per-platform command conventions in `router-slash-commands`. Each command's body maps directly to a `dreamland hypnos-serve --mode=<view|interactive>` invocation — no platform-specific server logic, only a thin CLI call per platform's slash-command mechanism.
 - Modified (write path only, not requirements): editor mutations call into the same writer logic used by `hypnos` (agent authoring), `mengpo` (archival), and the Janus routing-table update path, so those code paths gain a second caller.
 - New dependency: litegraph.js, vendored/bundled for the server's static assets (no external CDN at runtime, consistent with the project's offline-friendly CLI).
