@@ -69,3 +69,29 @@ Before writing a generated file during sync, the server SHALL compare the file's
 
 - **WHEN** no platform file targeted by a save has changed on disk since the last sync
 - **THEN** the save proceeds and the affected files are regenerated without requiring any conflict choice
+
+### Requirement: `hypnos` can implement a workflow-graph plan headlessly
+
+`dreamland hypnos-serve --mode=apply-plan --plan <file>` SHALL read an ordered list of node/edge mutation operations from `<file>` and apply each one through the same mutation handlers, sync logic, and drift detection the interactive editor's write routes use, without starting an HTTP listener or requiring a browser. This is how the `hypnos` agent implements a workflow-graph change on its own.
+
+#### Scenario: Applying a plan produces the same result as the equivalent manual edits
+
+- **WHEN** a plan file containing a `create_edge` operation from `hypnos` to a new agent node, followed by a `create_node` operation for that agent, is applied via `--mode=apply-plan`
+- **THEN** `.dreamland/workflow-graph.json` and all six platform files reflect the same end state that performing the equivalent create-node-then-connect-edge actions in `/hypnos-interactive` would have produced
+
+#### Scenario: Plan apply exits without starting a server
+
+- **WHEN** `dreamland hypnos-serve --mode=apply-plan --plan <file>` runs
+- **THEN** no HTTP port is opened
+- **AND** the process applies the plan and exits, reporting per-operation success or failure
+
+#### Scenario: Drift during plan apply blocks that operation, not the whole run
+
+- **WHEN** a plan includes an operation targeting a platform file that has drifted from what `.dreamland/workflow-graph.json` last generated
+- **THEN** that operation is rejected with the conflict reported in the process output
+- **AND** operations that don't target the drifted file still apply normally
+
+#### Scenario: Invalid operation in a plan is rejected before any write
+
+- **WHEN** a plan file contains an operation referencing a node id that does not exist and is not created earlier in the same plan
+- **THEN** the entire plan is rejected before any file is written, with the invalid operation identified in the error

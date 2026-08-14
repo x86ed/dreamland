@@ -47,15 +47,26 @@
 - [ ] 6.3 Register both commands in the scaffold installer so `dreamland init` writes them alongside the existing per-agent commands
 - [ ] 6.4 Tests: both commands installed on all six platforms per existing scaffold installer test conventions
 
-## 7. Self-hosting bootstrap
+## 7. Plan-driven headless apply (hypnos)
 
-- [ ] 7.1 Run the importer against this repository's actual installed files to produce the first real `.dreamland/workflow-graph.json`
-- [ ] 7.2 Hand-resolve any routing edges the importer flagged as unresolved
-- [ ] 7.3 Commit the bootstrapped `.dreamland/workflow-graph.json`
+- [ ] 7.1 Define the plan file format: an ordered JSON array reusing the same operation types (`create_node`, `update_node`, `delete_node`, `create_edge`, `delete_edge`) the interactive editor's write routes accept
+- [ ] 7.2 Add `--mode=apply-plan --plan <file>` to `cmd/hypnosserve.go`: loads the plan, validates all referenced node ids resolve (creations earlier in the plan count), applies each operation via the same handlers/sync/drift-detection from §3, reports per-operation success/failure, exits without opening a port
+- [ ] 7.3 Reject the whole plan before any write if an operation references a node id that doesn't exist and isn't created earlier in the same plan
+- [ ] 7.4 On a drift conflict for one operation, reject that operation and report it, but continue applying non-conflicting operations in the plan
+- [ ] 7.5 Update `hypnos`'s own instructions in `internal/scaffold/templates/agents/*/hypnos.*` (all six platforms) to state the new plan-apply responsibility
+- [ ] 7.6 Tests: applying a plan produces the same end state as the equivalent manual edits; no server starts in apply-plan mode; invalid node reference rejects the whole plan; drift on one operation doesn't block unrelated operations in the same plan
 
-## 8. Validation
+## 8. Self-hosting bootstrap
 
-- [ ] 8.1 End-to-end: add a routing edge via `/hypnos-interactive`, confirm all six platform files updated and content matches the regenerated hand-off sentence
-- [ ] 8.2 End-to-end: create a new agent via the editor, confirm tool-tier assignment and six-platform file creation match what `hypnos` would produce by hand
-- [ ] 8.3 End-to-end: hand-edit a platform file, then attempt a conflicting save, confirm it's blocked with the conflict surfaced
-- [ ] 8.4 End-to-end: `/hypnos-view` open during an in-progress OpenSpec task shows the status indicator update without a manual reload
+- [ ] 8.1 Run the importer against this repository's actual installed files to produce the first real `.dreamland/workflow-graph.json`
+- [ ] 8.2 Hand-resolve any routing edges the importer flagged as unresolved
+- [ ] 8.3 Update this repository's own live `hypnos` agent files to match the template change in 7.5
+- [ ] 8.4 Commit the bootstrapped `.dreamland/workflow-graph.json`
+
+## 9. Validation
+
+- [ ] 9.1 End-to-end: add a routing edge via `/hypnos-interactive`, confirm all six platform files updated and content matches the regenerated hand-off sentence
+- [ ] 9.2 End-to-end: create a new agent via the editor, confirm tool-tier assignment and six-platform file creation match what `hypnos` would produce by hand
+- [ ] 9.3 End-to-end: hand-edit a platform file, then attempt a conflicting save, confirm it's blocked with the conflict surfaced
+- [ ] 9.4 End-to-end: `/hypnos-view` open during an in-progress OpenSpec task shows the status indicator update without a manual reload
+- [ ] 9.5 End-to-end: run `dreamland hypnos-serve --mode=apply-plan --plan <file>` with a plan equivalent to 9.1's manual edit, confirm identical resulting files

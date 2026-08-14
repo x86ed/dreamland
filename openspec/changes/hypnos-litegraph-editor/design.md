@@ -10,6 +10,7 @@ This change is scoped to the current repository's own **installed** platform fil
 - One litegraph.js graph, not six: a single canonical model of agents/skills/hooks/routing that the six platform files are generated *from*, so editing once fans out everywhere.
 - `/hypnos-view`: read-only snapshot of the graph, including live OpenSpec task/change status, safe to open mid-session without risk of mutating anything.
 - `/hypnos-interactive`: full editor — move/connect/disconnect nodes, create/attach/detach a skill, agent, or hook — writes land in the six platform files via the same writer logic `hypnos`/`mengpo` use today (new caller, not new logic).
+- `hypnos` (the agent) can implement a workflow-graph change on its own, headlessly, from a plan file — the same mutation operations the browser UI issues, applied through the identical writer/sync/drift-detection path, with no server listener or browser required.
 - Local-only server (`localhost`, ephemeral port), no new runtime dependency beyond a vendored `litegraph.js` static asset embedded in the binary (`go:embed`), consistent with `agent-scaffolding`'s "templates embedded at compile time, nothing read from the filesystem at install time" constraint.
 
 **Non-Goals:**
@@ -18,6 +19,7 @@ This change is scoped to the current repository's own **installed** platform fil
 - Platforms beyond the existing six.
 - Free-form scripting of new hook *behavior* in the UI. The editor attaches/detaches existing known hook commands (`dreamland coauthor`, `dreamland telemetry write`, etc.) to nodes; it does not let a user type arbitrary shell into a node and have it become a hook.
 - Replacing `hypnos`'s own agent-authoring responsibility. The editor is a second front end onto the same writer logic Hypnos already owns — it does not bypass Hypnos's tool-tier/routing-table rules.
+- A bespoke plan-file DSL or a mapping from `tasks.md` prose to graph mutations. The plan format is the same structured operation list the interactive editor's write routes already accept — no new parsing surface.
 
 ## Decisions
 
@@ -30,6 +32,10 @@ This change is scoped to the current repository's own **installed** platform fil
 **Sync writes are diffed per platform file, not full re-scaffold.** Reuses `internal/scaffold`'s existing per-platform formatting functions (the same ones `dreamland init`/`hypnos` call) but only rewrites files whose derived content actually changed, and only the files touched by the specific node/edge edited — avoids clobbering unrelated hand-edits elsewhere in a platform's directory the way a full `--force` re-scaffold would.
 
 **Server: `dreamland hypnos-serve --mode=view|interactive`, `net/http` stdlib, localhost-only, ephemeral port.** Matches the existing `cmd/serve.go` (MCP server) pattern of a dedicated cobra subcommand; no new HTTP framework dependency. The two slash commands (`/hypnos-view`, `/hypnos-interactive`) just invoke this command with the matching `--mode` and open the printed URL — mirrors how other dreamland slash commands shell out to the CLI binary. `--mode=view` never mounts the write/save HTTP routes at all (not just a disabled UI button), so a view-mode server has no code path capable of mutating `.dreamland/workflow-graph.json` or any platform file.
+
+**Plan file is a list of the same mutation operations the interactive editor's write routes accept — not a second schema.** `dreamland hypnos-serve --mode=apply-plan --plan <file>` reads an ordered JSON array of operations (`create_node`, `update_node`, `delete_node`, `create_edge`, `delete_edge` — the same operation types §3's writer integration already has to define for the HTTP write routes) and applies them one at a time through the identical handler functions, including the drift check before each write. Considered a bespoke "plan" DSL closer to `tasks.md`'s checklist prose; rejected — it would need its own parser and its own mapping onto graph mutations, duplicating work the interactive editor already requires, and reintroducing the same prose-parsing fragility the `routes_to` decision above moved away from. Reusing the operation list means the interactive editor and `hypnos`'s headless mode are two callers of one mutation API, not two implementations. `--mode=apply-plan` performs no `net/http` listen — it loads the plan, applies it, reports results, and exits.
+
+**`hypnos`'s own instructions gain the plan-apply responsibility in the same place every other agent capability lives: its per-platform template files.** Because `hypnos` is one of the ten framework-shipped agents, its role description is authored in `internal/scaffold/templates/agents/*/hypnos.*` (the source `dreamland init` uses for every repo, not just this one) — distinct from the live per-repo `.dreamland/workflow-graph.json`/platform files this change's editor operates on. This change updates both: the shipped templates (so every future `dreamland init` gives `hypnos` this ability) and this repository's own installed `hypnos` files (self-hosting bootstrap, §Migration Plan step 5), the same two-tier pattern prior changes (e.g. `claude-code-parity`) already followed when an agent's responsibilities changed.
 
 **litegraph.js vendored as a single embedded static asset, no CDN fetch at runtime.** Matches the project's offline-friendly CLI posture (already true of every other scaffolded artifact, which is embedded at compile time per `agent-scaffolding`).
 
@@ -48,8 +54,10 @@ This change is scoped to the current repository's own **installed** platform fil
 1. Add `.dreamland/workflow-graph.json` schema + the bootstrap importer (scan six live directories, best-effort `routes_to` extraction, flag unresolved edges).
 2. Add graph-driven writer entrypoints in `internal/scaffold`, delegating to the existing per-platform formatting logic `hypnos`/`mengpo` already call, plus the drift check.
 3. Add `dreamland hypnos-serve` (view and interactive modes), embedded `litegraph.js` UI, ephemeral localhost port.
-4. Add `/hypnos-view` and `/hypnos-interactive` slash-command templates across all six platforms, following `router-slash-commands` conventions.
-5. Run the importer against this repository (dreamland is self-hosted) as the first real bootstrap, and hand-resolve any flagged edges.
+4. Add `dreamland hypnos-serve --mode=apply-plan`, reusing the mutation handlers from step 2.
+5. Add `/hypnos-view` and `/hypnos-interactive` slash-command templates across all six platforms, following `router-slash-commands` conventions.
+6. Update `hypnos`'s own instructions in `internal/scaffold/templates/agents/*/hypnos.*` (all six platforms) to state the new plan-apply responsibility.
+7. Run the importer against this repository (dreamland is self-hosted) as the first real bootstrap, hand-resolve any flagged edges, and update this repo's own live `hypnos` agent files to match step 6.
 
 No rollback concerns beyond deleting `.dreamland/workflow-graph.json` and the two commands — the six platform files remain valid, hand-editable files with or without the graph layer present.
 

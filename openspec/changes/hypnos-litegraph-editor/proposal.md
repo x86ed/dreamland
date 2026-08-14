@@ -1,6 +1,6 @@
 ## Why
 
-The agent/skill/hook graph (ten agents, six platform templates, Janus's routing table, per-agent hooks) is currently only inspectable by reading template files and spec prose across `internal/scaffold/templates/`. There is no single view of the whole system, and changing routing or attaching a skill/hook means hand-editing every platform's file. A litegraph.js-based visual editor gives users one place to see the framework's structure and to change it, with edits fanning out through the same scaffold-sync mechanism `hypnos`/`mengpo` already use to keep all six platforms consistent.
+The agent/skill/hook graph (ten agents, six platform templates, Janus's routing table, per-agent hooks) is currently only inspectable by reading template files and spec prose across `internal/scaffold/templates/`. There is no single view of the whole system, and changing routing or attaching a skill/hook means hand-editing every platform's file. A litegraph.js-based visual editor gives users one place to see the framework's structure and to change it, with edits fanning out through the same scaffold-sync mechanism `hypnos`/`mengpo` already use to keep all six platforms consistent. `hypnos` itself should also be able to drive that same mutation path from a plan document, so a workflow change can be implemented headlessly, without a human dragging nodes in the browser.
 
 ## What Changes
 
@@ -9,12 +9,14 @@ The agent/skill/hook graph (ten agents, six platform templates, Janus's routing 
 - Add `/hypnos-view`: a slash command that invokes `dreamland hypnos-serve --mode=view`, opening the same graph read-only, rendering current repo state (including in-flight OpenSpec change/task status) for observing work as it happens, with no write path.
 - Editor writes route through the existing per-platform scaffold writers (the same code `dreamland init`/`hypnos` use) so a change made in the graph is reflected in Claude Code, Cursor, Codex, Kiro, Antigravity, and GitHub Copilot templates without manual per-platform edits.
 - Creating/attaching/detaching a skill or agent from the editor SHALL go through the same validation and file layout as the `hypnos`/`mengpo` agents (tool-tier rules, per-platform file conventions) rather than writing ad hoc content.
+- Add `dreamland hypnos-serve --mode=apply-plan --plan <file>`: a headless mode that reads a structured plan file (an ordered list of the same node/edge mutation operations the interactive editor's save action performs) and applies it through the identical writer/sync/drift-detection path — no HTTP server or browser involved. This is how `hypnos` (the agent) implements a workflow-graph change on its own, in addition to its existing agent-authoring job.
+- `hypnos`'s own agent instructions (all six platform templates, plus this repo's live installed files) are updated to state this new plan-apply responsibility.
 
 ## Capabilities
 
 ### New Capabilities
 - `litegraph-workflow-view`: local server + `/hypnos-view` that renders agents, skills, hooks, and their connections (routing, attachments, hand-offs) as a read-only litegraph.js graph reflecting current repo/task state.
-- `litegraph-workflow-editor`: local server + `/hypnos-interactive` that renders the same graph in editable mode; node/edge mutations (create/attach/detach agents, skills, hooks; change routing edges) are written back through the existing per-platform scaffold-sync mechanism so every platform's templates and Janus's routing table stay consistent.
+- `litegraph-workflow-editor`: local server + `/hypnos-interactive` that renders the same graph in editable mode; node/edge mutations (create/attach/detach agents, skills, hooks; change routing edges) are written back through the existing per-platform scaffold-sync mechanism so every platform's templates and Janus's routing table stay consistent. Includes a headless `--mode=apply-plan` entrypoint so `hypnos` can drive the same mutations from a plan file instead of browser interaction.
 
 ### Modified Capabilities
 (none — this change adds new entry points and a new UI layer on top of the existing scaffold-sync mechanism; it does not change the requirements of `agent-scaffolding`, `router-slash-commands`, or `janus-router-agent`)
@@ -23,5 +25,6 @@ The agent/skill/hook graph (ten agents, six platform templates, Janus's routing 
 
 - New: `cmd/hypnosserve.go` — a `dreamland hypnos-serve` subcommand compiled into the `dreamland` binary, hosting the local HTTP server (view/interactive modes) and serving a litegraph.js single-page app.
 - New: `/hypnos-interactive` and `/hypnos-view` slash-command templates across all six platforms (`internal/scaffold/templates/commands/*`), following the existing per-platform command conventions in `router-slash-commands`. Each command's body maps directly to a `dreamland hypnos-serve --mode=<view|interactive>` invocation — no platform-specific server logic, only a thin CLI call per platform's slash-command mechanism.
-- Modified (write path only, not requirements): editor mutations call into the same writer logic used by `hypnos` (agent authoring), `mengpo` (archival), and the Janus routing-table update path, so those code paths gain a second caller.
+- Modified (write path only, not requirements): editor mutations call into the same writer logic used by `hypnos` (agent authoring), `mengpo` (archival), and the Janus routing-table update path, so those code paths gain a second and third caller (browser UI, and `hypnos`'s headless plan-apply mode).
 - New dependency: litegraph.js, vendored/bundled for the server's static assets (no external CDN at runtime, consistent with the project's offline-friendly CLI).
+- Modified: `internal/scaffold/templates/agents/*/hypnos.*` (all six platforms) and this repo's live `hypnos` agent files, to add the plan-apply responsibility to `hypnos`'s own instructions.
