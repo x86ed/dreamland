@@ -1,18 +1,19 @@
 ## 1. `dreamland agent-status --start`/`--stop`
 
-- [ ] 1.1 Add `cmd/agent_status.go`: a `agent-status` cobra command with `--start`/`--stop` bool flags, reading a hook JSON payload from stdin and extracting `session_id` and (for `--start`) `tool_input.subagent_type` — reuse the existing payload-parsing approach `agentNameFromHookPayloadFrom` already uses (`cmd/coauthor.go`), don't duplicate it; extract a shared helper if needed rather than copy-pasting the JSON-unmarshal logic.
-- [ ] 1.2 `--start`: write `{"agent": "<name>", "tool_use_id": "<id>", "started_at": "<RFC3339>"}` to `.dreamland/agent-status/<session_id>.json`, creating the `agent-status` directory if needed. No `subagent_type` in the payload, or an unparseable payload → exit 0, write nothing.
-- [ ] 1.3 `--stop`: delete `.dreamland/agent-status/<session_id>.json` if it exists. Missing file, or unparseable payload → exit 0, no error.
-- [ ] 1.4 Unit tests: valid `--start` payload writes the expected file/contents; missing `subagent_type` writes nothing; `--stop` deletes an existing file; `--stop` on a session with no file is a no-op; malformed JSON on either flag exits 0.
-- [ ] 1.5 Add `.dreamland/agent-status/` to `.gitignore` — per-session churn, no history value, would otherwise get swept into every `dreamland commit` checkpoint (`git add -A`). See design.md Decisions.
+- [ ] 1.1 Add `cmd/agent_status.go`: an `agent-status` cobra command with `--start`/`--stop` bool flags, reading a hook JSON payload from stdin and extracting `session_id` and (for `--start`) `tool_input.subagent_type` — reuse the existing payload-parsing approach `agentNameFromHookPayloadFrom` already uses (`cmd/coauthor.go`), don't duplicate it; extract a shared helper if needed rather than copy-pasting the JSON-unmarshal logic.
+- [ ] 1.2 Add a read-merge-write helper for `.dreamland/agent-status.json`: read the file (missing file = empty map, not an error), unmarshal into `map[string]entry`, apply a caller-supplied mutation, drop any remaining entry whose `started_at` exceeds the staleness threshold, write back. Plain read-then-write, no file locking — an accepted trade-off for a cosmetic feature, see design.md Risks. Not `atomicJSONMerge` (`internal/scaffold/scaffold.go`) — that helper deep-merges nested JSON for settings patches and doesn't support deleting a key, which `--stop` needs.
+- [ ] 1.3 `--start`: mutation sets this session's key to `{"agent": "<name>", "tool_use_id": "<id>", "started_at": "<RFC3339>"}`. No `subagent_type` in the payload, or an unparseable payload → exit 0, file untouched.
+- [ ] 1.4 `--stop`: mutation deletes this session's key if present. Missing key, missing file, or unparseable payload → exit 0, no error.
+- [ ] 1.5 Unit tests: valid `--start` payload sets the expected key/contents; missing `subagent_type` leaves the file untouched; a stale entry from another session is pruned on write; `--stop` removes an existing key; `--stop` on a session with no key is a no-op; malformed JSON on either flag exits 0.
+- [ ] 1.6 Add `.dreamland/agent-status.json` to `.gitignore` — per-dispatch churn, no history value, would otherwise get swept into every `dreamland commit` checkpoint (`git add -A`). See design.md Decisions.
 
 ## 2. `dreamland statusline`
 
-- [ ] 2.1 Add `cmd/statusline.go`: a `statusline` cobra command reading the `statusLine` JSON payload from stdin (`session_id` field), looking up `.dreamland/agent-status/<session_id>.json`.
-- [ ] 2.2 No state file for the session → print an idle indicator (no active dispatch) to stdout, exit 0.
-- [ ] 2.3 State file exists, `started_at` within the staleness threshold (10 minutes, named constant) → print an indicator containing the recorded agent name, exit 0.
-- [ ] 2.4 State file exists but `started_at` exceeds the staleness threshold → treat as stale, print the idle indicator (same as 2.2), exit 0. Do not delete the stale file here — `--stop` owns deletion; statusline only reads.
-- [ ] 2.5 Unit tests covering all three cases (no file, active-recent, active-stale), plus malformed/missing `session_id` in the payload (exit 0, idle indicator — statusline must never error out and blank the user's status bar).
+- [ ] 2.1 Add `cmd/statusline.go`: a `statusline` cobra command reading the `statusLine` JSON payload from stdin (`session_id` field), looking up that key in `.dreamland/agent-status.json`. Read-only — never writes the file, never prunes (that's `agent-status`'s job).
+- [ ] 2.2 No matching key (or file doesn't exist) → print an idle indicator (no active dispatch) to stdout, exit 0.
+- [ ] 2.3 Matching key, `started_at` within the staleness threshold (10 minutes, named constant shared with `agent-status`'s pruning logic) → print an indicator containing the recorded agent name, exit 0.
+- [ ] 2.4 Matching key, `started_at` exceeds the staleness threshold → treat as stale, print the idle indicator (same as 2.2), exit 0.
+- [ ] 2.5 Unit tests covering all three cases (no key, active-recent, active-stale), plus malformed/missing `session_id` in the payload (exit 0, idle indicator — statusline must never error out and blank the user's status bar).
 
 ## 3. Claude Code hook binding
 

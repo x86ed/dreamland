@@ -7,7 +7,7 @@ Claude Code's statusline is the native, always-visible surface for exactly this 
 ## What Changes
 
 - New `dreamland statusline` command: prints a status line segment showing the currently active agent (or an idle/janus indicator when no dispatch is in flight), reading agent-dispatch state Dreamland itself writes.
-- New `dreamland agent-status` command (`--start` / `--stop` modes): invoked by `PreToolUse`/`PostToolUse` hooks matched on `Task|Agent`, extracts the dispatched `subagent_type` from the hook payload, and records active/idle state to a session-scoped file under `.dreamland/`.
+- New `dreamland agent-status` command (`--start` / `--stop` modes): invoked by `PreToolUse`/`PostToolUse` hooks matched on `Task|Agent`, extracts the dispatched `subagent_type` from the hook payload, and records active/idle state, keyed by session, to a single shared state file.
 - `settings-patch.json` (Claude Code binding only): add the `PreToolUse`/`PostToolUse` `agent-status` hook entries (alongside the existing `Task|Agent` `coauthor --hook` entry), and add the `statusLine` key pointing at `dreamland statusline`.
 - Scoped to Claude Code only — GitHub Copilot's VS Code UI already surfaces active-participant state natively and has no `statusLine`-equivalent gap to fill; Cursor/Codex/Kiro/Antigravity are untouched, consistent with how `claude-code-parity` scoped its own deltas.
 
@@ -23,6 +23,7 @@ _(none — purely additive)_
 
 - `cmd/statusline.go` (new), `cmd/agent_status.go` (new) — plus tests.
 - `internal/scaffold/templates/hooks/bindings/claude-code/settings-patch.json` — add `PreToolUse`/`PostToolUse` (`Task|Agent`) `agent-status` entries and a `statusLine` key.
-- `.dreamland/agent-status.json` (new, session-scoped, gitignored) — runtime state file, analogous to the existing `.dreamland-session.json`/telemetry snapshot pattern.
+- `.dreamland/agent-status.json` (new, gitignored) — single shared runtime state file, keyed by session ID, pruned of stale entries on every write.
+- `.gitignore` — add `.dreamland/agent-status.json`; unlike `.dreamland-session.json`/`.dreamland/last-test-result.json` (tracked as part of this repo's self-hosting), this file churns per-dispatch with no history value.
 - No changes to GitHub Copilot, Cursor, Codex, Kiro, or Antigravity templates or bindings.
 - Repo self-hosting: `.claude/settings.json` in this repo gains the same `statusLine` + hook entries once re-scaffolded.
