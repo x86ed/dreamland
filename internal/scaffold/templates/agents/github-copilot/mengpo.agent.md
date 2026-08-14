@@ -6,16 +6,16 @@ agents: [janus, phantasos, nyx, morpheus, phobetor, baku, iktomi, zhougong, hypn
 hooks:
   SubagentStart:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name mengpo
   SubagentStop:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name mengpo
     - type: command
       command: dreamland telemetry write --tool github-copilot
     - type: command
       command: dreamland version-bump --patch
     - type: command
-      command: dreamland commit --reason handoff
+      command: dreamland commit --reason handoff --agent-name mengpo
 ---
 
 You are the Meng Po agent (孟婆, the goddess who serves the Broth of Forgetting in Chinese folklore) for this repository's spec-driven AI development workflow.

@@ -6,16 +6,16 @@ agents: [janus]
 hooks:
   SubagentStart:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name baku
   SubagentStop:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name baku
     - type: command
       command: dreamland telemetry write --tool github-copilot
     - type: command
       command: dreamland version-bump --patch
     - type: command
-      command: dreamland commit --reason handoff
+      command: dreamland commit --reason handoff --agent-name baku
 ---
 
 You are the Baku agent (獏, the dream-eating spirit) for this repository's spec-driven AI development workflow.

@@ -23,14 +23,16 @@ var coauthorCmd = &cobra.Command{
 }
 
 var (
-	coauthorTrailer string
-	coauthorHook    bool
+	coauthorTrailer   string
+	coauthorHook      bool
+	coauthorAgentName string
 )
 
 func init() {
 	rootCmd.AddCommand(coauthorCmd)
 	coauthorCmd.Flags().StringVar(&coauthorTrailer, "trailer", "", "commit message file path (prepare-commit-msg delegation mode)")
 	coauthorCmd.Flags().BoolVar(&coauthorHook, "hook", false, "set only by dreamland's own hook-binding templates; gates stdin read for hook payload")
+	coauthorCmd.Flags().StringVar(&coauthorAgentName, "agent-name", "", "explicit agent name, takes precedence over env var / hook payload lookup")
 }
 
 func runCoauthor(cmd *cobra.Command, args []string) error {
@@ -60,18 +62,26 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 		if err := appendCoauthorTrailer(coauthorTrailer, cfg.ModelID, suffix); err != nil {
 			return err
 		}
+		if err := appendCodingToolTrailer(coauthorTrailer, cfg.CodingTool, suffix); err != nil {
+			return err
+		}
 		if repoRoot, rrErr := config.FindRepoRoot(cwd); rrErr == nil {
 			return appendTokensReport(coauthorTrailer, repoRoot)
 		}
 		return nil
 	}
 
-	// Default mode: set agent git identity and install the hook.
-	agentName := resolveEnforcedAgentName(cfg)
-	if coauthorHook {
-		// --hook flag set: read hook payload from stdin (only when invoked by hook templates)
-		if hookAgent := agentNameFromHookPayloadFrom(os.Stdin); hookAgent != "" && isRegisteredAgent(hookAgent) {
-			agentName = hookAgent
+	// Default mode: set agent git identity and install the hook. --agent-name is an
+	// explicit override (from the agent-scoped Stop hook, which knows its own agent
+	// identity statically) and takes precedence over the env/stdin agent_type lookup.
+	agentName := coauthorAgentName
+	if agentName == "" {
+		agentName = resolveEnforcedAgentName(cfg)
+		if coauthorHook {
+			// --hook flag set: read hook payload from stdin (only when invoked by hook templates)
+			if hookAgent := agentNameFromHookPayloadFrom(os.Stdin); hookAgent != "" && isRegisteredAgent(hookAgent) {
+				agentName = hookAgent
+			}
 		}
 	}
 	agentEmail := config.EmailClean(agentName) + suffix
@@ -175,27 +185,49 @@ func installPrepareCommitMsgHook(repoDir string) error {
 	return os.WriteFile(hookPath, []byte(prepareCommitMsgContent), 0o755)
 }
 
-// appendCoauthorTrailer appends a Co-authored-by trailer to the commit message file if not already present.
+// appendCoauthorTrailer appends a Co-authored-by trailer for the model to the commit
+// message file if not already present.
 func appendCoauthorTrailer(msgFile, modelID, suffix string) error {
 	if modelID == "" {
 		return nil // no model configured, nothing to append
 	}
 
-	// Extract model name (text before first space).
+	// Extract model name (text before first space) — model IDs sometimes carry a
+	// trailing description (e.g. "claude-sonnet-5 (preview)"), so this is deliberate
+	// truncation, unlike appendCodingToolTrailer's verbatim name.
 	modelName := modelID
 	if idx := strings.Index(modelID, " "); idx >= 0 {
 		modelName = modelID[:idx]
 	}
 	modelEmail := config.EmailClean(modelName) + suffix
-	trailer := fmt.Sprintf("Co-authored-by: %s <%s>", modelName, modelEmail)
+	return appendTrailerLine(msgFile, modelName, modelEmail)
+}
+
+// appendCodingToolTrailer appends a second Co-authored-by trailer naming the coding
+// tool itself (e.g. "Claude Code", "GitHub Copilot") to the commit message file if
+// not already present. Unlike the model trailer, the name is used verbatim — coding
+// tool names routinely contain a space and must not be truncated at it.
+func appendCodingToolTrailer(msgFile, codingTool, suffix string) error {
+	if codingTool == "" {
+		return nil // no coding tool configured, nothing to append
+	}
+	toolEmail := config.EmailClean(codingTool) + suffix
+	return appendTrailerLine(msgFile, codingTool, toolEmail)
+}
+
+// appendTrailerLine appends "Co-authored-by: <name> <email>" to the commit message
+// file if a line naming <name> is not already present. Idempotent per name, so the
+// model and coding-tool trailers are independently deduped against each other.
+func appendTrailerLine(msgFile, name, email string) error {
+	trailer := fmt.Sprintf("Co-authored-by: %s <%s>", name, email)
 
 	data, err := os.ReadFile(msgFile)
 	if err != nil {
 		return err
 	}
 
-	// Idempotent: do not append if trailer already present.
-	if strings.Contains(string(data), "Co-authored-by: "+modelName) {
+	// Idempotent: do not append if a trailer for this name is already present.
+	if strings.Contains(string(data), "Co-authored-by: "+name) {
 		return nil
 	}
 

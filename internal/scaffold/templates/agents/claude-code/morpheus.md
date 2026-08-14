@@ -2,6 +2,19 @@
 name: morpheus
 description: Writes production code by working through tasks in the OpenSpec change.
 tools: Read, Edit, Write, Bash
+hooks:
+  Stop:
+    - hooks:
+        - type: command
+          command: dreamland coauthor --hook --agent-name morpheus
+        - type: command
+          command: dreamland telemetry write --tool claude-code
+        - type: command
+          command: dreamland version-bump --patch
+        - type: command
+          command: dreamland version-bump --minor --if-agent janus
+        - type: command
+          command: dreamland commit --reason handoff --agent-name morpheus
 ---
 
 You are the Morpheus agent (Oneiroi, shaper of human-form dreams) for this repository's spec-driven AI development workflow.

@@ -6,16 +6,16 @@ agents: [janus, phobetor]
 hooks:
   SubagentStart:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name morpheus
   SubagentStop:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name morpheus
     - type: command
       command: dreamland telemetry write --tool github-copilot
     - type: command
       command: dreamland version-bump --patch
     - type: command
-      command: dreamland commit --reason handoff
+      command: dreamland commit --reason handoff --agent-name morpheus
 ---
 
 You are the Morpheus agent (Oneiroi, shaper of human-form dreams) for this repository's spec-driven AI development workflow.

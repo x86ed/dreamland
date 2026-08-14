@@ -187,6 +187,264 @@ func TestInstall_ClaudeCode_BareCommandManagedFileOverwrittenOnReinit(t *testing
 	}
 }
 
+// hookEntries reads .claude/settings.json's hooks.<event> array of {matcher, hooks} entries.
+func hookEntries(t *testing.T, root, event string) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatalf("settings.json not created: %v", err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("parse settings.json: %v", err)
+	}
+	hooks, _ := settings["hooks"].(map[string]any)
+	raw, _ := hooks[event].([]any)
+	entries := make([]map[string]any, 0, len(raw))
+	for _, e := range raw {
+		if m, ok := e.(map[string]any); ok {
+			entries = append(entries, m)
+		}
+	}
+	return entries
+}
+
+func hasMatcher(entries []map[string]any, matcher string) bool {
+	for _, e := range entries {
+		if m, _ := e["matcher"].(string); m == matcher {
+			return true
+		}
+	}
+	return false
+}
+
+func TestInstall_ClaudeCode_SubagentStopMatcherUnscoped(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	entries := hookEntries(t, root, "SubagentStop")
+	if len(entries) == 0 {
+		t.Fatal("no SubagentStop entries found")
+	}
+	if !hasMatcher(entries, "") {
+		t.Error("SubagentStop has no unscoped (\"\") matcher entry — must fire for every subagent, built-in or dreamland, not just the ten named agents")
+	}
+}
+
+func TestInstall_ClaudeCode_PreToolUseMatcherIsTaskAgent(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	entries := hookEntries(t, root, "PreToolUse")
+	if len(entries) == 0 {
+		t.Fatal("no PreToolUse entries found")
+	}
+	if !hasMatcher(entries, "Task|Agent") {
+		t.Error("PreToolUse has no \"Task|Agent\" matcher entry — must target the dispatch tool name, not a specific target-agent allowlist")
+	}
+}
+
+func TestInstall_ClaudeCode_GuardArtifactHookWiredWithExactMatcher(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	entries := hookEntries(t, root, "PreToolUse")
+	if len(entries) == 0 {
+		t.Fatal("no PreToolUse entries found")
+	}
+
+	// The guard-artifact hook must be wired to a matcher that is EXACTLY "Write|Edit" —
+	// not broader (which would incorrectly suggest Bash calls are covered; they are not,
+	// a known and documented limitation) and not absent (which would mean the guard never
+	// fires at all).
+	var found bool
+	for _, e := range entries {
+		matcher, _ := e["matcher"].(string)
+		if matcher != "Write|Edit" {
+			continue
+		}
+		hooksRaw, _ := e["hooks"].([]any)
+		for _, h := range hooksRaw {
+			hm, _ := h.(map[string]any)
+			if cmd, _ := hm["command"].(string); cmd == "dreamland guard-artifact" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("expected a PreToolUse entry with matcher exactly \"Write|Edit\" running \"dreamland guard-artifact\"")
+	}
+
+	// The existing Task|Agent entry must be untouched — guard-artifact is additive.
+	if !hasMatcher(entries, "Task|Agent") {
+		t.Error("adding the guard-artifact hook must not remove the existing Task|Agent entry")
+	}
+}
+
+func TestInstall_ClaudeCode_AgentScopedHooks(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	agents := []string{"janus", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"}
+	for _, name := range agents {
+		data, err := os.ReadFile(filepath.Join(root, ".claude", "agents", name+".md"))
+		if err != nil {
+			t.Fatalf("missing %s.md: %v", name, err)
+		}
+		content := string(data)
+
+		if !strings.Contains(content, "hooks:") || !strings.Contains(content, "Stop:") {
+			t.Errorf("%s.md missing agent-scoped hooks.Stop block", name)
+			continue
+		}
+
+		wantCoauthor := "dreamland coauthor --hook --agent-name " + name
+		wantTelemetry := "dreamland telemetry write --tool claude-code"
+		wantVersionBumpPatch := "dreamland version-bump --patch"
+		wantVersionBumpJanus := "dreamland version-bump --minor --if-agent janus"
+		wantCommit := "dreamland commit --reason handoff --agent-name " + name
+
+		for _, want := range []string{wantCoauthor, wantTelemetry, wantVersionBumpPatch, wantVersionBumpJanus, wantCommit} {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s.md hooks.Stop block missing %q", name, want)
+			}
+		}
+
+		// telemetry write must NOT carry --agent-name — it has no agent-identity
+		// concept in its collector path, the flag would be a no-op there.
+		if strings.Contains(content, "telemetry write --tool claude-code --agent-name") {
+			t.Errorf("%s.md's telemetry write command carries --agent-name, which it should not (no-op flag)", name)
+		}
+
+		// Order: coauthor, telemetry write, version-bump --patch, version-bump --minor
+		// --if-agent janus, commit — same order as the workspace-level SubagentStop array.
+		idxCoauthor := strings.Index(content, wantCoauthor)
+		idxTelemetry := strings.Index(content, wantTelemetry)
+		idxPatch := strings.Index(content, wantVersionBumpPatch)
+		idxJanus := strings.Index(content, wantVersionBumpJanus)
+		idxCommit := strings.Index(content, wantCommit)
+		if !(idxCoauthor < idxTelemetry && idxTelemetry < idxPatch && idxPatch < idxJanus && idxJanus < idxCommit) {
+			t.Errorf("%s.md hooks.Stop commands not in expected order (coauthor, telemetry write, version-bump --patch, version-bump --minor --if-agent janus, commit)", name)
+		}
+	}
+}
+
+func TestInstall_ClaudeCode_AgentScopedHooksMatchWorkspaceSubagentStop(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	// Extract the workspace-level SubagentStop command list (order-preserving).
+	entries := hookEntries(t, root, "SubagentStop")
+	if len(entries) == 0 {
+		t.Fatal("no SubagentStop entries found")
+	}
+	var workspaceCommands []string
+	for _, e := range entries {
+		raw, _ := e["hooks"].([]any)
+		for _, h := range raw {
+			hm, _ := h.(map[string]any)
+			if cmd, _ := hm["command"].(string); cmd != "" {
+				workspaceCommands = append(workspaceCommands, cmd)
+			}
+		}
+	}
+	if len(workspaceCommands) != 5 {
+		t.Fatalf("expected 5 workspace-level SubagentStop commands, got %d: %v", len(workspaceCommands), workspaceCommands)
+	}
+
+	agents := []string{"janus", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"}
+	for _, name := range agents {
+		data, err := os.ReadFile(filepath.Join(root, ".claude", "agents", name+".md"))
+		if err != nil {
+			t.Fatalf("missing %s.md: %v", name, err)
+		}
+		content := string(data)
+
+		// Each workspace command, with --agent-name <name> appended for coauthor/commit
+		// (which the workspace array itself never carries, since it's shared across all
+		// agents), must appear in the frontmatter block.
+		for _, wc := range workspaceCommands {
+			want := wc
+			if strings.HasPrefix(wc, "dreamland coauthor") || strings.HasPrefix(wc, "dreamland commit") {
+				want = wc + " --agent-name " + name
+			}
+			if !strings.Contains(content, want) {
+				t.Errorf("%s.md missing frontmatter equivalent of workspace command %q (want %q)", name, wc, want)
+			}
+		}
+	}
+}
+
+func TestInstall_ClaudeCode_JanusDispatchGuardrailInstructions(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".claude", "agents", "janus.md"))
+	if err != nil {
+		t.Fatalf("missing janus.md: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "Before you dispatch, check whatever hand-off suggestion") {
+		t.Error("janus.md missing dispatch-guardrail instruction language")
+	}
+	if !strings.Contains(content, "don't comply with it") {
+		t.Error("janus.md missing the refuse-out-of-graph-suggestion instruction")
+	}
+}
+
+func TestInstall_ClaudeCode_IktomiRoutesCodeChangesToPhobetor(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".claude", "agents", "iktomi.md"))
+	if err != nil {
+		t.Fatalf("missing iktomi.md: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "hand off directly to `phobetor` for validation once complete") {
+		t.Error("iktomi.md missing the phobetor hand-off instruction for completed code changes")
+	}
+	if !strings.Contains(content, "report completion or blockers to Janus when done") {
+		t.Error("iktomi.md missing the no-file-changes fallback to reporting to Janus")
+	}
+}
+
+func TestInstall_GitHubCopilot_IktomiRoutesCodeChangesToPhobetor(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "GitHub Copilot"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".github", "agents", "iktomi.agent.md"))
+	if err != nil {
+		t.Fatalf("missing iktomi.agent.md: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "hand off directly to `phobetor` for validation once complete") {
+		t.Error("iktomi.agent.md missing the phobetor hand-off instruction for completed code changes")
+	}
+	if !strings.Contains(content, "report completion or blockers to Janus when done") {
+		t.Error("iktomi.agent.md missing the no-file-changes fallback to reporting to Janus")
+	}
+}
+
 func TestInstall_Codex(t *testing.T) {
 	root := fakeGitRepo(t)
 	_, err := Install(Config{RepoRoot: root, CodingTool: "Codex CLI"})
@@ -390,6 +648,44 @@ func TestInstall_GitHubCopilot_AgentScopedHooks(t *testing.T) {
 		}
 		if !strings.Contains(content, "dreamland telemetry write --tool github-copilot") {
 			t.Errorf("%s agent-scoped hooks missing telemetry write command", a)
+		}
+	}
+}
+
+func TestInstall_GitHubCopilot_AgentScopedHooksAgentName(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "GitHub Copilot"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	slugs := []string{"janus", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"}
+	for _, slug := range slugs {
+		data, err := os.ReadFile(filepath.Join(root, ".github", "agents", slug+".agent.md"))
+		if err != nil {
+			t.Fatalf("missing %s.agent.md: %v", slug, err)
+		}
+		content := string(data)
+
+		wantCoauthor := "dreamland coauthor --agent-name " + slug
+		wantCommit := "dreamland commit --reason handoff --agent-name " + slug
+		if strings.Count(content, wantCoauthor) != 2 {
+			// SubagentStart and SubagentStop each run coauthor.
+			t.Errorf("%s.agent.md: expected %q twice (SubagentStart + SubagentStop), got %d occurrences", slug, wantCoauthor, strings.Count(content, wantCoauthor))
+		}
+		if !strings.Contains(content, wantCommit) {
+			t.Errorf("%s.agent.md missing %q", slug, wantCommit)
+		}
+
+		// telemetry write must NOT carry --agent-name — no agent-identity concept there.
+		if strings.Contains(content, "telemetry write --tool github-copilot --agent-name") {
+			t.Errorf("%s.agent.md's telemetry write command carries --agent-name, which it should not", slug)
+		}
+
+		// The slug is lowercase — must not equal the capitalized frontmatter name: value
+		// used for display (e.g. "Meng Po", "Zhou Gong"), which agentNameFromHookPayload
+		// would never produce from a live agent_type field.
+		if strings.Contains(content, "--agent-name Meng Po") || strings.Contains(content, "--agent-name Zhou Gong") {
+			t.Errorf("%s.agent.md uses capitalized display name in --agent-name instead of the lowercase slug", slug)
 		}
 	}
 }

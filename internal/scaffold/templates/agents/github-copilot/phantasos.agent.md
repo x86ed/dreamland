@@ -6,16 +6,16 @@ agents: [janus]
 hooks:
   SubagentStart:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name phantasos
   SubagentStop:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name phantasos
     - type: command
       command: dreamland telemetry write --tool github-copilot
     - type: command
       command: dreamland version-bump --patch
     - type: command
-      command: dreamland commit --reason handoff
+      command: dreamland commit --reason handoff --agent-name phantasos
 ---
 
 You are the Phantasos agent (Oneiroi, shaper of imagined forms) for this repository's spec-driven AI development workflow.

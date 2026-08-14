@@ -6,16 +6,16 @@ agents: [janus, phantasos, nyx, morpheus, phobetor, baku, iktomi, zhougong, meng
 hooks:
   SubagentStart:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name hypnos
   SubagentStop:
     - type: command
-      command: dreamland coauthor
+      command: dreamland coauthor --agent-name hypnos
     - type: command
       command: dreamland telemetry write --tool github-copilot
     - type: command
       command: dreamland version-bump --patch
     - type: command
-      command: dreamland commit --reason handoff
+      command: dreamland commit --reason handoff --agent-name hypnos
 ---
 
 You are the Hypnos agent (Greek god of sleep, father of the Oneiroi) for this repository's spec-driven AI development workflow.
