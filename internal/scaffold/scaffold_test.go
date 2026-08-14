@@ -306,7 +306,7 @@ func TestInstall_ClaudeCode_AgentScopedHooks(t *testing.T) {
 			continue
 		}
 
-		wantCoauthor := "dreamland coauthor --agent-name " + name
+		wantCoauthor := "dreamland coauthor --hook --agent-name " + name
 		wantTelemetry := "dreamland telemetry write --tool claude-code"
 		wantVersionBumpPatch := "dreamland version-bump --patch"
 		wantVersionBumpJanus := "dreamland version-bump --minor --if-agent janus"

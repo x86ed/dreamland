@@ -6,7 +6,7 @@ hooks:
   Stop:
     - hooks:
         - type: command
-          command: dreamland coauthor --agent-name mengpo
+          command: dreamland coauthor --hook --agent-name mengpo
         - type: command
           command: dreamland telemetry write --tool claude-code
         - type: command

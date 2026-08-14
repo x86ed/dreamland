@@ -8,7 +8,7 @@ hooks:
   Stop:
     - hooks:
         - type: command
-          command: dreamland coauthor --agent-name janus
+          command: dreamland coauthor --hook --agent-name janus
         - type: command
           command: dreamland telemetry write --tool claude-code
         - type: command

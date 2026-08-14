@@ -104,17 +104,14 @@ func runCommit(cmd *cobra.Command, args []string) error {
 		return Blocking(fmt.Errorf("git add -A: %w", err))
 	}
 
-<<<<<<< HEAD
+	// --agent-name is an explicit override (from the agent-scoped Stop hook, which
+	// knows its own agent identity statically) and takes precedence; otherwise fall
+	// back to the git identity coauthor already set, which is what actually appears
+	// as the commit author — see currentGitIdentityName.
 	agentName := commitAgentName
 	if agentName == "" {
-		agentName = resolveAgentName(cfg.CodingTool)
-		if hookAgent := agentNameFromHookPayload(); hookAgent != "" {
-			agentName = hookAgent
-		}
+		agentName = currentGitIdentityName(cfg)
 	}
-=======
-	agentName := currentGitIdentityName(cfg)
->>>>>>> origin/main
 	message := fmt.Sprintf("chore: %s checkpoint (%s)", commitReason, agentName)
 	if out, err := gitExec("commit", "-m", message); err != nil {
 		return Blocking(fmt.Errorf("git commit: %w\n%s", err, out))

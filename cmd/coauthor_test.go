@@ -1,13 +1,14 @@
 package cmd
 
 import (
-	"encoding/json"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"dreamland/internal/config"
 	"dreamland/internal/telemetry"
@@ -19,23 +20,6 @@ func TestResolveAgentName_EnvVar(t *testing.T) {
 	got := resolveAgentName("Claude Code")
 	if got != "orchestrator" {
 		t.Errorf("got %q, want orchestrator", got)
-	}
-}
-
-func TestResolveAgentName_FallbackJanus(t *testing.T) {
-	// Make sure no platform env vars are set.
-	for _, env := range []string{"CLAUDE_AGENT_ID", "CODEX_AGENT_ID", "CURSOR_AGENT_ID", "KIRO_AGENT_ID"} {
-		t.Setenv(env, "")
-	}
-
-	// No env var, but a coding tool is configured: falls back to "janus" (the
-	// implicit entry role before any specialist is dispatched), not the raw
-	// coding-tool name, regardless of which tool is configured.
-	for _, tool := range []string{"Claude Code", "GitHub Copilot", "Cursor"} {
-		got := resolveAgentName(tool)
-		if got != "janus" {
-			t.Errorf("resolveAgentName(%q) = %q, want \"janus\"", tool, got)
-		}
 	}
 }
 
@@ -365,7 +349,6 @@ func TestResolveEnforcedAgentName_ClaudeCodeFallback(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 func TestRunCoauthor_AgentNameFlagSkipsStdinRead(t *testing.T) {
 	agentNames := []string{"janus", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"}
 
@@ -374,8 +357,10 @@ func TestRunCoauthor_AgentNameFlagSkipsStdinRead(t *testing.T) {
 			makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
 
 			// A pipe with nothing written and never closed: if the code attempted the
-			// stdin read despite --agent-name being set, this call would block for the
-			// full hookPayloadReadTimeout. It must not.
+			// stdin read despite --agent-name being set, this call would block forever —
+			// agentNameFromHookPayloadFrom's io.ReadAll has no timeout of its own (that's
+			// intentional; --hook gates whether it's ever called at all — see coauthor.go).
+			// --agent-name must win before that gate is even checked.
 			r, w, err := os.Pipe()
 			if err != nil {
 				t.Fatal(err)
@@ -391,17 +376,21 @@ func TestRunCoauthor_AgentNameFlagSkipsStdinRead(t *testing.T) {
 				return "", nil
 			})
 
-			origTrailer, origAgentName := coauthorTrailer, coauthorAgentName
+			origTrailer, origHook, origAgentName := coauthorTrailer, coauthorHook, coauthorAgentName
 			coauthorTrailer = ""
+			coauthorHook = true
 			coauthorAgentName = name
-			t.Cleanup(func() { coauthorTrailer = origTrailer; coauthorAgentName = origAgentName })
+			t.Cleanup(func() { coauthorTrailer = origTrailer; coauthorHook = origHook; coauthorAgentName = origAgentName })
 
-			start := time.Now()
-			if err := runCoauthor(nil, nil); err != nil {
-				t.Fatalf("runCoauthor: %v", err)
-			}
-			if elapsed := time.Since(start); elapsed >= hookPayloadReadTimeout {
-				t.Errorf("runCoauthor took %s — stdin read was not skipped despite --agent-name=%s", elapsed, name)
+			done := make(chan error, 1)
+			go func() { done <- runCoauthor(nil, nil) }()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("runCoauthor: %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("runCoauthor blocked on stdin despite --agent-name=%s", name)
 			}
 
 			found := false
@@ -427,10 +416,11 @@ func TestRunCoauthor_AgentNameFlagAbsent_FallsBackToExistingChain(t *testing.T) 
 		return "", nil
 	})
 
-	origTrailer, origAgentName := coauthorTrailer, coauthorAgentName
+	origTrailer, origHook, origAgentName := coauthorTrailer, coauthorHook, coauthorAgentName
 	coauthorTrailer = ""
+	coauthorHook = true
 	coauthorAgentName = ""
-	t.Cleanup(func() { coauthorTrailer = origTrailer; coauthorAgentName = origAgentName })
+	t.Cleanup(func() { coauthorTrailer = origTrailer; coauthorHook = origHook; coauthorAgentName = origAgentName })
 
 	if err := runCoauthor(nil, nil); err != nil {
 		t.Fatalf("runCoauthor: %v", err)
@@ -444,6 +434,15 @@ func TestRunCoauthor_AgentNameFlagAbsent_FallsBackToExistingChain(t *testing.T) 
 	}
 	if !found {
 		t.Errorf("expected fallback chain to resolve iktomi from hook payload, got calls: %v", gitCalls)
+	}
+}
+
+func TestResolveEnforcedAgentName_OtherPlatformFallback(t *testing.T) {
+	// Other platforms should fall back to the tool name
+	cfg := &config.Config{CodingTool: "GitHub Copilot"}
+	got := resolveEnforcedAgentName(cfg)
+	if got != "GitHub Copilot" {
+		t.Errorf("got %q, want GitHub Copilot fallback", got)
 	}
 }
 
@@ -539,14 +538,6 @@ func TestAppendTokensReport_NotDuplicated(t *testing.T) {
 	data, _ := os.ReadFile(f.Name())
 	if strings.Count(string(data), "Tokens: ") != 1 {
 		t.Errorf("Tokens line duplicated, got:\n%s", string(data))
-=======
-func TestResolveEnforcedAgentName_OtherPlatformFallback(t *testing.T) {
-	// Other platforms should fall back to the tool name
-	cfg := &config.Config{CodingTool: "GitHub Copilot"}
-	got := resolveEnforcedAgentName(cfg)
-	if got != "GitHub Copilot" {
-		t.Errorf("got %q, want GitHub Copilot fallback", got)
->>>>>>> origin/main
 	}
 }
 

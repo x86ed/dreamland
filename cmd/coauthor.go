@@ -22,24 +22,17 @@ var coauthorCmd = &cobra.Command{
 	RunE:  runCoauthor,
 }
 
-<<<<<<< HEAD
-var coauthorTrailer string
-var coauthorAgentName string
-=======
 var (
-	coauthorTrailer string
-	coauthorHook    bool
+	coauthorTrailer   string
+	coauthorHook      bool
+	coauthorAgentName string
 )
->>>>>>> origin/main
 
 func init() {
 	rootCmd.AddCommand(coauthorCmd)
 	coauthorCmd.Flags().StringVar(&coauthorTrailer, "trailer", "", "commit message file path (prepare-commit-msg delegation mode)")
-<<<<<<< HEAD
-	coauthorCmd.Flags().StringVar(&coauthorAgentName, "agent-name", "", "explicit agent name, takes precedence over env var / hook payload lookup")
-=======
 	coauthorCmd.Flags().BoolVar(&coauthorHook, "hook", false, "set only by dreamland's own hook-binding templates; gates stdin read for hook payload")
->>>>>>> origin/main
+	coauthorCmd.Flags().StringVar(&coauthorAgentName, "agent-name", "", "explicit agent name, takes precedence over env var / hook payload lookup")
 }
 
 func runCoauthor(cmd *cobra.Command, args []string) error {
@@ -78,19 +71,17 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Default mode: set agent git identity and install the hook.
-<<<<<<< HEAD
+	// Default mode: set agent git identity and install the hook. --agent-name is an
+	// explicit override (from the agent-scoped Stop hook, which knows its own agent
+	// identity statically) and takes precedence over the env/stdin agent_type lookup.
 	agentName := coauthorAgentName
 	if agentName == "" {
-		agentName = resolveAgentName(cfg.CodingTool)
-		if hookAgent := agentNameFromHookPayload(); hookAgent != "" {
-=======
-	agentName := resolveEnforcedAgentName(cfg)
-	if coauthorHook {
-		// --hook flag set: read hook payload from stdin (only when invoked by hook templates)
-		if hookAgent := agentNameFromHookPayloadFrom(os.Stdin); hookAgent != "" && isRegisteredAgent(hookAgent) {
->>>>>>> origin/main
-			agentName = hookAgent
+		agentName = resolveEnforcedAgentName(cfg)
+		if coauthorHook {
+			// --hook flag set: read hook payload from stdin (only when invoked by hook templates)
+			if hookAgent := agentNameFromHookPayloadFrom(os.Stdin); hookAgent != "" && isRegisteredAgent(hookAgent) {
+				agentName = hookAgent
+			}
 		}
 	}
 	agentEmail := config.EmailClean(agentName) + suffix
@@ -131,14 +122,7 @@ func resolveEnforcedAgentName(cfg *config.Config) string {
 	return agentName
 }
 
-// resolveAgentName returns the agent name from platform env vars or falls back to
-// "janus" — the router is the implicit entry role for every dreamland session before
-// any specialist has been explicitly dispatched, so it's the correct identity for the
-// window between session start and the first hand-off, not the raw coding-tool name.
-// The coding-tool name isn't lost by this fallback: it's always captured separately in
-// the coding-tool Co-authored-by trailer (see appendCodingToolTrailer), independent of
-// AgentName. Falls back further to "dreamland" only when no coding tool is configured
-// at all — a degenerate case distinct from "no agent dispatched yet".
+// resolveAgentName returns the agent name from platform env vars or falls back to the coding tool name.
 func resolveAgentName(codingTool string) string {
 	for _, env := range []string{
 		"CLAUDE_AGENT_ID",
@@ -151,7 +135,7 @@ func resolveAgentName(codingTool string) string {
 		}
 	}
 	if codingTool != "" {
-		return "janus"
+		return codingTool
 	}
 	return "dreamland"
 }

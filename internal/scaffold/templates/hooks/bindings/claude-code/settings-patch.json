@@ -15,6 +15,12 @@
         "hooks": [
           {"type": "command", "command": "dreamland coauthor --hook"}
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {"type": "command", "command": "dreamland guard-artifact"}
+        ]
       }
     ],
     "PostToolUse": [
@@ -22,12 +28,6 @@
         "matcher": "Bash",
         "hooks": [
           {"type": "command", "command": "dreamland version-bump --change-from-command"}
-        ]
-      },
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {"type": "command", "command": "dreamland guard-artifact"}
         ]
       }
     ],

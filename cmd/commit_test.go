@@ -3,13 +3,9 @@ package cmd
 import (
 	"errors"
 	"os"
-<<<<<<< HEAD
-=======
 	"path/filepath"
->>>>>>> origin/main
 	"strings"
 	"testing"
-	"time"
 
 	"dreamland/internal/config"
 )
@@ -185,111 +181,25 @@ func TestRunCommit_CommitsOnDirtyTree(t *testing.T) {
 	if !commitCalled {
 		t.Error("expected 'git commit' call")
 	}
-<<<<<<< HEAD
-	if !strings.Contains(commitMsg, "chore: handoff checkpoint (janus)") {
-=======
 	if !strings.Contains(commitMsg, "chore: handoff checkpoint (GitHub Copilot)") {
->>>>>>> origin/main
 		t.Errorf("unexpected commit message: %q", commitMsg)
 	}
 }
 
-<<<<<<< HEAD
-func TestRunCommit_AgentNameFlagSkipsStdinRead(t *testing.T) {
-	agentNames := []string{"janus", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"}
-
-	for _, name := range agentNames {
-		t.Run(name, func(t *testing.T) {
-			makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
-
-			// A pipe with nothing written and never closed: if the code attempted the
-			// stdin read despite --agent-name being set, this call would block for the
-			// full hookPayloadReadTimeout. It must not.
-			r, w, err := os.Pipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { w.Close(); r.Close() })
-			origStdin := os.Stdin
-			os.Stdin = r
-			t.Cleanup(func() { os.Stdin = origStdin })
-
-			var commitMsg string
-			stubRunCmd(t, func(_ string, args ...string) (string, error) {
-				if len(args) > 0 && args[0] == "status" {
-					return " M some/file.go\n", nil
-				}
-				if len(args) > 0 && args[0] == "commit" {
-					commitMsg = strings.Join(args, " ")
-				}
-				return "", nil
-			})
-
-			origReason, origAgentName := commitReason, commitAgentName
-			commitReason = "handoff"
-			commitAgentName = name
-			t.Cleanup(func() { commitReason = origReason; commitAgentName = origAgentName })
-
-			start := time.Now()
-			if err := runCommit(nil, nil); err != nil {
-				t.Fatalf("runCommit: %v", err)
-			}
-			if elapsed := time.Since(start); elapsed >= hookPayloadReadTimeout {
-				t.Errorf("runCommit took %s — stdin read was not skipped despite --agent-name=%s", elapsed, name)
-			}
-
-			want := "chore: handoff checkpoint (" + name + ")"
-			if !strings.Contains(commitMsg, want) {
-				t.Errorf("commit message = %q, want to contain %q", commitMsg, want)
-			}
-		})
-	}
-}
-
-func TestRunCommit_AgentNameFlagAbsent_UsesHookPayloadAgentType(t *testing.T) {
-	agentNames := []string{"janus", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"}
-
-	for _, name := range agentNames {
-		t.Run(name, func(t *testing.T) {
-			makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
-			withPipedStdin(t, `{"hook_event_name":"SubagentStop","agent_type":"`+name+`"}`)
-
-			var commitMsg string
-			stubRunCmd(t, func(_ string, args ...string) (string, error) {
-				if len(args) > 0 && args[0] == "status" {
-					return " M some/file.go\n", nil
-				}
-				if len(args) > 0 && args[0] == "commit" {
-					commitMsg = strings.Join(args, " ")
-				}
-				return "", nil
-			})
-
-			origReason, origAgentName := commitReason, commitAgentName
-			commitReason = "handoff"
-			commitAgentName = ""
-			t.Cleanup(func() { commitReason = origReason; commitAgentName = origAgentName })
-
-			if err := runCommit(nil, nil); err != nil {
-				t.Fatalf("runCommit: %v", err)
-			}
-
-			want := "chore: handoff checkpoint (" + name + ")"
-			if !strings.Contains(commitMsg, want) {
-				t.Errorf("commit message = %q, want to contain %q, not the coding-tool-name fallback", commitMsg, want)
-			}
-		})
-	}
-}
-
-func TestRunCommit_BuiltinAgentTypeFromHookPayload(t *testing.T) {
-	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
-	withPipedStdin(t, `{"hook_event_name":"SubagentStop","agent_type":"general-purpose"}`)
+// TestRunCommit_AgentNameFlagOverridesGitIdentity verifies --agent-name takes
+// precedence over currentGitIdentityName's git-config-read fallback. Unlike coauthor,
+// runCommit never reads stdin/hook payloads directly — it trusts the git identity
+// coauthor already set — so there's no stdin-blocking scenario to guard against here.
+func TestRunCommit_AgentNameFlagOverridesGitIdentity(t *testing.T) {
+	makeVersionBumpRepo(t, config.Config{CodingTool: "GitHub Copilot"})
 
 	var commitMsg string
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "status" {
 			return " M some/file.go\n", nil
+		}
+		if len(args) >= 4 && args[0] == "config" && args[3] == "user.name" {
+			return "morpheus\n", nil // configured git identity — must be overridden below
 		}
 		if len(args) > 0 && args[0] == "commit" {
 			commitMsg = strings.Join(args, " ")
@@ -299,43 +209,19 @@ func TestRunCommit_BuiltinAgentTypeFromHookPayload(t *testing.T) {
 
 	origReason, origAgentName := commitReason, commitAgentName
 	commitReason = "handoff"
-	commitAgentName = ""
+	commitAgentName = "phantasos"
 	t.Cleanup(func() { commitReason = origReason; commitAgentName = origAgentName })
 
 	if err := runCommit(nil, nil); err != nil {
 		t.Fatalf("runCommit: %v", err)
 	}
 
-	want := "chore: handoff checkpoint (general-purpose)"
+	want := "chore: handoff checkpoint (phantasos)"
 	if !strings.Contains(commitMsg, want) {
-		t.Errorf("commit message = %q, want to contain %q — resolution doesn't distinguish dreamland agents from built-ins", commitMsg, want)
+		t.Errorf("commit message = %q, want to contain %q", commitMsg, want)
 	}
 }
 
-func TestRunCommit_NoPayloadNoFlag_FallsBackToJanus(t *testing.T) {
-	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
-
-	// Pipe with nothing written and never closed: simulates no hook payload arriving
-	// within the timeout. Combined with no --agent-name, must fall back through
-	// resolveAgentName to "janus" (session-start-equivalent identity), not the raw
-	// coding-tool name.
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { w.Close(); r.Close() })
-	origStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = origStdin })
-
-	var commitMsg string
-	stubRunCmd(t, func(_ string, args ...string) (string, error) {
-		if len(args) > 0 && args[0] == "status" {
-			return " M some/file.go\n", nil
-		}
-		if len(args) > 0 && args[0] == "commit" {
-			commitMsg = strings.Join(args, " ")
-=======
 func TestRunCommit_NilConfig(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
@@ -349,25 +235,10 @@ func TestRunCommit_NilConfig(t *testing.T) {
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "status" {
 			return "", nil // clean tree
->>>>>>> origin/main
 		}
 		return "", nil
 	})
 
-<<<<<<< HEAD
-	origReason, origAgentName := commitReason, commitAgentName
-	commitReason = "handoff"
-	commitAgentName = ""
-	t.Cleanup(func() { commitReason = origReason; commitAgentName = origAgentName })
-
-	if err := runCommit(nil, nil); err != nil {
-		t.Fatalf("runCommit: %v", err)
-	}
-
-	want := "chore: handoff checkpoint (janus)"
-	if !strings.Contains(commitMsg, want) {
-		t.Errorf("commit message = %q, want to contain %q", commitMsg, want)
-=======
 	orig2 := commitReason
 	commitReason = "turn-complete"
 	t.Cleanup(func() { commitReason = orig2 })
@@ -477,6 +348,5 @@ func TestCurrentGitIdentityName_UsesConfiguredGitIdentity(t *testing.T) {
 	got := currentGitIdentityName(cfg)
 	if got != "morpheus" {
 		t.Errorf("got %q, want morpheus (from git config)", got)
->>>>>>> origin/main
 	}
 }
