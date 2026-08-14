@@ -139,7 +139,15 @@ func TestRunOtelReceiver_ForegroundListenAndServeFails(t *testing.T) {
 		CodingTool:   "GitHub Copilot",
 		OtelEndpoint: "http://" + occupied.Addr().String(),
 	})
-	_ = root
+
+	// Without this, runOtelReceiver's config.Load reads whatever real config exists
+	// at the actual process cwd (not root), so the OtelEndpoint override above is
+	// silently ignored, ListenAndServe binds the real default address instead, and
+	// — with nothing else listening there on a bare CI runner — blocks in Accept()
+	// forever. This was the actual cause of the hang, independent of address format.
+	origGetwd := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = origGetwd })
 
 	origForeground := otelReceiverForeground
 	otelReceiverForeground = true
