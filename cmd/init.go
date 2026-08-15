@@ -298,6 +298,12 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if err := scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/copilot-hook-debug.jsonl"); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
 	}
+	if err := scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/workflow-graph.json"); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
+	}
+	if err := scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/hypnos.lock"); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
+	}
 
 	// Codex: prompt to write ~/.codex/config.toml.
 	if res.tool == "Codex CLI" {

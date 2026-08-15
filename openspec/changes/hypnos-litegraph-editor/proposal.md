@@ -20,17 +20,19 @@ This is a general capability of the `dreamland` binary, not something specific t
 ## Capabilities
 
 ### New Capabilities
+
 - `litegraph-workflow-view`: local server + `/hypnos-view` that renders agents, skills, hooks, and their connections (routing, attachments, hand-offs) as a read-only litegraph.js graph reflecting current repo/task state.
 - `litegraph-workflow-editor`: local server + `/hypnos-interactive` that renders the same graph in editable mode; node/edge mutations (create/attach/detach agents, skills, hooks; change routing edges) are written back through the existing per-platform scaffold-sync mechanism so every platform's templates and Janus's routing table stay consistent. Includes a headless `--mode=apply-plan` entrypoint so `hypnos` can drive the same mutations from a plan file instead of browser interaction.
 
 ### Modified Capabilities
+
 - `janus-router-agent`: the existing "Janus dispatches agent-roster tasks to Hypnos or Meng Po via /opsx:apply" requirement only covers creating/retiring an agent. It's widened to also cover workflow-graph-structural tasks (routing-edge changes, hook/skill attach/detach) — Janus dispatches those to `hypnos` in place of `morpheus`, the same `/opsx:apply` mechanism, not a new dispatch path.
 
 ## Impact
 
 - New: `cmd/hypnosserve.go` — a `dreamland hypnos-serve` subcommand compiled into the `dreamland` binary, hosting the local HTTP server (view/interactive modes) and serving a litegraph.js single-page app.
 - New: `/hypnos-interactive` and `/hypnos-view` slash-command templates across all six platforms (`internal/scaffold/templates/commands/*`), following the existing per-platform command conventions in `router-slash-commands`. Each command's body maps directly to a `dreamland hypnos-serve --mode=<view|interactive>` invocation — no platform-specific server logic, only a thin CLI call per platform's slash-command mechanism.
-- Modified (write path only, not requirements): editor mutations call into the same writer logic used by `hypnos` (agent authoring), `mengpo` (archival), and the Janus routing-table update path, so those code paths gain a second and third caller (browser UI, and `hypnos`'s headless plan-apply mode).
+- New: per-platform agent-rendering functions in `internal/scaffold` — checked the existing code (`installFlatAgents`/`installSkills` in `scaffold.go`) and confirmed there's no existing formatter that renders an agent from structured fields to extract or adapt; today's agent files are static, pre-authored template content, byte-copied verbatim. These renderers are genuinely new code, following the same tool-tier/file-layout conventions `hypnos`/`mengpo` apply by hand. `atomicJSONMerge` (same file) *is* directly reusable for project-scoped hook attach into `.claude/settings.json`.
 - New dependency: litegraph.js, vendored/bundled for the server's static assets (no external CDN at runtime, consistent with the project's offline-friendly CLI).
 - Modified: `internal/scaffold/templates/agents/*/hypnos.*` (all six platforms) and this repo's live `hypnos` agent files, to add the plan-apply responsibility and the Janus in-place-of-`morpheus` dispatch rule to `hypnos`'s own instructions.
 - Modified: `internal/scaffold/templates/agents/*/janus.*` (all six platforms) and this repo's live `janus` agent files, to widen the existing agent-roster `/opsx:apply` dispatch rule to also cover workflow-graph-structural tasks.

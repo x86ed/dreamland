@@ -32,3 +32,5 @@ go.work.sum
 # .vscode/
 dreamland
 .dreamland.json
+.dreamland/workflow-graph.json
+.dreamland/hypnos.lock
