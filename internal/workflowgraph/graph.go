@@ -20,16 +20,24 @@ const (
 	TierWriteOnlyNoEdit Tier = "write-only-no-edit"
 )
 
-// HookEvent is a platform-agnostic hook trigger point, mapped to each platform's
-// real event name by the per-platform writer (Claude Code's Stop/SubagentStop/
-// PreToolUse/SessionStart, GitHub Copilot's SubagentStart/SubagentStop).
+// HookEvent is a hook trigger point. Named close to each platform's own event
+// keys rather than collapsed into a smaller abstracted set — confirmed by reading
+// this repo's own `.claude/settings.json`, which has five distinct workspace-level
+// event keys (PostToolUse, PreToolUse, SessionStart, Stop, SubagentStop); Stop and
+// SubagentStop are genuinely different events (whole-session end vs. one subagent's
+// turn end) and must not be collapsed into a single bucket, or the writer can't
+// round-trip which real key a binding belongs under. GitHub Copilot's frontmatter
+// hooks use SubagentStart/SubagentStop; Claude Code's per-agent frontmatter uses
+// only Stop.
 type HookEvent string
 
 const (
-	EventTurnEnd      HookEvent = "turn_end"
-	EventTurnStart    HookEvent = "turn_start"
-	EventPreToolUse   HookEvent = "pre_tool_use"
-	EventSessionStart HookEvent = "session_start"
+	EventSessionStart  HookEvent = "session_start"
+	EventPreToolUse    HookEvent = "pre_tool_use"
+	EventPostToolUse   HookEvent = "post_tool_use"
+	EventStop          HookEvent = "stop"           // Claude Code: Stop
+	EventSubagentStart HookEvent = "subagent_start" // GitHub Copilot: SubagentStart
+	EventSubagentStop  HookEvent = "subagent_stop"  // Claude Code/Copilot: SubagentStop
 )
 
 // HookScope distinguishes a workspace-wide binding (wired to the ProjectNode) from

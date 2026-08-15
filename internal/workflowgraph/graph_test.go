@@ -30,7 +30,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	g.Hooks["hypnos-stop-telemetry"] = &HookNode{
 		ID:      "hypnos-stop-telemetry",
 		Command: "dreamland telemetry write --tool claude-code",
-		Event:   EventTurnEnd,
+		Event:   EventStop,
 		Scope:   ScopeAgent,
 	}
 	g.Skills["openspec-propose"] = &SkillNode{

@@ -1,0 +1,351 @@
+package workflowgraph
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// newClaudeRepo creates a temp repo with only Claude Code installed (an empty
+// .claude/agents dir plus a minimal settings.json), matching this repo's own
+// actual installed-platform shape.
+func newClaudeRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".claude", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".claude", "settings.json"), []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestCreateAgentWritesClaudeCodeFileWithHookBaseline(t *testing.T) {
+	root := newClaudeRepo(t)
+	g := New(root)
+
+	if err := CreateAgent(root, g, "testagent", "Does test things.", TierFullEdit); err != nil {
+		t.Fatalf("CreateAgent: unexpected error %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".claude", "agents", "testagent.md"))
+	if err != nil {
+		t.Fatalf("expected file to be written: %v", err)
+	}
+	content := string(data)
+
+	for _, want := range []string{
+		"name: testagent",
+		"description: Does test things.",
+		"tools: Read, Edit, Write, Bash",
+		"dreamland coauthor --hook --agent-name testagent",
+		"dreamland telemetry write --tool claude-code",
+		"dreamland commit --reason handoff --agent-name testagent",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("rendered file missing %q\n---\n%s", want, content)
+		}
+	}
+
+	// Baseline hook nodes must exist in the graph too, agent-scoped.
+	found := 0
+	for _, h := range g.Hooks {
+		if h.Scope == ScopeAgent {
+			found++
+		}
+	}
+	if found != len(claudeStopBaseline) {
+		t.Errorf("got %d agent-scoped hook nodes, want %d", found, len(claudeStopBaseline))
+	}
+}
+
+func TestCreateAgentDuplicateErrors(t *testing.T) {
+	root := newClaudeRepo(t)
+	g := New(root)
+	if err := CreateAgent(root, g, "dup", "desc", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateAgent(root, g, "dup", "desc again", TierFullEdit); err == nil {
+		t.Error("expected an error creating a duplicate agent id, got nil")
+	}
+}
+
+func TestRoutingEdgeRoundTripsThroughImport(t *testing.T) {
+	root := newClaudeRepo(t)
+	g := New(root)
+	if err := CreateAgent(root, g, "alpha", "First agent.", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateAgent(root, g, "beta", "Second agent.", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AddRoutingEdge(root, g, "alpha", "beta"); err != nil {
+		t.Fatalf("AddRoutingEdge: unexpected error %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(root, ".claude", "agents", "alpha.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "hand off directly to `beta`") {
+		t.Errorf("expected rendered hand-off sentence, got:\n%s", content)
+	}
+
+	// Full round-trip: re-import from disk and confirm the edge reappears.
+	reimported, err := Import(root)
+	if err != nil {
+		t.Fatalf("Import: unexpected error %v", err)
+	}
+	found := false
+	for _, e := range reimported.Edges {
+		if e.Kind == EdgeRouting && e.From == "alpha" && e.To == "beta" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected routing edge alpha -> beta to round-trip through Import")
+	}
+
+	// Now remove it and confirm the sentence disappears.
+	if err := RemoveRoutingEdge(root, g, "alpha", "beta"); err != nil {
+		t.Fatalf("RemoveRoutingEdge: unexpected error %v", err)
+	}
+	content, err = os.ReadFile(filepath.Join(root, ".claude", "agents", "alpha.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "beta") {
+		t.Errorf("expected hand-off sentence removed, got:\n%s", content)
+	}
+}
+
+func TestDeleteAgentRemovesFileAndCleansUpEdges(t *testing.T) {
+	root := newClaudeRepo(t)
+	g := New(root)
+	if err := CreateAgent(root, g, "source", "Source agent.", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateAgent(root, g, "target", "Target agent.", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddRoutingEdge(root, g, "source", "target"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := DeleteAgent(root, g, "target"); err != nil {
+		t.Fatalf("DeleteAgent: unexpected error %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".claude", "agents", "target.md")); !os.IsNotExist(err) {
+		t.Errorf("expected target.md removed, stat err = %v", err)
+	}
+	if _, ok := g.Agents["target"]; ok {
+		t.Error("expected \"target\" removed from g.Agents")
+	}
+
+	content, err := os.ReadFile(filepath.Join(root, ".claude", "agents", "source.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "hand off directly to `target`") {
+		t.Errorf("expected source's hand-off sentence to target regenerated away, got:\n%s", content)
+	}
+}
+
+func TestAttachDetachHookToProject(t *testing.T) {
+	root := newClaudeRepo(t)
+	g := New(root)
+
+	if err := AttachHookToProject(root, g, EventSessionStart, "dreamland version-bump"); err != nil {
+		t.Fatalf("AttachHookToProject: unexpected error %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	hooks := doc["hooks"].(map[string]any)
+	sessionStart := hooks["SessionStart"].([]any)
+	if len(sessionStart) != 1 {
+		t.Fatalf("expected one SessionStart binding, got %d", len(sessionStart))
+	}
+
+	// Attaching the same command again must not duplicate it.
+	if err := AttachHookToProject(root, g, EventSessionStart, "dreamland version-bump"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	json.Unmarshal(data, &doc)
+	hooks = doc["hooks"].(map[string]any)
+	binding := hooks["SessionStart"].([]any)[0].(map[string]any)
+	if len(binding["hooks"].([]any)) != 1 {
+		t.Errorf("expected exactly one command after re-attaching, got %d", len(binding["hooks"].([]any)))
+	}
+
+	if projectHooks := countProjectHooks(g); projectHooks != 1 {
+		t.Errorf("expected 1 project-scoped hook node in graph, got %d", projectHooks)
+	}
+
+	if err := DetachHookFromProject(root, g, EventSessionStart, "dreamland version-bump"); err != nil {
+		t.Fatalf("DetachHookFromProject: unexpected error %v", err)
+	}
+	data, err = os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	json.Unmarshal(data, &doc)
+	hooks = doc["hooks"].(map[string]any)
+	if v, ok := hooks["SessionStart"]; ok && len(v.([]any)) != 0 {
+		t.Errorf("expected SessionStart binding removed entirely, got %+v", v)
+	}
+	if projectHooks := countProjectHooks(g); projectHooks != 0 {
+		t.Errorf("expected 0 project-scoped hook nodes after detach, got %d", projectHooks)
+	}
+}
+
+func TestAttachHookToProjectFallsBackPerAgentOnCopilot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".github", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	g := New(root)
+	if err := CreateAgent(root, g, "one", "First.", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateAgent(root, g, "two", "Second.", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AttachHookToProject(root, g, EventSubagentStop, "dreamland custom-audit"); err != nil {
+		t.Fatalf("AttachHookToProject: unexpected error %v", err)
+	}
+
+	for _, id := range []string{"one", "two"} {
+		content, err := os.ReadFile(filepath.Join(root, ".github", "agents", id+".agent.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(content), "dreamland custom-audit") {
+			t.Errorf("agent %q: expected the fanned-out hook command in its frontmatter, got:\n%s", id, content)
+		}
+	}
+
+	if err := DetachHookFromProject(root, g, EventSubagentStop, "dreamland custom-audit"); err != nil {
+		t.Fatalf("DetachHookFromProject: unexpected error %v", err)
+	}
+	for _, id := range []string{"one", "two"} {
+		content, err := os.ReadFile(filepath.Join(root, ".github", "agents", id+".agent.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(content), "dreamland custom-audit") {
+			t.Errorf("agent %q: expected the fanned-out hook command removed, got:\n%s", id, content)
+		}
+	}
+}
+
+func countProjectHooks(g *Graph) int {
+	n := 0
+	for _, h := range g.Hooks {
+		if h.Scope == ScopeProject {
+			n++
+		}
+	}
+	return n
+}
+
+func TestAttachDetachHookToAgent(t *testing.T) {
+	root := newClaudeRepo(t)
+	g := New(root)
+	if err := CreateAgent(root, g, "solo", "Solo agent.", TierRouterExcluded); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AttachHookToAgent(root, g, "solo", EventPreToolUse, "dreamland custom-check"); err != nil {
+		t.Fatalf("AttachHookToAgent: unexpected error %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(root, ".claude", "agents", "solo.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "dreamland custom-check") {
+		t.Errorf("expected custom hook command in rendered file, got:\n%s", content)
+	}
+
+	if err := DetachHookFromAgent(root, g, "solo", EventPreToolUse, "dreamland custom-check"); err != nil {
+		t.Fatalf("DetachHookFromAgent: unexpected error %v", err)
+	}
+	content, err = os.ReadFile(filepath.Join(root, ".claude", "agents", "solo.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "dreamland custom-check") {
+		t.Errorf("expected custom hook command removed, got:\n%s", content)
+	}
+}
+
+func TestAttachDetachSkillNeverTouchesSkillFile(t *testing.T) {
+	root := newClaudeRepo(t)
+	skillDir := filepath.Join(root, ".claude", "skills", "openspec-propose")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillContent := "---\nname: openspec-propose\ndescription: Propose a change.\n---\n\nBody.\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g := New(root)
+	if err := CreateAgent(root, g, "author", "Authors things.", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := importSkills(root, g); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AttachSkill(g, "author", "openspec-propose"); err != nil {
+		t.Fatalf("AttachSkill: unexpected error %v", err)
+	}
+	found := false
+	for _, e := range g.Edges {
+		if e.Kind == EdgeAttachment && e.From == "openspec-propose" && e.To == "author" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected an attachment edge after AttachSkill")
+	}
+
+	after, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != skillContent {
+		t.Error("AttachSkill modified the skill's own file — it must not")
+	}
+
+	if err := DetachSkill(g, "author", "openspec-propose"); err != nil {
+		t.Fatalf("DetachSkill: unexpected error %v", err)
+	}
+	for _, e := range g.Edges {
+		if e.Kind == EdgeAttachment {
+			t.Errorf("expected no attachment edges after DetachSkill, found %+v", e)
+		}
+	}
+	after, err = os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != skillContent {
+		t.Error("DetachSkill modified the skill's own file — it must not")
+	}
+}

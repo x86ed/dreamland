@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>dreamland workflow graph</title>
+<style>
+  body { font-family: -apple-system, sans-serif; margin: 2rem; color: #222; }
+  code { background: #f0f0f0; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>dreamland workflow graph</h1>
+<p>
+  The litegraph.js graph UI isn't vendored yet (tasks.md &sect;9) &mdash; this is a
+  placeholder so the server's routing and static-asset embedding can be built
+  and tested ahead of the UI layer.
+</p>
+<p>Read-only graph JSON: <code>GET /api/graph</code></p>
+<p>Live refresh stream: <code>GET /api/events</code> (Server-Sent Events)</p>
+<p id="mode"></p>
+<script>
+  fetch('/api/graph').then(r => r.json()).then(g => {
+    document.getElementById('mode').textContent =
+      'Loaded ' + Object.keys(g.agents || {}).length + ' agent(s), ' +
+      Object.keys(g.hooks || {}).length + ' hook(s), ' +
+      Object.keys(g.skills || {}).length + ' skill(s).';
+  });
+</script>
+</body>
+</html>

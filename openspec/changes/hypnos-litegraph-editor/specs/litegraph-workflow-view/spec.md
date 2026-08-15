@@ -41,16 +41,16 @@ The graph rendered by `/hypnos-view` and `/hypnos-interactive` SHALL be rebuilt 
 - **THEN** the agent's node is still created in the graph
 - **AND** the node is visually flagged as having unresolved routing, with no edge fabricated on its behalf
 
-### Requirement: The view refreshes on update via a filesystem watcher, not polling
+### Requirement: The view refreshes on update, pushed to the browser without a manual reload
 
-While `/hypnos-view` (or `/hypnos-interactive`) is open, a filesystem watcher on the six live platform directories and the active OpenSpec change directory SHALL trigger a graph rebuild and push a refresh to the open browser tab whenever a watched file changes, without requiring a manual reload or a fixed polling interval.
+While `/hypnos-view` (or `/hypnos-interactive`) is open, a server-side watcher on the six live platform directories and the active OpenSpec change directory SHALL detect a change and push a refresh to the open browser tab over the SSE connection, without the browser ever needing to re-fetch on a timer or the user manually reloading the page. (The server's own change-detection mechanism is a short-interval mtime poll, not an OS-native filesystem-event API — see design.md's revised decision; that's an internal implementation detail, not something the browser side does or waits on.)
 
 #### Scenario: Hand-off edge change appears without reload
 
 - **WHEN** an agent's routing edge changes on disk (via the editor, a `hypnos` plan-apply run, or a hand edit) while `/hypnos-view` is open
-- **THEN** the open browser tab reflects the updated edge shortly after the change, without the user reloading the page
+- **THEN** the open browser tab reflects the updated edge shortly after the change, without the user reloading the page or the browser polling for it
 
 #### Scenario: In-progress task highlighted on its agent's node
 
 - **WHEN** `morpheus` is actively working through `tasks.md` for an open OpenSpec change
-- **THEN** the `morpheus` node in an open `/hypnos-view` session shows an in-progress indicator tied to that change, and the indicator updates as task status changes, pushed by the same filesystem-watcher mechanism rather than periodic polling
+- **THEN** the `morpheus` node in an open `/hypnos-view` session shows an in-progress indicator tied to that change, and the indicator updates as task status changes, pushed to the browser over the same SSE connection rather than the browser re-fetching on a timer

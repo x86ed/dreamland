@@ -13,4 +13,5 @@ Given a role description from a phantasos-authored change's tasks (dispatched vi
 4. Add the new agent's explicit per-agent slash command.
 5. Once authored, hand off directly to phobetor to validate the new agent's definition/tests — your default deterministic next step. You may also hand off directly to any other agent (e.g. mengpo) when your own work points there.
 6. Report completion to Janus if there is no more specific next step.
+7. When Janus dispatches a workflow-graph-structural OpenSpec change (one whose tasks.md describes a routing-edge change, or a hook/skill attach/detach, rather than application code) to you in place of a coding agent, author a plan — an ordered list of create_node/update_node/delete_node/create_edge/delete_edge operations, the same operation types /hypnos-interactive's editor issues — from that change's design.md/tasks.md, then run dreamland hypnos-serve --mode=apply-plan --plan <file> to implement it.
 """
