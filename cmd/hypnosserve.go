@@ -143,6 +143,10 @@ func serveGraph(cmd *cobra.Command, repoRoot string, interactive bool) error {
 // background watcher.
 func newHypnosMux(repoRoot string, interactive bool, guarded *guardedGraph, broadcaster *workflowgraph.Broadcaster) (http.Handler, error) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/mode", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"interactive": interactive})
+	})
 	mux.HandleFunc("GET /api/graph", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(guarded.Get())

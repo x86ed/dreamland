@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -73,6 +74,77 @@ func TestViewModeHasNoMutateRoute(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("view-mode POST /api/mutate: got %d, want %d (404, not a permission error)", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+func TestStaticAssetsServedThroughEmbeddedFS(t *testing.T) {
+	root := newTestClaudeRepo(t)
+	g, err := workflowgraph.Import(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux, err := newHypnosMux(root, false, &guardedGraph{g: g}, workflowgraph.NewBroadcaster())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	for _, path := range []string{"/", "/app.js", "/nodes.js", "/growable.js", "/vendor/litegraph.min.js", "/vendor/litegraph.css"} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s: got %d, want 200", path, resp.StatusCode)
+		}
+		if len(body) == 0 {
+			t.Errorf("%s: empty body", path)
+		}
+	}
+
+	// litegraph.min.js should be a real, substantial vendored asset, not a stub.
+	resp, err := http.Get(srv.URL + "/vendor/litegraph.min.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if len(body) < 100000 {
+		t.Errorf("vendor/litegraph.min.js is only %d bytes — expected a real vendored library", len(body))
+	}
+	if !strings.Contains(string(body), "registerNodeType") {
+		t.Error("vendor/litegraph.min.js does not contain \"registerNodeType\" — wrong asset or corrupted vendoring")
+	}
+}
+
+func TestAPIModeReflectsInteractiveFlag(t *testing.T) {
+	root := newTestClaudeRepo(t)
+	g, err := workflowgraph.Import(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broadcaster := workflowgraph.NewBroadcaster()
+
+	for _, interactive := range []bool{false, true} {
+		mux, err := newHypnosMux(root, interactive, &guardedGraph{g: g}, broadcaster)
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(mux)
+		resp, err := http.Get(srv.URL + "/api/mode")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]bool
+		json.NewDecoder(resp.Body).Decode(&got)
+		resp.Body.Close()
+		srv.Close()
+		if got["interactive"] != interactive {
+			t.Errorf("interactive=%v: got /api/mode = %v", interactive, got)
+		}
 	}
 }
 
@@ -235,6 +307,90 @@ func TestSSEEventsRouteStreamsOnPublish(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected a \"data: refresh\" line after Publish")
+	}
+}
+
+// TestWatcherToSSEIntegration wires a real Watcher, Broadcaster, and the
+// GET /api/events route together exactly as serveGraph does, then makes a
+// real hand-edit to a watched file and confirms an SSE message arrives —
+// closing the "hand-edit a platform file while /hypnos-view is open" loop
+// (tasks.md §12.4) as far as it can go without a browser: the browser-side
+// re-render on receiving that message is app.js's subscribeEvents, which
+// cannot be executed outside one.
+func TestWatcherToSSEIntegration(t *testing.T) {
+	root := newTestClaudeRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".claude", "agents", "existing.md"), []byte("---\nname: existing\ndescription: d\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	guarded := &guardedGraph{}
+	broadcaster := workflowgraph.NewBroadcaster()
+	fired := make(chan struct{}, 4)
+	watcher := workflowgraph.NewWatcher(workflowgraph.WatchPaths(root, ""), 30*time.Millisecond, func() {
+		g, err := workflowgraph.Import(root)
+		if err != nil {
+			return
+		}
+		guarded.Set(g)
+		broadcaster.Publish()
+		fired <- struct{}{}
+	})
+	watcher.Start()
+	defer watcher.Stop()
+
+	mux, err := newHypnosMux(root, false, guarded, broadcaster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	scanner := bufio.NewScanner(resp.Body)
+	messages := make(chan string, 4)
+	go func() {
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.Contains(line, "data:") {
+				messages <- line
+			}
+		}
+	}()
+
+	// Give the watcher a moment past its first poll baseline, then make a
+	// real hand-edit — description change is enough to advance the mtime.
+	time.Sleep(60 * time.Millisecond)
+	future := time.Now().Add(time.Second)
+	newContent := []byte("---\nname: existing\ndescription: hand-edited\n---\nbody\n")
+	path := filepath.Join(root, ".claude", "agents", "existing.md")
+	if err := os.WriteFile(path, newContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watcher never fired after the hand-edit")
+	}
+	select {
+	case <-messages:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no SSE message received after the watcher fired")
+	}
+
+	g := guarded.Get()
+	if g == nil || g.Agents["existing"] == nil || g.Agents["existing"].Description != "hand-edited" {
+		t.Errorf("expected the served graph to reflect the hand-edit, got %+v", g)
 	}
 }
 

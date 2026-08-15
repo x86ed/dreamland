@@ -127,6 +127,29 @@ func TestApplyOperationsStopsAtFirstRuntimeError(t *testing.T) {
 	}
 }
 
+func TestApplyOperationsCreateSkillNode(t *testing.T) {
+	root := newClaudeRepo(t)
+	g := New(root)
+
+	ops := []Operation{
+		{Type: OpCreateNode, Kind: NodeKindSkill, ID: "new-skill", Description: "Created via a plan."},
+	}
+	applied, err := ApplyOperations(root, g, ops)
+	if err != nil {
+		t.Fatalf("ApplyOperations: unexpected error %v", err)
+	}
+	if applied != 1 {
+		t.Errorf("applied = %d, want 1", applied)
+	}
+	skill, ok := g.Skills["new-skill"]
+	if !ok || skill.Owner != OwnerDreamland {
+		t.Errorf("expected skill %+v with Owner=dreamland", skill)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claude", "skills", "new-skill", "SKILL.md")); err != nil {
+		t.Errorf("expected SKILL.md written: %v", err)
+	}
+}
+
 func TestApplyOperationsHookBindingEdges(t *testing.T) {
 	root := newClaudeRepo(t)
 	g := New(root)

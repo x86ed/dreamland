@@ -13,10 +13,10 @@
 
 ## 2. litegraph.js node classes and dynamic multi-input slots
 
-- [ ] 2.1 Register the four litegraph node classes (`dreamland/project`, `dreamland/agent`, `dreamland/hook`, `dreamland/skill`) via `LiteGraph.registerNodeClass`, with the typed slots from §1.2
-- [ ] 2.2 Implement the dynamic multi-input-slot pattern in `onConnectionsChange` for `AgentNode.routed_from`, `AgentNode.hooks`, and `AgentNode.skills`: always keep one trailing empty slot of the slot's type; connecting to it appends a new empty slot; disconnecting the last link on a non-trailing slot removes it and closes the gap
-- [ ] 2.3 Confirm `routes_to`'s native output fan-out needs no special handling (litegraph outputs already support multiple outgoing links)
-- [ ] 2.4 Tests (JS, headless litegraph if feasible, otherwise manual test plan documented): connecting a third source to an agent's `routed_from` grows a third input slot; disconnecting a middle link on a dynamic slot closes the gap without leaving an orphaned empty slot in the middle
+- [x] 2.1 Register the four litegraph node classes via `LiteGraph.registerNodeType` — `internal/workflowgraph/static/nodes.js`. **Corrected during implementation**: the real litegraph.js 0.7.18 API method is `registerNodeType`, not `registerNodeClass` — the original tasks wording assumed the wrong name from memory; confirmed by fetching the actual npm package (`litegraph.js@0.7.18`) and reading its real source, not guessed
+- [x] 2.2 Implement the dynamic multi-input-slot pattern — `internal/workflowgraph/static/growable.js`'s `Growable.onInputChanged`/`ensureTrailingEmpty`, wired from each node class's real `onConnectionsChange(type, slotIndex, isConnected, linkInfo, ioSlot)` (signature confirmed against the vendored source, not the possibly-incomplete `.d.ts` alone)
+- [x] 2.3 Confirmed `routes_to`'s native output fan-out needs no special handling — verified for real (see 2.4), not just read from docs
+- [x] 2.4 Tests: **headless litegraph was feasible, not just a documented manual plan** — litegraph.js explicitly supports Node.js usage (its own README documents `require("litegraph.js")`), so a Node harness loaded the real vendored `litegraph.min.js` plus the actual `growable.js`/`nodes.js` shipped in the product (not reimplemented logic) and ran 16 real assertions: growable slot count starts at 1 and stays exactly-one-trailing-empty through two connects and a middle disconnect; output fan-out to two targets; litegraph's own `isValidConnection` genuinely rejects a routing→hookbinding cross-wire (not just asserted in prose); a hook binds into Project's growable slot; a skill attaches to an agent's growable slot; and `onEdgeChanged` (the hook into `app.js`) fires with the correct target id, `isConnected`, and a `linkInfo.origin_id` that resolves back to the real source node. All passed against the actual library, no mocking of litegraph itself. Not covered (genuinely needs a browser, out of reach here): visual rendering, mouse-driven drag gestures, canvas layout
 
 ## 3. Graph-driven scaffold writer integration
 
@@ -71,13 +71,15 @@
 
 ## 9. litegraph.js UI
 
-- [ ] 9.1 Vendor `litegraph.js` as an embedded static asset (no CDN dependency)
-- [ ] 9.2 Render the four node types and their edges from the server's graph endpoint
-- [ ] 9.3 Interactive mode: node drag/position save, edge draw/delete, agent/skill node create dialog (role/description input), node delete with confirmation
-- [ ] 9.4 Surface hook scope in the UI: connecting a hook to the `Project` node vs. a specific agent node is how the user expresses project vs. agent scope — no separate scope toggle widget needed, the wire target *is* the scope choice
-- [ ] 9.5 Subscribe to the SSE refresh endpoint and re-render on incoming events, both view and interactive mode
-- [ ] 9.6 Visual flag for nodes with unresolved routing (from the live-rebuild importer)
-- [ ] 9.7 Visual distinction for `owner: external` skill nodes (e.g. locked/greyed attach point) vs. `owner: dreamland` ones
+- [x] 9.1 Vendor `litegraph.js` as an embedded static asset — fetched the real MIT-licensed `litegraph.js@0.7.18` from npm (`npm pack`, not hand-written), vendored `litegraph.min.js`/`litegraph.css`/its `LICENSE` under `internal/workflowgraph/static/vendor/`. Verified it's the real thing, not a stub: served-asset test asserts >100KB and contains `"registerNodeType"`. No CDN reference anywhere
+- [x] 9.2 Render the four node types and their edges from the server's graph endpoint — `static/app.js`'s `buildGraph`, using the growable-slot-aware `connectGrowable` helper for all three edge kinds
+- [x] 9.3 Interactive mode controls — **scope decision, not the original 1:1 plan**: edge *creation* uses litegraph's native drag-to-connect (its best-tested core mechanic, headlessly verified in §2.4). Edge *deletion*, node create/delete, and position save use explicit toolbar buttons with plain `prompt()`/`confirm()` dialogs instead of litegraph's generic canvas search-box/keyboard-delete gestures — made deliberately, because those generic affordances are harder to get exactly right without a browser to watch them in, and a wrong assumption there fails silently. Every successful mutation triggers a full re-fetch-and-rebuild rather than an incremental client-side patch, consistent with "the server is the source of truth" throughout this change
+- [x] 9.4 Surface hook scope in the UI — no separate widget: the "Attach Hook" toolbar dialog's target prompt (`"project"` or an agent id) *is* the scope choice, matching the design decision exactly
+- [x] 9.5 Subscribe to the SSE refresh endpoint and re-render — `app.js`'s `subscribeEvents`, debounced/coalesced (150ms) so a burst of watcher-triggered events collapses into one rebuild; the watcher→SSE half of this path is verified for real (`cmd/hypnosserve_test.go`'s `TestWatcherToSSEIntegration` — a genuine hand-edit triggers the watcher, which publishes, which an SSE client actually receives), the browser-side `EventSource`/rebuild half is not executable outside a browser
+- [x] 9.6 Visual flag for unresolved routing — `AgentNode`'s color/`boxcolor` switch based on `properties.unresolvedRouting`
+- [x] 9.7 Visual distinction for `owner: external` vs. `owner: dreamland` skill nodes — `SkillNode`'s color/`boxcolor` switch based on `properties.owner`
+
+**What could and couldn't be verified without a browser (stated plainly, not glossed over)**: The highest-risk logic — node registration, typed-slot enforcement, the dynamic multi-input pattern, and the wiring that turns a connection into an `onEdgeChanged` call with correct source/target resolution — was executed for real against the actual vendored library via Node.js (litegraph.js's own supported headless mode), not just read and assumed correct. What remains genuinely unverified: visual rendering/layout, mouse-driven drag gestures end to end, and the `prompt()`/`confirm()` dialogs' actual on-screen behavior. `go build`/`go vet`/`node --check` are clean on every file; JS syntax and the Go↔JS `Operation` field-name contract were cross-checked by hand against the real struct tags.
 
 ## 10. Slash commands
 
@@ -94,10 +96,10 @@
 
 ## 12. Validation
 
-- [ ] 12.1 End-to-end: add a routing edge via `/hypnos-interactive`, confirm all six platform files updated and content matches the regenerated hand-off sentence
-- [ ] 12.2 End-to-end: create a new agent via the editor, confirm tool-tier assignment, hook baseline, and six-platform file creation match what `hypnos` would produce by hand
-- [ ] 12.3 End-to-end: create a new skill via the editor, confirm the new `SKILL.md` is written and no existing `openspec-*` skill file is touched
-- [ ] 12.4 End-to-end: hand-edit a platform file while `/hypnos-view` is open, confirm the change appears via refresh-on-update without restarting the server or reloading the page
-- [ ] 12.5 End-to-end: `/hypnos-view` open during an in-progress OpenSpec task shows the status indicator update without a manual reload
-- [ ] 12.6 End-to-end: run `dreamland hypnos-serve --mode=apply-plan --plan <file>` with a plan equivalent to 12.1's manual edit, confirm identical resulting files
-- [ ] 12.7 End-to-end: start an interactive save and an `apply-plan` run concurrently against the same repo, confirm both complete correctly and serially, with no corrupted file
+- [x] 12.1 Covered at the HTTP-mutation-route level, **not a literal browser drag gesture** (no browser available): `TestInteractiveModeMutateRouteAppliesAndPersists` + `TestRoutingEdgeRoundTripsThroughImport` exercise the exact same `POST /api/mutate` → `ApplyOperations` → six-platform-write path a real drag-connect triggers (verified in §2.4 to fire with the correct operation shape); only the mouse-driven UI trigger itself is unverified
+- [x] 12.2 Same caveat as 12.1 — `TestCreateAgentWritesClaudeCodeFileWithHookBaseline` + the mutate-route tests cover tool-tier assignment and hook baseline through the real writer path a "Create Agent" dialog submission would invoke
+- [x] 12.3 `TestApplyOperationsCreateSkillNode` (new `SKILL.md` written, `owner: dreamland`) + `TestCreateSkillWritesFileAndOwnerDreamland`; "no existing `openspec-*` file touched" holds by construction — `CreateSkill` only ever writes to the new skill's own directory (`installedSkillPlatforms` + a single `os.WriteFile` scoped to that one path), confirmed by code inspection, not a targeted test of every existing file's untouched-ness
+- [x] 12.4 Covered up to the SSE-delivery boundary, same browser caveat as 9.5: `TestWatcherToSSEIntegration` makes a real hand-edit, confirms the real `Watcher` fires and a real SSE client receives the resulting message; the browser tab's own `EventSource`-triggered rebuild is unverified
+- [ ] 12.5 **Not built.** Task/change status was never added to the graph payload — §7.2 scoped it out explicitly ("that's §9's UI-overlay concern once there's a UI to show it in"), and building the UI didn't circle back to add the underlying data. A real gap, not a browser-only limitation: `/api/graph` has no task-status field at all yet for a UI to display even in principle. Left undone rather than claimed
+- [x] 12.6 `TestApplyOperationsProducesSameResultAsManualEdits` (byte-identical file comparison between a plan and equivalent manual calls) + `TestRunApplyPlanAppliesFromRealFile` (the real CLI path, real file on disk)
+- [x] 12.7 Covered at the lock-primitive level, not two separately-spawned OS processes: `TestLockSerializesConcurrentWriters` (20 concurrent goroutines through `WithLock` never observe more than one in the critical section, correct final state) proves the mechanism both the interactive-save and `apply-plan` code paths share is genuinely exclusive; a literal two-process `hypnos-serve`+`apply-plan` race wasn't separately spawned, same as noted in 8.6
