@@ -12,11 +12,11 @@
 - [ ] 2.1 Extract/adapt `internal/scaffold`'s per-platform formatting functions (used today by `dreamland init`/`hypnos`) to accept a graph node as input instead of only a static embedded template string
 - [ ] 2.2 Implement per-platform sync: given a changed node/edge, determine the minimal set of platform files to regenerate
 - [ ] 2.3 Implement the instruction-body hand-off sentence regeneration from `routes_to` (add/remove sentence on edge add/remove), in the canonical form the importer (1.4) parses back
-- [ ] 2.4 Implement agent creation (new node -> six platform files, tool-tier assignment per existing router-excluded/full-edit/write-only-no-edit matrix)
+- [ ] 2.4 Implement agent creation (new node -> six platform files, tool-tier assignment per existing router-excluded/full-edit/write-only-no-edit matrix, plus the platform's standard telemetry/coauthor/commit hook baseline — Claude Code's 5-command `hooks.Stop` block, GitHub Copilot's `SubagentStart`/4-command `SubagentStop` block, both parameterized by the new agent's name — matching what every existing agent already has; Cursor/Codex/Kiro/Antigravity get standard frontmatter/instruction-body boilerplate only, no hook block, since they have no per-agent hook mechanism)
 - [ ] 2.5 Implement agent deletion/archival (six platform files removed/archived, same process `mengpo` uses; dependent `routes_to` edges cleaned up and their sources regenerated)
 - [ ] 2.6 Implement hook/skill attach/detach with project-vs-agent scope resolution per platform (project-level binding where the platform supports one — e.g. Claude Code's workspace `.claude/settings.json` hooks array; per-agent frontmatter only where required — e.g. GitHub Copilot)
 - [ ] 2.7 Every write handler rebuilds the graph from current on-disk state immediately before applying its mutation (no mutating a stale in-memory snapshot)
-- [ ] 2.8 Tests: edge add/remove syncs all six platforms; agent create/delete syncs all six platforms; hook attach lands project-scoped on Claude Code and agent-scoped on GitHub Copilot; a hand edit made just before a save is preserved, not overwritten
+- [ ] 2.8 Tests: edge add/remove syncs all six platforms; agent create/delete syncs all six platforms; hook attach lands project-scoped on Claude Code and agent-scoped on GitHub Copilot; a hand edit made just before a save is preserved, not overwritten; a newly created agent's Claude Code and GitHub Copilot hook blocks match an existing agent's, modulo agent name
 
 ## 3. Filesystem watcher and live refresh
 

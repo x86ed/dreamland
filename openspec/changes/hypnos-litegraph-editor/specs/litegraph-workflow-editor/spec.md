@@ -65,6 +65,13 @@ Creating a new agent, skill, or hook node, or attaching/detaching one from anoth
 - **THEN** the new agent's tool bindings are assigned per the same router-excluded/full-edit/write-only-no-edit tier matrix `hypnos` applies when authoring an agent by hand
 - **AND** a file is written for the new agent on all six platforms following each platform's existing format conventions
 
+#### Scenario: Creating a new agent includes the platform's standard telemetry/coauthor/commit hook baseline
+
+- **WHEN** a user creates a new agent node in `/hypnos-interactive` and saves, on a repository with Claude Code and GitHub Copilot installed
+- **THEN** the new agent's Claude Code file includes the same 5-command `hooks.Stop` block (coauthor, telemetry write, version-bump patch, version-bump minor if-agent janus, commit) every existing agent has, parameterized with the new agent's name
+- **AND** the new agent's GitHub Copilot file includes the platform's `SubagentStart`/`SubagentStop` hook equivalent, parameterized the same way
+- **AND** the new agent is not missing this baseline the way a hand-authored file might be if someone forgot to copy it
+
 #### Scenario: Deleting an agent node archives it like `mengpo` would
 
 - **WHEN** a user deletes an agent node in `/hypnos-interactive` and confirms
