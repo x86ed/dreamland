@@ -40,13 +40,14 @@
 - [ ] 5.5 Print the local URL and open it in the default browser on start
 - [ ] 5.6 Tests: view-mode server has no mutation route reachable (404, not 403); interactive-mode server accepts a mutation and it lands in the graph cache and platform files
 
-## 6. Plan-driven headless apply (hypnos)
+## 6. Plan-driven headless apply (hypnos) and Janus dispatch
 
 - [ ] 6.1 Define the plan file format: an ordered JSON array reusing the same operation types (`create_node`, `update_node`, `delete_node`, `create_edge`, `delete_edge`) the interactive editor's write routes accept
 - [ ] 6.2 Add `--mode=apply-plan --plan <file>` to `cmd/hypnosserve.go`: acquires the lock, rebuilds the graph from current disk state, validates all referenced node ids resolve (creations earlier in the plan count), applies each operation via the same handlers/sync from §2, releases the lock, reports per-operation success/failure, exits without opening a port
 - [ ] 6.3 Reject the whole plan before any write if an operation references a node id that doesn't exist and isn't created earlier in the same plan
 - [ ] 6.4 Update `hypnos`'s own instructions in `internal/scaffold/templates/agents/*/hypnos.*` (all six platforms) to state the plan-apply responsibility and the Janus in-place-of-`morpheus` dispatch rule for graph-structural OpenSpec changes
-- [ ] 6.5 Tests: applying a plan produces the same end state as the equivalent manual edits; no server starts in apply-plan mode; invalid node reference rejects the whole plan; a plan-apply run and an interactive save overlapping serialize via the lock (§4)
+- [ ] 6.5 Update `janus`'s own instructions in `internal/scaffold/templates/agents/*/janus.*` (all six platforms): widen the existing "dispatches agent-roster tasks to Hypnos or Meng Po via /opsx:apply" rule to also route workflow-graph-structural tasks (routing-edge changes, hook/skill attach/detach) to `hypnos`, per the modified `janus-router-agent` requirement
+- [ ] 6.6 Tests: applying a plan produces the same end state as the equivalent manual edits; no server starts in apply-plan mode; invalid node reference rejects the whole plan; a plan-apply run and an interactive save overlapping serialize via the lock (§4); a scaffold-installer test asserting all six `janus.*` files route workflow-graph-structural tasks to `hypnos`
 
 ## 7. litegraph.js UI
 
@@ -67,7 +68,7 @@
 
 - [ ] 9.1 Run the live-rebuild importer against this repository's actual installed files, confirming it produces a correct graph without needing a committed cache
 - [ ] 9.2 Hand-resolve any routing edges the importer flagged as unresolved by fixing the source platform file's hand-off sentence to the canonical pattern
-- [ ] 9.3 Update this repository's own live `hypnos` agent files to match the template change in 6.4
+- [ ] 9.3 Update this repository's own live `hypnos` and `janus` agent files to match the template changes in 6.4 and 6.5
 
 ## 10. Validation
 

@@ -21,7 +21,7 @@ The agent/skill/hook graph (ten agents, six platform templates, Janus's routing 
 - `litegraph-workflow-editor`: local server + `/hypnos-interactive` that renders the same graph in editable mode; node/edge mutations (create/attach/detach agents, skills, hooks; change routing edges) are written back through the existing per-platform scaffold-sync mechanism so every platform's templates and Janus's routing table stay consistent. Includes a headless `--mode=apply-plan` entrypoint so `hypnos` can drive the same mutations from a plan file instead of browser interaction.
 
 ### Modified Capabilities
-(none — this change adds new entry points and a new UI layer on top of the existing scaffold-sync mechanism; it does not change the requirements of `agent-scaffolding`, `router-slash-commands`, or `janus-router-agent`)
+- `janus-router-agent`: the existing "Janus dispatches agent-roster tasks to Hypnos or Meng Po via /opsx:apply" requirement only covers creating/retiring an agent. It's widened to also cover workflow-graph-structural tasks (routing-edge changes, hook/skill attach/detach) — Janus dispatches those to `hypnos` in place of `morpheus`, the same `/opsx:apply` mechanism, not a new dispatch path.
 
 ## Impact
 
@@ -30,5 +30,6 @@ The agent/skill/hook graph (ten agents, six platform templates, Janus's routing 
 - Modified (write path only, not requirements): editor mutations call into the same writer logic used by `hypnos` (agent authoring), `mengpo` (archival), and the Janus routing-table update path, so those code paths gain a second and third caller (browser UI, and `hypnos`'s headless plan-apply mode).
 - New dependency: litegraph.js, vendored/bundled for the server's static assets (no external CDN at runtime, consistent with the project's offline-friendly CLI).
 - Modified: `internal/scaffold/templates/agents/*/hypnos.*` (all six platforms) and this repo's live `hypnos` agent files, to add the plan-apply responsibility and the Janus in-place-of-`morpheus` dispatch rule to `hypnos`'s own instructions.
+- Modified: `internal/scaffold/templates/agents/*/janus.*` (all six platforms) and this repo's live `janus` agent files, to widen the existing agent-roster `/opsx:apply` dispatch rule to also cover workflow-graph-structural tasks.
 - New: `.dreamland/workflow-graph.json` added to `.gitignore` — a regenerated cache, never committed; a filesystem watcher (project-standardized wherever the platform supports it, e.g. Claude Code's workspace-level hook/file-watch mechanisms) triggers cache rebuild and browser push on change.
 - New: a small advisory-lock helper serializing writes across concurrent `dreamland hypnos-serve` processes touching the same repo.
