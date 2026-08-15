@@ -135,6 +135,30 @@
           withMutation([{ type: "delete_edge", edgeKind: "attachment", from: skill.id, to: nodeId }]);
         });
       });
+    } else if (nodeKind === "project") {
+      // A skill with no attachment edge at all defaults to showing here,
+      // same as hooks default to project scope — no platform file scopes a
+      // skill to one specific agent today (confirmed: nothing represents
+      // "which agent uses which skill" in any real config), so "available
+      // project-wide" is the honest default rather than leaving it invisible
+      // just because nothing has claimed it yet. Rendering-only convention —
+      // no edge is fabricated in the data model. There's deliberately no
+      // "project" attachment target in the Go layer (AttachSkill/DetachSkill
+      // only accept a real agent id) — a skill only ever leaves this default
+      // list by being explicitly attached to a specific agent, at which
+      // point it shows there instead. No click action here: there's nothing
+      // to detach for a skill that was never explicitly attached to
+      // anything.
+      var attachedSkillIds = {};
+      (data.edges || []).forEach(function (e) {
+        if (e.kind === "attachment") attachedSkillIds[e.from] = true;
+      });
+      Object.keys(data.skills || {}).sort().forEach(function (skillId) {
+        if (attachedSkillIds[skillId]) return; // explicitly attached to a specific agent — shown there instead
+        var skill = data.skills[skillId];
+        var label = truncateLabel("🧩 " + skill.id + " (project-wide, " + skill.owner + ")");
+        node.addWidget("button", label, null, function () {}); // no click action — nothing to detach for a never-explicitly-attached skill
+      });
     }
 
     if (!interactive) return;
@@ -170,7 +194,12 @@
     agentIds.forEach(function (id, i) {
       var a = data.agents[id];
       var node = new DreamlandNodes.AgentNode(a);
-      node.pos = [a.posX || 80 + i * 260, a.posY || 260];
+      // Project's default height grows with however many project-scoped
+      // hooks/skills it has (each is a widget row) — this repo alone has 10
+      // (6 hooks + 4 skills), which visually collided with the agent row's
+      // old fixed 260px default. 560 gives headroom for a reasonably busy
+      // Project node before the first-run default layout needs it.
+      node.pos = [a.posX || 80 + i * 260, a.posY || 560];
       attachHookSkillWidgets(node, "agent", id, data);
       graph.add(node);
       nodesById["agent:" + id] = node;
