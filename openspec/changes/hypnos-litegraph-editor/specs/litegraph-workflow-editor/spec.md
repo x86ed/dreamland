@@ -55,9 +55,9 @@ Connecting or removing an edge between two agent nodes SHALL regenerate the sour
 - **THEN** the regenerated instruction body no longer states a hand-off to that target
 - **AND** the change is synced to all six platform files for that agent
 
-### Requirement: Creating, attaching, and detaching agents/skills/hooks goes through existing scaffold writer logic
+### Requirement: Creating and deleting agent nodes goes through existing scaffold writer logic
 
-Creating a new agent, skill, or hook node, or attaching/detaching one from another node, SHALL apply the same tool-tier rules and per-platform file conventions that `hypnos` (agent authoring) and `mengpo` (archival) already enforce, rather than writing ad hoc content.
+Creating a new agent node, or deleting one, SHALL apply the same tool-tier rules and per-platform file conventions that `hypnos` (agent authoring) and `mengpo` (archival) already enforce, rather than writing ad hoc content.
 
 #### Scenario: Creating a new agent from the editor applies tool-tier rules
 
@@ -78,9 +78,9 @@ Creating a new agent, skill, or hook node, or attaching/detaching one from anoth
 - **THEN** the agent's files are archived/removed on all six platforms following the same process `mengpo` uses to retire an agent
 - **AND** any remaining routing edges pointing at the deleted agent are removed and their source agents' instruction bodies regenerated
 
-### Requirement: Hook and skill attachment defaults to project (workspace) scope where the platform supports it
+### Requirement: Hook attachment defaults to project (workspace) scope where the platform supports it
 
-Attaching a hook or skill to the graph SHALL default to a project-level (workspace-wide) binding on any platform whose native format supports one, applying to every agent rather than being duplicated per agent. Per-agent scope SHALL only be used on a platform that has no project-level mechanism for that binding.
+Attaching a hook to the graph SHALL default to a project-level (workspace-wide) binding on any platform whose native format supports one, applying to every agent rather than being duplicated per agent. Per-agent scope SHALL only be used on a platform that has no project-level mechanism for that binding.
 
 #### Scenario: Attaching a hook on Claude Code creates a workspace-level binding
 
@@ -97,6 +97,21 @@ Attaching a hook or skill to the graph SHALL default to a project-level (workspa
 - **WHEN** a user detaches a project-scoped hook node and saves
 - **THEN** the workspace-level binding is removed on platforms where it was project-scoped
 - **AND** any per-agent bindings for that hook are removed on platforms where it was necessarily agent-scoped
+
+### Requirement: Existing skills are attach/detach-only; creating a new skill requires the new skill-authoring writer
+
+Wiring an existing skill node to an agent (recording that the agent may invoke it), or removing that wire, SHALL NOT modify the skill's own file — those files are owned by whatever tool generated them (e.g. the external `openspec` CLI for this repo's current skills), not by `dreamland`. Creating a brand-new skill node SHALL write a `SKILL.md` (or platform equivalent) through a dedicated skill-authoring writer, separate from the agent-authoring writer, since no such writer exists prior to this change.
+
+#### Scenario: Attaching an existing skill to an agent does not touch the skill's own file
+
+- **WHEN** a user wires the `openspec-propose` skill node to an agent's `skills` input in `/hypnos-interactive` and saves
+- **THEN** the agent's file records that it can invoke `openspec-propose`
+- **AND** `.claude/skills/openspec-propose/SKILL.md` is not modified
+
+#### Scenario: Creating a new skill writes a new SKILL.md through the skill-authoring writer
+
+- **WHEN** a user creates a new skill node in `/hypnos-interactive`, sets its description, and saves
+- **THEN** a new `SKILL.md` (or platform equivalent) is written for it via the skill-authoring writer, distinct from the agent-authoring writer's code path
 
 ### Requirement: `hypnos` can implement a workflow-graph plan headlessly
 

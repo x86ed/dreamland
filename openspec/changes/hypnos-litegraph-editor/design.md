@@ -53,6 +53,38 @@ This change is scoped to the current repository's own **installed** platform fil
 
 **litegraph.js vendored as a single embedded static asset, no CDN fetch at runtime.** Matches the project's offline-friendly CLI posture (already true of every other scaffolded artifact, which is embedded at compile time per `agent-scaffolding`).
 
+## Graph Node Taxonomy
+
+This is the concrete abstraction layer: four registered litegraph node classes, typed slots, and a field-by-field mapping from each platform's actual file format — checked against the real files in this repository, not assumed.
+
+**`dreamland/project`** — exactly one instance per graph, non-deletable. No inputs. Represents the repository's workspace scope: the real target for platform-native project-level bindings. Confirmed by reading `.claude/settings.json`: it already carries a `hooks` object with five real event keys (`PostToolUse`, `PreToolUse`, `SessionStart`, `Stop`, `SubagentStop`), each an unscoped (`matcher: ""`) array — this is the actual workspace-level mechanism the Project node represents on Claude Code. On a platform with no workspace-level hook mechanism (confirmed: GitHub Copilot has none; Cursor/Codex/Kiro/Antigravity have no hook mechanism at all), attaching a hook to the Project node falls back to writing the identical binding onto every agent node individually — the closest available equivalent, not a silent no-op.
+
+**`dreamland/agent`** — one per installed agent (ten today). Properties: `id`, `description`, `tier` (`router-excluded`/`full-edit`/`write-only-no-edit`, per `agent-scaffolding`'s matrix), `broadRouting` (bool, the `iktomi`/`zhougong`/`hypnos`/`mengpo` route-to-any-peer capability), `instructionBody` (free text, edited in a side-panel modal, never inline on the node canvas), read-only `platformFiles` map for jump-to-file. Slots:
+- Output `routes_to` (type `routing`) — litegraph's native output fan-out covers one agent handing off to several targets (e.g. Janus to any of nine).
+- Input `routed_from` (type `routing`), dynamic multi-input (below) — more than one source can target the same agent (e.g. both Janus and Iktomi can route to Phantasos).
+- Input `hooks` (type `hookbinding`), dynamic multi-input — agent-scoped hook bindings only; a hook wired to the Project node instead is a separate, project-scoped node, not a second edge on this slot.
+- Input `skills` (type `attachment`), dynamic multi-input.
+
+**`dreamland/hook`** — one node per distinct *binding* (a command + abstracted event, e.g. `turn_end`/`turn_start`/`pre_tool_use`/`session_start`, mapped by the writer to each platform's real event name), not one per raw command string. Output `bound_to` (type `hookbinding`) fans out to the Project node (workspace-scoped) or to one-or-more agent nodes (agent-scoped) — never mixed on one node instance. Concretely: Claude Code's `telemetry write --tool claude-code` command appears **twice** in this repo today — once in `.claude/settings.json`'s workspace `SubagentStop` array (coverage guarantee, matcher `""`) and once, differently parameterized, in every individual agent's frontmatter `Stop` block (needs the statically-known `--agent-name`, per `claude-code-parity`'s own reasoning). These import as **two separate hook nodes** — one Project-scoped, one agent-scoped per agent — because they're genuinely two independent bindings serving different purposes, not the same binding rendered twice.
+
+**`dreamland/skill`** — one per installed skill directory (the four `openspec-*` skills under `.claude/skills/` in this repo today). Properties: `id`, `description`, read-only `owner`. **These import read/attach-only.** Confirmed by reading `.claude/skills/openspec-propose/SKILL.md`: its frontmatter carries `metadata.generatedBy: "1.3.1"`, and a repo-wide grep for the `dreamland-managed` marker (the convention `internal/scaffold/scaffold.go`'s `bareCommandMarker` uses to mark files safe to regenerate) returns zero hits anywhere under skill or agent templates — it exists only for command files. These four skill files are written by the external `openspec` CLI, not `internal/scaffold`. The editor can wire a skill node to an agent (recording that the agent may invoke it) but cannot create, edit, or delete the skill file itself — `internal/scaffold` has no skill-authoring code path today. See the new "Skill-authoring writer" task group below; this is added scope this design didn't originally account for, not something silently covered by "the same writer logic `hypnos`/`mengpo` use" (that logic has only ever targeted agent files).
+
+**Commands are deliberately not a node type.** `router-slash-commands` already guarantees exactly one command per non-router agent, deterministically named (`/drmlnd:<agent>`) — a 1:1, name-derived relationship with no independent state to edit. Modeling it as a node would just clone every agent node with an unwireable duplicate. It's rendered as a read-only badge on the agent node instead.
+
+**Dynamic multi-input slots.** litegraph's built-in input slots accept exactly one incoming link — connecting a second link to an already-connected input replaces the first, which is wrong for "many sources hand off to one target" or "many hooks bind to one agent." The mechanism used (a standard litegraph idiom for variadic inputs, implemented via each node's `onConnectionsChange`): every growable input slot always has one trailing *empty* slot available; connecting a link to it appends a fresh empty slot of the same type immediately after; disconnecting the last link on a non-trailing slot removes it and closes the gap. `routed_from`, `hooks`, and `skills` all use this pattern; `routes_to` doesn't need it since litegraph's native output fan-out already covers one-to-many there.
+
+**Platform file -> node field mapping**, checked against real template files (`internal/scaffold/templates/agents/*/hypnos.*`, `internal/scaffold/templates/agents/*/baku.*`) and this repo's own live files:
+
+| Field | Claude Code | GitHub Copilot | Cursor | Codex | Kiro | Antigravity |
+| --- | --- | --- | --- | --- | --- | --- |
+| `id` | filename stem | frontmatter `name` | filename stem | `name =` | frontmatter `name` | directory name |
+| `description` | frontmatter `description` | frontmatter `description` | frontmatter `description` | `description =` | frontmatter `description` | frontmatter `description` |
+| `tier` | reverse of `tools:` list, per `agent-scaffolding`'s matrix | reverse of `tools:` list | not represented (platform has no tool-restriction frontmatter) | reverse of Codex's own capability-key convention, whatever `internal/scaffold`'s existing Codex writer emits today — checked `hypnos.toml`/`baku.toml`, neither currently shows an explicit capability-restriction key in its `[agent]` table, so the importer defers entirely to the existing writer's convention rather than inventing a new one | not represented | not represented |
+| `instructionBody` | body after frontmatter, hand-off sentence(s) stripped | same | same | `developer_instructions` string, sentence(s) stripped | body after frontmatter | body after frontmatter |
+| `routes_to` edges | regex on the stripped hand-off sentence(s) | same | same | same | same | same |
+
+Cursor/Codex/Kiro/Antigravity having no `tier` representation is a pre-existing platform characteristic (those agents get full tool access implicitly), not something this change introduces.
+
 ## Risks / Trade-offs
 
 [Two processes (browser-driven interactive save, and a `hypnos` `apply-plan` run) write at the same moment] → advisory file lock serializes writes; a losing process blocks briefly rather than corrupting the cache or a platform file.
@@ -65,18 +97,21 @@ This change is scoped to the current repository's own **installed** platform fil
 
 [Filesystem watcher misses or coalesces rapid changes, leaving the browser stale] → rebuild is idempotent and cheap (same importer used at server start); worst case is a slightly delayed refresh, not incorrect data, since the next watch event or manual reload rebuilds from current disk truth regardless.
 
+[Proposal's "create skills" acceptance criterion has no existing writer to reuse — `internal/scaffold` has never authored a `SKILL.md`] → scoped as its own task group (new `SKILL.md`-per-platform writer, modeled on the existing agent writer but new code, not a reuse), rather than silently assumed covered; skill nodes are read/attach-only until that writer exists.
+
 ## Migration Plan
 
 1. Add the live-rebuild importer (scan six live directories + Janus routing prose, best-effort `routes_to` extraction, flag unresolved edges) and the `.dreamland/workflow-graph.json` cache read/write helpers; add the cache path to `.gitignore`.
-2. Add graph-driven writer entrypoints in `internal/scaffold`, delegating to the existing per-platform formatting logic `hypnos`/`mengpo` already call, plus the hook/skill project-vs-agent scope resolution per platform.
-3. Add the advisory-lock helper (`.dreamland/hypnos.lock`) wrapping every write operation.
-4. Add the filesystem watcher (six live directories + active OpenSpec change dir) driving cache rebuild and an SSE push endpoint.
-5. Add `dreamland hypnos-serve` (view and interactive modes), embedded `litegraph.js` UI subscribing to the SSE endpoint, ephemeral localhost port.
-6. Add `dreamland hypnos-serve --mode=apply-plan`, reusing the mutation handlers and lock from steps 2-3.
-7. Add `/hypnos-view` and `/hypnos-interactive` slash-command templates across all six platforms, following `router-slash-commands` conventions.
-8. Update `hypnos`'s own instructions in `internal/scaffold/templates/agents/*/hypnos.*` (all six platforms) to state the plan-apply responsibility and the Janus in-place-of-`morpheus` dispatch rule.
-9. Update `janus`'s own instructions in `internal/scaffold/templates/agents/*/janus.*` (all six platforms) to widen the agent-roster dispatch rule to workflow-graph-structural tasks, per the modified `janus-router-agent` requirement.
-10. Run the importer against this repository (dreamland is self-hosted) as the first real rebuild, hand-resolve any flagged edges by fixing the source platform file's hand-off sentence to the canonical pattern, and update this repo's own live `hypnos` and `janus` files to match steps 8-9.
+2. Add graph-driven writer entrypoints in `internal/scaffold`, delegating to the existing per-platform formatting logic `hypnos`/`mengpo` already call, plus the hook project-vs-agent scope resolution per platform.
+3. Add the new `SKILL.md`-per-platform skill-authoring writer (new code — `internal/scaffold` has none today), used only for skill nodes created through the editor/plan-apply; the four pre-existing `openspec`-CLI-owned skills remain read/attach-only.
+4. Add the advisory-lock helper (`.dreamland/hypnos.lock`) wrapping every write operation.
+5. Add the filesystem watcher (six live directories + active OpenSpec change dir) driving cache rebuild and an SSE push endpoint.
+6. Add `dreamland hypnos-serve` (view and interactive modes), embedded `litegraph.js` UI subscribing to the SSE endpoint, ephemeral localhost port.
+7. Add `dreamland hypnos-serve --mode=apply-plan`, reusing the mutation handlers and lock from steps 2-4.
+8. Add `/hypnos-view` and `/hypnos-interactive` slash-command templates across all six platforms, following `router-slash-commands` conventions.
+9. Update `hypnos`'s own instructions in `internal/scaffold/templates/agents/*/hypnos.*` (all six platforms) to state the plan-apply responsibility and the Janus in-place-of-`morpheus` dispatch rule.
+10. Update `janus`'s own instructions in `internal/scaffold/templates/agents/*/janus.*` (all six platforms) to widen the agent-roster dispatch rule to workflow-graph-structural tasks, per the modified `janus-router-agent` requirement.
+11. Run the importer against this repository (dreamland is self-hosted) as the first real rebuild, hand-resolve any flagged edges by fixing the source platform file's hand-off sentence to the canonical pattern, and update this repo's own live `hypnos` and `janus` files to match steps 9-10.
 
 No rollback concerns beyond deleting `.dreamland/workflow-graph.json` (gitignored, nothing lost) and the two commands — the six platform files remain valid, hand-editable files with or without the graph layer present.
 
