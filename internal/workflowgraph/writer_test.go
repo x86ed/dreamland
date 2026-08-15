@@ -49,6 +49,32 @@ func TestCreateAgentWritesClaudeCodeFileWithHookBaseline(t *testing.T) {
 			t.Errorf("rendered file missing %q\n---\n%s", want, content)
 		}
 	}
+	// Regression: a real bug (fmt.Sprintf on a template with no %s verb
+	// appends "%!(EXTRA string=...)" to the command) corrupted this exact
+	// baseline in this repo's own live hypnos.md during manual testing.
+	// Substring-only checks above wouldn't catch the appended garbage.
+	if strings.Contains(content, "%!(EXTRA") {
+		t.Errorf("rendered file has a malformed fmt.Sprintf command (%%!(EXTRA...)):\n%s", content)
+	}
+	for line := range strings.SplitSeq(content, "\n") {
+		if strings.Contains(line, "command:") {
+			cmd := strings.TrimSpace(strings.SplitN(line, "command:", 2)[1])
+			switch {
+			case strings.HasPrefix(cmd, "dreamland telemetry write"):
+				if cmd != "dreamland telemetry write --tool claude-code" {
+					t.Errorf("telemetry write command has unexpected trailing content: %q", cmd)
+				}
+			case strings.HasPrefix(cmd, "dreamland version-bump --patch"):
+				if cmd != "dreamland version-bump --patch" {
+					t.Errorf("version-bump --patch command has unexpected trailing content: %q", cmd)
+				}
+			case strings.HasPrefix(cmd, "dreamland version-bump --minor"):
+				if cmd != "dreamland version-bump --minor --if-agent janus" {
+					t.Errorf("version-bump --minor command has unexpected trailing content: %q", cmd)
+				}
+			}
+		}
+	}
 
 	// Baseline hook nodes must exist in the graph too, agent-scoped.
 	found := 0

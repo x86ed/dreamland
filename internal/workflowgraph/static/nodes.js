@@ -15,7 +15,28 @@
 (function () {
   "use strict";
 
+  // initBaseNode fills in the instance state litegraph.js's own LGraphNode
+  // constructor (_ctor) normally sets up — flags, mode, id, graph, connections
+  // — which never runs for these classes since they're built via `new
+  // DreamlandNodes.AgentNode(data)` directly rather than through
+  // `LiteGraph.createNode`, the only path that back-fills these
+  // (LiteGraph.createNode's own source patches in exactly these fields
+  // if missing, confirmed by reading it directly). Real bug this call fixes:
+  // without `this.flags` initialized, LGraphNode.prototype.getConnectionPos
+  // throws "Cannot read properties of undefined (reading 'collapsed')" the
+  // first time the canvas tries to draw a link — silently blanking the whole
+  // canvas. Only caught by an actual browser; the headless Node verification
+  // in §2.4 never exercised drawing, only connect/disconnect logic.
+  function initBaseNode(node) {
+    node.flags = {};
+    node.mode = LiteGraph.ALWAYS;
+    node.connections = [];
+    node.graph = null;
+    node.id = -1;
+  }
+
   function ProjectNode() {
+    initBaseNode(this);
     this.title = "Project";
     this.color = "#2b2f3a";
     this.bgcolor = "#1a1d24";
@@ -32,6 +53,7 @@
   LiteGraph.registerNodeType("dreamland/project", ProjectNode);
 
   function AgentNode(data) {
+    initBaseNode(this);
     this.properties = { agentId: data && data.id, tier: data && data.tier, unresolvedRouting: !!(data && data.unresolvedRouting) };
     this.title = (data && data.id) || "agent";
     this.addOutput("routes_to", "routing");
@@ -68,6 +90,7 @@
   LiteGraph.registerNodeType("dreamland/agent", AgentNode);
 
   function HookNode(data) {
+    initBaseNode(this);
     this.properties = { command: data && data.command, event: data && data.event, scope: data && data.scope };
     this.title = (data && data.command) || "hook";
     this.addOutput("bound_to", "hookbinding");
@@ -79,6 +102,7 @@
   LiteGraph.registerNodeType("dreamland/hook", HookNode);
 
   function SkillNode(data) {
+    initBaseNode(this);
     this.properties = { skillId: data && data.id, owner: (data && data.owner) || "external" };
     this.title = (data && data.id) || "skill";
     this.addOutput("available_to", "attachment");

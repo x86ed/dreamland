@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // platformAgentFilename returns the canonical target filename (or, for
@@ -168,7 +169,16 @@ var copilotSubagentStopBaseline = []string{
 
 func addHookBaseline(g *Graph, agentID, platform string) {
 	add := func(event HookEvent, commandTemplate string) {
-		command := fmt.Sprintf(commandTemplate, agentID)
+		// Not every baseline command takes --agent-name (e.g. telemetry write,
+		// version-bump) — fmt.Sprintf on a template with no %s verb still
+		// appends the unused argument as "%!(EXTRA string=...)" to the output,
+		// a real bug this repo's own live .claude/agents/hypnos.md hit during
+		// manual browser testing (real hand-off sentence corrupted). Only
+		// substitute when the template actually has a verb to fill.
+		command := commandTemplate
+		if strings.Contains(commandTemplate, "%s") {
+			command = fmt.Sprintf(commandTemplate, agentID)
+		}
 		id := agentID + ":" + string(event) + ":" + slugCommand(command)
 		g.Hooks[id] = &HookNode{ID: id, Command: command, Event: event, Scope: ScopeAgent}
 		g.Edges = append(g.Edges, Edge{Kind: EdgeHookBinding, From: id, To: agentID})
