@@ -120,6 +120,42 @@ func TestStaticAssetsServedThroughEmbeddedFS(t *testing.T) {
 	}
 }
 
+func TestAPIStatusRoute(t *testing.T) {
+	root := newTestClaudeRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".dreamland-session.json"), []byte(`{"agent":"phobetor"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := workflowgraph.Import(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux, err := newHypnosMux(root, false, &guardedGraph{g: g}, workflowgraph.NewBroadcaster())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/status: got %d, want 200", resp.StatusCode)
+	}
+	var got StatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.CurrentAgent != "phobetor" {
+		t.Errorf("CurrentAgent = %q, want %q", got.CurrentAgent, "phobetor")
+	}
+	if got.Changes == nil {
+		t.Error("Changes should be an empty slice, not null, when marshaled")
+	}
+}
+
 func TestAPIModeReflectsInteractiveFlag(t *testing.T) {
 	root := newTestClaudeRepo(t)
 	g, err := workflowgraph.Import(root)

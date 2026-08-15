@@ -50,7 +50,24 @@ While `/hypnos-view` (or `/hypnos-interactive`) is open, a server-side watcher o
 - **WHEN** an agent's routing edge changes on disk (via the editor, a `hypnos` plan-apply run, or a hand edit) while `/hypnos-view` is open
 - **THEN** the open browser tab reflects the updated edge shortly after the change, without the user reloading the page or the browser polling for it
 
-#### Scenario: In-progress task highlighted on its agent's node
+### Requirement: The view surfaces OpenSpec task/change progress and the currently active agent
 
-- **WHEN** `morpheus` is actively working through `tasks.md` for an open OpenSpec change
-- **THEN** the `morpheus` node in an open `/hypnos-view` session shows an in-progress indicator tied to that change, and the indicator updates as task status changes, pushed to the browser over the same SSE connection rather than the browser re-fetching on a timer
+The graph SHALL include, alongside the node/edge structure, every in-progress OpenSpec change's task-completion progress and the session's currently active agent (the same identity `.dreamland-session.json`'s coauthor/telemetry hooks already maintain every turn). **Scope note, corrected from the original wording**: there is no per-task agent-assignment data anywhere in this system — OpenSpec tracks task completion, not who is doing a given task, and that association only ever exists transiently inside a live agent session. The requirement is therefore scoped to what's genuinely knowable: a change-level progress overlay, plus a highlight on the one agent node matching the session's current agent — not a specific-task-to-specific-agent-node binding, which isn't real data to bind from.
+
+#### Scenario: In-progress change progress is visible
+
+- **WHEN** an OpenSpec change has `tasks.md` items completed but not archived, and `/hypnos-view` is open
+- **THEN** the view shows that change's name and completed/total task count, sourced from `openspec list --json`
+- **AND** the display updates as task status changes, pushed to the browser over the same SSE connection rather than the browser re-fetching on a timer
+
+#### Scenario: The currently active agent's node is highlighted
+
+- **WHEN** `.dreamland-session.json` names an agent as the session's current agent
+- **THEN** that agent's node in an open `/hypnos-view` session is visually highlighted
+- **AND** no other agent's node is highlighted on the basis of task content alone
+
+#### Scenario: Status overlay degrades gracefully without the openspec CLI
+
+- **WHEN** the `openspec` CLI is not installed or `openspec list --json` fails
+- **THEN** the graph itself still renders normally
+- **AND** the change-progress overlay is simply empty, not an error blocking the rest of the view

@@ -151,6 +151,10 @@ func newHypnosMux(repoRoot string, interactive bool, guarded *guardedGraph, broa
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(guarded.Get())
 	})
+	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(currentStatus(repoRoot))
+	})
 	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {

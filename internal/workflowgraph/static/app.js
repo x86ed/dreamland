@@ -157,7 +157,54 @@
   }
 
   function loadGraph() {
-    return apiGet("/api/graph").then(buildGraph);
+    return apiGet("/api/graph").then(buildGraph).then(loadStatus);
+  }
+
+  // --- task/change status overlay -------------------------------------------
+  //
+  // Real-data scope note (see cmd/status.go's StatusResponse doc comment):
+  // there's no per-task agent-assignment data anywhere in this system, only
+  // a session-wide "current agent" (from .dreamland-session.json) and
+  // OpenSpec's own change-level task-completion counts. This highlights the
+  // one current-agent node and shows change progress as a panel — it does
+  // not attempt a specific-task-to-specific-agent mapping, because that data
+  // doesn't exist to map from.
+
+  function applyStatus(status) {
+    var panel = document.getElementById("status-panel");
+    var changes = status.changes || [];
+    if (changes.length === 0) {
+      panel.textContent = "";
+    } else {
+      panel.textContent = changes
+        .map(function (c) {
+          return c.name + " (" + c.completedTasks + "/" + c.totalTasks + ", " + c.status + ")";
+        })
+        .join("  ·  ");
+    }
+
+    Object.keys(nodesById).forEach(function (key) {
+      if (key.indexOf("agent:") !== 0) return;
+      var node = nodesById[key];
+      var agentId = key.slice(6);
+      if (status.currentAgent && agentId === status.currentAgent) {
+        node.color = "#4a3a00";
+        node.boxcolor = "#ffcc00";
+        node.title = agentId + " ● active";
+      } else {
+        node.title = agentId;
+      }
+    });
+    graph.setDirtyCanvas(true, true);
+  }
+
+  function loadStatus() {
+    return apiGet("/api/status")
+      .then(applyStatus)
+      .catch(function () {
+        // Status is best-effort telemetry — a fetch failure shouldn't break
+        // the graph view itself.
+      });
   }
 
   // --- edge changes from user interaction (drag-connect / disconnect) -----
@@ -206,7 +253,9 @@
   function setupToolbar() {
     var toolbar = document.getElementById("toolbar");
     if (!interactive) {
-      toolbar.innerHTML = '<span id="status"></span> <em>(read-only — /hypnos-interactive to edit)</em>';
+      toolbar.innerHTML =
+        '<span id="status"></span> <em>(read-only — /hypnos-interactive to edit)</em>' +
+        ' <span id="status-panel"></span>';
       return;
     }
 
@@ -219,7 +268,7 @@
       '<button id="btn-detach-hook">Detach Hook</button> ' +
       '<button id="btn-delete-agent">Delete Agent</button> ' +
       '<button id="btn-save-positions">Save Positions</button> ' +
-      '<span id="status"></span>';
+      '<span id="status"></span> <span id="status-panel"></span>';
 
     document.getElementById("btn-create-agent").onclick = function () {
       var id = prompt("New agent id (kebab-case):");
