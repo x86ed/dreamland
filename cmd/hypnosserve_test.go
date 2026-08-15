@@ -256,12 +256,19 @@ func TestInteractiveModeMutateRouteAppliesAndPersists(t *testing.T) {
 		t.Error("expected guardedGraph to reflect the new agent after mutate")
 	}
 
-	cacheData, err := os.ReadFile(cachePathFor(root))
+	// The positions file is written after every mutation (SavePositions is
+	// unconditional), but position is the only thing it persists — the real,
+	// meaningful persistence check for a newly created agent is the actual
+	// platform file, already asserted above. Confirm the new agent's key is
+	// present here only to the extent that's true: every agent, including
+	// this one, gets an entry (defaulting to position 0,0 since it was never
+	// moved) — not a stand-in for "the agent's data was cached."
+	positionsData, err := os.ReadFile(positionsPathFor(root))
 	if err != nil {
-		t.Fatalf("expected graph cache written: %v", err)
+		t.Fatalf("expected positions file written: %v", err)
 	}
-	if !strings.Contains(string(cacheData), "webagent") {
-		t.Error("expected the graph cache to include the new agent")
+	if !strings.Contains(string(positionsData), "webagent") {
+		t.Error("expected the positions file to include an entry for the new agent")
 	}
 }
 
@@ -449,12 +456,12 @@ func TestRebuildGraphPreservesPositionAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Simulate a Save Positions call: mutate position, save the cache — the
-	// exact sequence the /api/mutate handler performs.
+	// Simulate a Save Positions call: mutate position, save the positions
+	// file — the exact sequence the /api/mutate handler performs.
 	agent := g.Agents["hypnos"]
 	agent.PosX = 485
 	agent.PosY = 509
-	if err := workflowgraph.Save(cachePathFor(root), g); err != nil {
+	if err := workflowgraph.SavePositions(positionsPathFor(root), g); err != nil {
 		t.Fatal(err)
 	}
 

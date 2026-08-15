@@ -3,102 +3,109 @@ package workflowgraph
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestLoadMissingCacheReturnsNilNotError(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "workflow-graph.json")
+func TestLoadPositionsMissingFileReturnsNilNotError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow-positions.json")
 
-	g, err := Load(path)
+	positions, err := LoadPositions(path)
 	if err != nil {
-		t.Fatalf("Load on missing file: unexpected error %v", err)
+		t.Fatalf("LoadPositions on missing file: unexpected error %v", err)
 	}
-	if g != nil {
-		t.Fatalf("Load on missing file: expected nil graph, got %+v", g)
+	if positions != nil {
+		t.Fatalf("LoadPositions on missing file: expected nil map, got %+v", positions)
 	}
 }
 
-// TestSaveCreatesParentDir is a regression test: Save used to call
-// os.WriteFile directly with no os.MkdirAll first, so it errored on a fresh
-// repo where .dreamland/ doesn't exist yet — caught via a real browser test
-// against a brand-new temp repo (existing repos happened to already have
-// .dreamland/ from other files, masking the gap).
-func TestSaveCreatesParentDir(t *testing.T) {
+// TestSavePositionsCreatesParentDir is a regression test: the original Save
+// (before this file only persisted positions at all) called os.WriteFile
+// directly with no os.MkdirAll first, so it errored on a fresh repo where
+// .dreamland/ doesn't exist yet — caught via a real browser test against a
+// brand-new temp repo (existing repos happened to already have .dreamland/
+// from other files, masking the gap).
+func TestSavePositionsCreatesParentDir(t *testing.T) {
 	root := t.TempDir()
-	path := filepath.Join(root, ".dreamland", "workflow-graph.json")
+	path := filepath.Join(root, ".dreamland", "workflow-positions.json")
 
 	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
 		t.Fatalf("test setup: .dreamland should not exist yet, stat err = %v", err)
 	}
 
-	if err := Save(path, New(root)); err != nil {
-		t.Fatalf("Save: unexpected error %v", err)
+	if err := SavePositions(path, New(root)); err != nil {
+		t.Fatalf("SavePositions: unexpected error %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Errorf("expected the cache file to exist: %v", err)
+		t.Errorf("expected the positions file to exist: %v", err)
 	}
 }
 
-func TestSaveLoadRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "workflow-graph.json")
+func TestSaveLoadPositionsRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow-positions.json")
+
+	g := New("/repo")
+	g.Agents["hypnos"] = &AgentNode{ID: "hypnos", PosX: 120, PosY: 340}
+	g.Agents["mengpo"] = &AgentNode{ID: "mengpo", PosX: -50, PosY: 0}
+
+	if err := SavePositions(path, g); err != nil {
+		t.Fatalf("SavePositions: unexpected error %v", err)
+	}
+
+	loaded, err := LoadPositions(path)
+	if err != nil {
+		t.Fatalf("LoadPositions: unexpected error %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("LoadPositions: expected a non-nil map")
+	}
+
+	hypnos, ok := loaded["hypnos"]
+	if !ok {
+		t.Fatal("expected \"hypnos\" position to round-trip")
+	}
+	if hypnos.PosX != 120 || hypnos.PosY != 340 {
+		t.Errorf("hypnos position = (%v, %v), want (120, 340)", hypnos.PosX, hypnos.PosY)
+	}
+
+	mengpo, ok := loaded["mengpo"]
+	if !ok {
+		t.Fatal("expected \"mengpo\" position to round-trip")
+	}
+	if mengpo.PosX != -50 || mengpo.PosY != 0 {
+		t.Errorf("mengpo position = (%v, %v), want (-50, 0)", mengpo.PosX, mengpo.PosY)
+	}
+}
+
+// TestSavePositionsOnlyPersistsPosition confirms nothing beyond position is
+// written — the whole point of narrowing this from a full-graph cache to a
+// positions file: everything else is always freshly re-derivable from the
+// six live platform directories and shouldn't need local persistence at all.
+func TestSavePositionsOnlyPersistsPosition(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow-positions.json")
 
 	g := New("/repo")
 	g.Agents["hypnos"] = &AgentNode{
 		ID:              "hypnos",
-		Description:     "Authors new agent definitions.",
+		Description:     "Should not be persisted.",
 		Tier:            TierFullEdit,
-		InstructionBody: "You are the Hypnos agent...",
-	}
-	g.Hooks["hypnos-stop-telemetry"] = &HookNode{
-		ID:      "hypnos-stop-telemetry",
-		Command: "dreamland telemetry write --tool claude-code",
-		Event:   EventStop,
-		Scope:   ScopeAgent,
-	}
-	g.Skills["openspec-propose"] = &SkillNode{
-		ID:          "openspec-propose",
-		Description: "Propose a new change.",
-		Owner:       OwnerExternal,
-	}
-	g.Edges = append(g.Edges, Edge{Kind: EdgeHookBinding, From: "hypnos-stop-telemetry", To: "hypnos"})
-
-	if err := Save(path, g); err != nil {
-		t.Fatalf("Save: unexpected error %v", err)
+		InstructionBody: "Should not be persisted either.",
+		PosX:            10,
+		PosY:            20,
 	}
 
-	loaded, err := Load(path)
+	if err := SavePositions(path, g); err != nil {
+		t.Fatalf("SavePositions: unexpected error %v", err)
+	}
+
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("Load: unexpected error %v", err)
+		t.Fatal(err)
 	}
-	if loaded == nil {
-		t.Fatal("Load: expected a graph, got nil")
-	}
-
-	if loaded.Project.RepoRoot != "/repo" {
-		t.Errorf("RepoRoot = %q, want %q", loaded.Project.RepoRoot, "/repo")
-	}
-	agent, ok := loaded.Agents["hypnos"]
-	if !ok {
-		t.Fatal("expected agent \"hypnos\" to round-trip")
-	}
-	if agent.Tier != TierFullEdit {
-		t.Errorf("agent.Tier = %q, want %q", agent.Tier, TierFullEdit)
-	}
-	hook, ok := loaded.Hooks["hypnos-stop-telemetry"]
-	if !ok {
-		t.Fatal("expected hook to round-trip")
-	}
-	if hook.Scope != ScopeAgent {
-		t.Errorf("hook.Scope = %q, want %q", hook.Scope, ScopeAgent)
-	}
-	skill, ok := loaded.Skills["openspec-propose"]
-	if !ok {
-		t.Fatal("expected skill to round-trip")
-	}
-	if skill.Owner != OwnerExternal {
-		t.Errorf("skill.Owner = %q, want %q", skill.Owner, OwnerExternal)
-	}
-	if len(loaded.Edges) != 1 || loaded.Edges[0].Kind != EdgeHookBinding {
-		t.Errorf("edges did not round-trip: %+v", loaded.Edges)
+	content := string(data)
+	for _, unwanted := range []string{"Description", "InstructionBody", "Tier", "Should not be persisted"} {
+		if strings.Contains(content, unwanted) {
+			t.Errorf("positions file unexpectedly contains %q:\n%s", unwanted, content)
+		}
 	}
 }

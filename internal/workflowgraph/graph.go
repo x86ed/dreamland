@@ -132,32 +132,47 @@ func New(repoRoot string) *Graph {
 	}
 }
 
-// Load reads the graph cache at path. Absence is not an error — callers should treat
-// a missing cache as "rebuild from disk," per the live-reload design (the cache is a
-// fast-reload convenience, never a required source of truth).
-func Load(path string) (*Graph, error) {
+// AgentPosition is one agent's saved canvas position — the only per-agent
+// state with no representation in any platform file (nothing in a .md/.toml/
+// SKILL.md carries "where this agent sits on a diagram"), and so the only
+// thing worth persisting locally at all. Everything else the graph renders
+// (agents, hooks, skills, edges) is always freshly re-derivable from the six
+// live platform directories — see Import — so there's nothing else to cache.
+type AgentPosition struct {
+	PosX float64 `json:"posX"`
+	PosY float64 `json:"posY"`
+}
+
+// SavePositions writes every agent's current position to path, creating the
+// parent directory if absent.
+func SavePositions(path string, g *Graph) error {
+	positions := make(map[string]AgentPosition, len(g.Agents))
+	for id, a := range g.Agents {
+		positions[id] = AgentPosition{PosX: a.PosX, PosY: a.PosY}
+	}
+	data, err := json.MarshalIndent(positions, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal positions: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create positions dir: %w", err)
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+// LoadPositions reads a previously-saved position map. Absence is not an
+// error — a missing file just means no agent has been repositioned yet.
+func LoadPositions(path string) (map[string]AgentPosition, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("read graph cache: %w", err)
+		return nil, fmt.Errorf("read positions: %w", err)
 	}
-	var g Graph
-	if err := json.Unmarshal(data, &g); err != nil {
-		return nil, fmt.Errorf("parse graph cache: %w", err)
+	var positions map[string]AgentPosition
+	if err := json.Unmarshal(data, &positions); err != nil {
+		return nil, fmt.Errorf("parse positions: %w", err)
 	}
-	return &g, nil
-}
-
-// Save writes the graph cache to path, creating it if absent.
-func Save(path string, g *Graph) error {
-	data, err := json.MarshalIndent(g, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal graph cache: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create cache dir: %w", err)
-	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return positions, nil
 }

@@ -87,8 +87,8 @@ func (gg *guardedGraph) Set(g *workflowgraph.Graph) {
 	gg.mu.Unlock()
 }
 
-func cachePathFor(repoRoot string) string {
-	return filepath.Join(repoRoot, ".dreamland", "workflow-graph.json")
+func positionsPathFor(repoRoot string) string {
+	return filepath.Join(repoRoot, ".dreamland", "workflow-positions.json")
 }
 
 func lockPathFor(repoRoot string) string {
@@ -96,7 +96,10 @@ func lockPathFor(repoRoot string) string {
 }
 
 // rebuildGraph re-imports the graph from the six live platform directories,
-// then carries forward each agent's node position from the last-saved cache.
+// then carries forward each agent's node position from the last-saved
+// positions file — the only thing actually persisted locally now (see
+// workflowgraph.AgentPosition's doc comment: nothing else needs a cache,
+// since it's all freshly re-derivable from the platform files every time).
 //
 // Real bug this fixes: position is UI-only state with no representation in
 // any platform file — Import() never derives it from anything, so a bare
@@ -108,15 +111,16 @@ func lockPathFor(repoRoot string) string {
 // reload (served from the same process's in-memory graph) but was lost on
 // an actual server restart (a fresh Import() with no prior state to draw
 // from). This is the one appropriate place for that merge: workflowgraph
-// itself has no opinion on "the cache path" convention — cmd owns that.
+// itself has no opinion on "the positions file path" convention — cmd owns
+// that.
 func rebuildGraph(repoRoot string) (*workflowgraph.Graph, error) {
 	g, err := workflowgraph.Import(repoRoot)
 	if err != nil {
 		return nil, err
 	}
-	if cached, _ := workflowgraph.Load(cachePathFor(repoRoot)); cached != nil {
+	if positions, _ := workflowgraph.LoadPositions(positionsPathFor(repoRoot)); positions != nil {
 		for id, agent := range g.Agents {
-			if prev, ok := cached.Agents[id]; ok {
+			if prev, ok := positions[id]; ok {
 				agent.PosX = prev.PosX
 				agent.PosY = prev.PosY
 			}
@@ -132,7 +136,10 @@ func serveGraph(cmd *cobra.Command, repoRoot string, interactive bool) error {
 	if err != nil {
 		return fmt.Errorf("initial graph import: %w", err)
 	}
-	_ = workflowgraph.Save(cachePathFor(repoRoot), initial) // best-effort fast-reload convenience, not required
+	// No save here: rebuildGraph already loaded whatever positions were last
+	// saved and merged them in — nothing new to persist yet. Positions only
+	// need writing when a mutation actually changes one (see /api/mutate and
+	// runApplyPlan below).
 
 	guarded := &guardedGraph{g: initial}
 	broadcaster := workflowgraph.NewBroadcaster()
@@ -142,7 +149,6 @@ func serveGraph(cmd *cobra.Command, repoRoot string, interactive bool) error {
 		if err != nil {
 			return // transient — next poll tries again
 		}
-		_ = workflowgraph.Save(cachePathFor(repoRoot), g)
 		guarded.Set(g)
 		broadcaster.Publish()
 	})
@@ -229,7 +235,7 @@ func newHypnosMux(repoRoot string, interactive bool, guarded *guardedGraph, broa
 				if err != nil {
 					return err
 				}
-				if err := workflowgraph.Save(cachePathFor(repoRoot), g); err != nil {
+				if err := workflowgraph.SavePositions(positionsPathFor(repoRoot), g); err != nil {
 					return err
 				}
 				guarded.Set(g)
@@ -286,7 +292,7 @@ func runApplyPlan(cmd *cobra.Command, repoRoot, planPath string) error {
 			return err
 		}
 		applied, applyErr = workflowgraph.ApplyOperations(repoRoot, g, ops)
-		if saveErr := workflowgraph.Save(cachePathFor(repoRoot), g); saveErr != nil && applyErr == nil {
+		if saveErr := workflowgraph.SavePositions(positionsPathFor(repoRoot), g); saveErr != nil && applyErr == nil {
 			applyErr = saveErr
 		}
 		return nil // report applyErr below, not via the lock's own error path
