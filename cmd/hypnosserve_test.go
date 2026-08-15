@@ -430,6 +430,62 @@ func TestWatcherToSSEIntegration(t *testing.T) {
 	}
 }
 
+// TestRebuildGraphPreservesPositionAcrossRestart reproduces the real bug
+// found via manual browser testing: Save Positions appeared to work (it
+// persisted across a page reload, served from the same running process's
+// in-memory graph) but was silently lost on an actual server restart,
+// because every rebuild path called workflowgraph.Import directly — which
+// never derives position from anything, since no platform file represents
+// it — instead of loading the last-saved cache first. rebuildGraph is the
+// fix; this simulates a restart by calling it fresh in a new "process"
+// (nothing carried over except what's on disk, exactly like a real restart).
+func TestRebuildGraphPreservesPositionAcrossRestart(t *testing.T) {
+	root := newTestClaudeRepo(t)
+	g, err := rebuildGraph(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowgraph.CreateAgent(root, g, "hypnos", "Author.", workflowgraph.TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a Save Positions call: mutate position, save the cache — the
+	// exact sequence the /api/mutate handler performs.
+	agent := g.Agents["hypnos"]
+	agent.PosX = 485
+	agent.PosY = 509
+	if err := workflowgraph.Save(cachePathFor(root), g); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a server restart: a fresh rebuildGraph call with no in-memory
+	// state carried over, only what's on disk (platform files + cache).
+	restarted, err := rebuildGraph(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedAgent := restarted.Agents["hypnos"]
+	if restartedAgent == nil {
+		t.Fatal("expected \"hypnos\" to still exist after rebuild")
+	}
+	if restartedAgent.PosX != 485 || restartedAgent.PosY != 509 {
+		t.Errorf("position lost across simulated restart: got (%v, %v), want (485, 509)", restartedAgent.PosX, restartedAgent.PosY)
+	}
+}
+
+func TestRebuildGraphHandlesNoCacheYet(t *testing.T) {
+	root := newTestClaudeRepo(t)
+	// No cache file exists yet — rebuildGraph must not error, and positions
+	// default to zero (nothing to carry forward).
+	g, err := rebuildGraph(root)
+	if err != nil {
+		t.Fatalf("rebuildGraph with no cache: unexpected error %v", err)
+	}
+	if g == nil {
+		t.Fatal("expected a non-nil graph")
+	}
+}
+
 func TestRunApplyPlanAppliesFromRealFile(t *testing.T) {
 	root := newTestClaudeRepo(t)
 	ops := []workflowgraph.Operation{

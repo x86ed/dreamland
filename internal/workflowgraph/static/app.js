@@ -1,17 +1,23 @@
 // app.js — loads the graph from the server, builds the litegraph.js canvas,
 // and (interactive mode only) turns user edits into POST /api/mutate calls.
 //
-// Design choice, made because this environment has no browser to visually
-// verify drag/drop gestures in: routing/hook/skill EDGES use litegraph's
-// native drag-to-connect (its core, best-tested mechanic — see nodes.js's
-// onConnectionsChange hooks). Node CREATE/DELETE and position save go through
-// explicit toolbar buttons with plain prompt()/confirm() dialogs instead of
-// litegraph's generic canvas search-box/keyboard-delete affordances, which
-// are harder to get exactly right without visual feedback. Every successful
-// mutation triggers a full re-fetch-and-rebuild rather than an incremental
-// client-side patch, consistent with the "server is the source of truth,
-// nothing client-side is trusted between rebuilds" design throughout this
-// change.
+// Design choices, made because this environment has no browser to visually
+// verify drag/drop gestures in: routing EDGES use litegraph's native
+// drag-to-connect (its core, best-tested mechanic — see nodes.js's
+// onConnectionsChange). Hooks and skills are NOT separate connectable nodes
+// — a hook binding is a lifecycle property of the agent/project it's bound
+// to, not a peer relationship the way agent routing is, and modeling it as a
+// wire-and-node pair produced a cluttered graph (every agent's identical
+// baseline hooks fanning out as near-duplicate nodes). They render as
+// litegraph button widgets directly inside the owning node, attached/detached
+// by clicking, driving the same create_edge/delete_edge operations either
+// way. Node CREATE/DELETE and position save go through explicit toolbar
+// buttons with plain prompt()/confirm() dialogs rather than litegraph's
+// generic canvas search-box/keyboard-delete affordances, which are harder to
+// get exactly right without visual feedback. Every successful mutation
+// triggers a full re-fetch-and-rebuild rather than an incremental
+// client-side patch, consistent with "the server is the source of truth,
+// nothing client-side is trusted between rebuilds" throughout this change.
 (function () {
   "use strict";
 
@@ -21,7 +27,7 @@
 
   var interactive = false;
   var loadingFromServer = false;
-  var nodesById = {}; // "project" | "agent:<id>" | "hook:<id>" | "skill:<id>" -> LGraphNode
+  var nodesById = {}; // "project" | "agent:<id>" -> LGraphNode (only connectable node kinds)
 
   function resizeCanvas() {
     canvasEl.width = window.innerWidth;
@@ -74,12 +80,6 @@
 
   // --- graph construction --------------------------------------------------
 
-  function gridPos(index) {
-    var col = index % 6;
-    var row = Math.floor(index / 6);
-    return [80 + col * 220, 400 + row * 140];
-  }
-
   function connectGrowable(sourceNode, outputIndex, targetNode, type) {
     var idxs = Growable.slotsOfType(targetNode, type);
     var emptyIdx = -1;
@@ -97,6 +97,64 @@
     sourceNode.connect(outputIndex, targetNode, emptyIdx);
   }
 
+  // attachHookSkillWidgets adds one button widget per hook (and, for an
+  // agent, per attached skill) bound to nodeId, plus "+ Attach ..." buttons
+  // in interactive mode. This is the whole hooks/skills-as-properties
+  // rendering this file's top comment describes — no separate canvas nodes.
+  // Widget label text is left to litegraph's own layout otherwise, which
+  // doesn't wrap and doesn't respect a wider node.size for text width — long
+  // hook commands broke out of the node's drawn box. Truncating here is
+  // simpler and more reliable than fighting litegraph's internal
+  // computeSize/button-drawing logic to make it wrap or auto-widen instead.
+  var WIDGET_LABEL_MAX = 36;
+  function truncateLabel(text) {
+    if (text.length <= WIDGET_LABEL_MAX) return text;
+    return text.slice(0, WIDGET_LABEL_MAX - 1) + "…";
+  }
+
+  function attachHookSkillWidgets(node, nodeKind, nodeId, data) {
+    (data.edges || []).forEach(function (e) {
+      if (e.kind !== "hookbinding" || e.to !== nodeId) return;
+      var hook = (data.hooks || {})[e.from];
+      if (!hook) return;
+      var label = truncateLabel("🪝 " + hook.event + ": " + hook.command);
+      node.addWidget("button", label, null, function () {
+        if (!interactive) return;
+        withMutation([{ type: "delete_edge", edgeKind: "hookbinding", to: nodeId, event: hook.event, command: hook.command }]);
+      });
+    });
+
+    if (nodeKind === "agent") {
+      (data.edges || []).forEach(function (e) {
+        if (e.kind !== "attachment" || e.to !== nodeId) return;
+        var skill = (data.skills || {})[e.from];
+        if (!skill) return;
+        var label = truncateLabel("🧩 " + skill.id + " (" + skill.owner + ")");
+        node.addWidget("button", label, null, function () {
+          if (!interactive) return;
+          withMutation([{ type: "delete_edge", edgeKind: "attachment", from: skill.id, to: nodeId }]);
+        });
+      });
+    }
+
+    if (!interactive) return;
+
+    node.addWidget("button", "+ Attach Hook", null, function () {
+      var event = prompt("Event (session_start | pre_tool_use | post_tool_use | stop | subagent_start | subagent_stop):", "stop");
+      var command = event && prompt("Command:");
+      if (!event || !command) return;
+      withMutation([{ type: "create_edge", edgeKind: "hookbinding", to: nodeId, event: event, command: command }]);
+    });
+
+    if (nodeKind === "agent") {
+      node.addWidget("button", "+ Attach Skill", null, function () {
+        var skillId = prompt("Skill id to attach:");
+        if (!skillId) return;
+        withMutation([{ type: "create_edge", edgeKind: "attachment", from: skillId, to: nodeId }]);
+      });
+    }
+  }
+
   function buildGraph(data) {
     loadingFromServer = true;
     graph.clear();
@@ -104,6 +162,7 @@
 
     var project = new DreamlandNodes.ProjectNode();
     project.pos = [80, 80];
+    attachHookSkillWidgets(project, "project", "project", data);
     graph.add(project);
     nodesById["project"] = project;
 
@@ -111,49 +170,23 @@
     agentIds.forEach(function (id, i) {
       var a = data.agents[id];
       var node = new DreamlandNodes.AgentNode(a);
-      node.pos = [a.posX || 80 + i * 220, a.posY || 240];
+      node.pos = [a.posX || 80 + i * 260, a.posY || 260];
+      attachHookSkillWidgets(node, "agent", id, data);
       graph.add(node);
       nodesById["agent:" + id] = node;
     });
 
-    var hookIds = Object.keys(data.hooks || {}).sort();
-    hookIds.forEach(function (id, i) {
-      var h = data.hooks[id];
-      var node = new DreamlandNodes.HookNode(h);
-      node.pos = gridPos(i);
-      graph.add(node);
-      nodesById["hook:" + id] = node;
-    });
-
-    var skillIds = Object.keys(data.skills || {}).sort();
-    skillIds.forEach(function (id, i) {
-      var s = data.skills[id];
-      var node = new DreamlandNodes.SkillNode(s);
-      var p = gridPos(i);
-      node.pos = [p[0], p[1] + 700];
-      graph.add(node);
-      nodesById["skill:" + id] = node;
-    });
-
     (data.edges || []).forEach(function (e) {
-      var fromNode, toNode, outputIndex = 0;
-      if (e.kind === "routing") {
-        fromNode = nodesById["agent:" + e.from];
-        toNode = nodesById["agent:" + e.to];
-        if (fromNode && toNode) connectGrowable(fromNode, 0, toNode, "routing");
-      } else if (e.kind === "hookbinding") {
-        fromNode = nodesById["hook:" + e.from];
-        toNode = e.to === "project" ? nodesById["project"] : nodesById["agent:" + e.to];
-        if (fromNode && toNode) connectGrowable(fromNode, 0, toNode, "hookbinding");
-      } else if (e.kind === "attachment") {
-        fromNode = nodesById["skill:" + e.from];
-        toNode = nodesById["agent:" + e.to];
-        if (fromNode && toNode) connectGrowable(fromNode, 0, toNode, "attachment");
-      }
+      if (e.kind !== "routing") return; // hookbinding/attachment render as widgets, not links
+      var fromNode = nodesById["agent:" + e.from];
+      var toNode = nodesById["agent:" + e.to];
+      if (fromNode && toNode) connectGrowable(fromNode, 0, toNode, "routing");
     });
 
     loadingFromServer = false;
-    setStatus(agentIds.length + " agent(s), " + hookIds.length + " hook(s), " + skillIds.length + " skill(s)");
+    var hookCount = Object.keys(data.hooks || {}).length;
+    var skillCount = Object.keys(data.skills || {}).length;
+    setStatus(agentIds.length + " agent(s), " + hookCount + " hook(s), " + skillCount + " skill(s)");
   }
 
   function loadGraph() {
@@ -207,18 +240,19 @@
       });
   }
 
-  // --- edge changes from user interaction (drag-connect / disconnect) -----
+  // --- edge changes from user interaction (drag-connect on routing only) ---
 
   window.DreamlandApp = {
     // Called by nodes.js's onConnectionsChange after Growable bookkeeping.
-    // Only fires a mutation for a *user*-driven connect/disconnect — never
-    // during buildGraph's own programmatic wiring (loadingFromServer), and
-    // never in view mode (whose server has no /api/mutate route anyway).
+    // Only fires a mutation for a *user*-driven connect — never during
+    // buildGraph's own programmatic wiring (loadingFromServer), and never in
+    // view mode (whose server has no /api/mutate route anyway). Routing is
+    // the only edge kind left that's a real litegraph connection; hooks and
+    // skills are widget interactions (attachHookSkillWidgets), not this path.
     onEdgeChanged: function (targetNode, slotType, isConnected, ioSlot, linkInfo) {
       if (loadingFromServer || !interactive) return;
-      if (!isConnected) return; // disconnects are handled via explicit "Detach" controls below, not this hook — see note in index.html
-      var kind = slotType === "routing" ? "routing" : slotType === "hookbinding" ? "hookbinding" : slotType === "attachment" ? "attachment" : null;
-      if (!kind) return;
+      if (!isConnected) return; // disconnects go through "Remove Routing Edge" instead, not this hook
+      if (slotType !== "routing") return;
 
       var sourceNode = linkInfo && graph.getNodeById(linkInfo.origin_id);
       if (!sourceNode) return;
@@ -227,14 +261,7 @@
       var sourceId = idOf(sourceNode);
       if (!targetId || !sourceId) return;
 
-      if (kind === "routing") {
-        withMutation([{ type: "create_edge", edgeKind: "routing", from: sourceId.id, to: targetId.id }]);
-      } else if (kind === "attachment") {
-        withMutation([{ type: "create_edge", edgeKind: "attachment", from: sourceId.id, to: targetId.id }]);
-      } else if (kind === "hookbinding") {
-        var hook = sourceNode.properties;
-        withMutation([{ type: "create_edge", edgeKind: "hookbinding", to: targetId.id, event: hook.event, command: hook.command }]);
-      }
+      withMutation([{ type: "create_edge", edgeKind: "routing", from: sourceId.id, to: targetId.id }]);
     },
   };
 
@@ -264,8 +291,6 @@
       '<button id="btn-create-skill">Create Skill</button> ' +
       '<button id="btn-add-route">Add Routing Edge</button> ' +
       '<button id="btn-remove-route">Remove Routing Edge</button> ' +
-      '<button id="btn-attach-hook">Attach Hook</button> ' +
-      '<button id="btn-detach-hook">Detach Hook</button> ' +
       '<button id="btn-delete-agent">Delete Agent</button> ' +
       '<button id="btn-save-positions">Save Positions</button> ' +
       '<span id="status"></span> <span id="status-panel"></span>';
@@ -297,24 +322,6 @@
       var to = from && prompt("Target agent id:");
       if (!from || !to) return;
       withMutation([{ type: "delete_edge", edgeKind: "routing", from: from, to: to }]);
-    };
-
-    document.getElementById("btn-attach-hook").onclick = function () {
-      var target = prompt('Target ("project" or an agent id):', "project");
-      if (!target) return;
-      var event = prompt('Event (session_start | pre_tool_use | post_tool_use | stop | subagent_start | subagent_stop):', "stop");
-      var command = event && prompt("Command:");
-      if (!event || !command) return;
-      withMutation([{ type: "create_edge", edgeKind: "hookbinding", to: target, event: event, command: command }]);
-    };
-
-    document.getElementById("btn-detach-hook").onclick = function () {
-      var target = prompt('Target ("project" or an agent id):', "project");
-      if (!target) return;
-      var event = prompt("Event:");
-      var command = event && prompt("Command:");
-      if (!event || !command) return;
-      withMutation([{ type: "delete_edge", edgeKind: "hookbinding", to: target, event: event, command: command }]);
     };
 
     document.getElementById("btn-delete-agent").onclick = function () {

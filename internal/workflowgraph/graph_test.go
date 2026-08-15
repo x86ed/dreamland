@@ -1,6 +1,7 @@
 package workflowgraph
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -14,6 +15,27 @@ func TestLoadMissingCacheReturnsNilNotError(t *testing.T) {
 	}
 	if g != nil {
 		t.Fatalf("Load on missing file: expected nil graph, got %+v", g)
+	}
+}
+
+// TestSaveCreatesParentDir is a regression test: Save used to call
+// os.WriteFile directly with no os.MkdirAll first, so it errored on a fresh
+// repo where .dreamland/ doesn't exist yet — caught via a real browser test
+// against a brand-new temp repo (existing repos happened to already have
+// .dreamland/ from other files, masking the gap).
+func TestSaveCreatesParentDir(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".dreamland", "workflow-graph.json")
+
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("test setup: .dreamland should not exist yet, stat err = %v", err)
+	}
+
+	if err := Save(path, New(root)); err != nil {
+		t.Fatalf("Save: unexpected error %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("expected the cache file to exist: %v", err)
 	}
 }
 

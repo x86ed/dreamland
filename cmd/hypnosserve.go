@@ -95,10 +95,40 @@ func lockPathFor(repoRoot string) string {
 	return filepath.Join(repoRoot, ".dreamland", "hypnos.lock")
 }
 
+// rebuildGraph re-imports the graph from the six live platform directories,
+// then carries forward each agent's node position from the last-saved cache.
+//
+// Real bug this fixes: position is UI-only state with no representation in
+// any platform file — Import() never derives it from anything, so a bare
+// Import() call silently resets every agent's position to zero. Every
+// rebuild path (server start, watcher-triggered refresh, every mutation)
+// used to call workflowgraph.Import directly, so a saved position only
+// survived as long as the same server process stayed running — confirmed by
+// reproducing it live: Save Positions persisted correctly across a page
+// reload (served from the same process's in-memory graph) but was lost on
+// an actual server restart (a fresh Import() with no prior state to draw
+// from). This is the one appropriate place for that merge: workflowgraph
+// itself has no opinion on "the cache path" convention — cmd owns that.
+func rebuildGraph(repoRoot string) (*workflowgraph.Graph, error) {
+	g, err := workflowgraph.Import(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	if cached, _ := workflowgraph.Load(cachePathFor(repoRoot)); cached != nil {
+		for id, agent := range g.Agents {
+			if prev, ok := cached.Agents[id]; ok {
+				agent.PosX = prev.PosX
+				agent.PosY = prev.PosY
+			}
+		}
+	}
+	return g, nil
+}
+
 // serveGraph starts the local server: read-only in view mode, with write
 // routes additionally mounted in interactive mode.
 func serveGraph(cmd *cobra.Command, repoRoot string, interactive bool) error {
-	initial, err := workflowgraph.Import(repoRoot)
+	initial, err := rebuildGraph(repoRoot)
 	if err != nil {
 		return fmt.Errorf("initial graph import: %w", err)
 	}
@@ -108,7 +138,7 @@ func serveGraph(cmd *cobra.Command, repoRoot string, interactive bool) error {
 	broadcaster := workflowgraph.NewBroadcaster()
 
 	watcher := workflowgraph.NewWatcher(workflowgraph.WatchPaths(repoRoot, ""), 2*time.Second, func() {
-		g, err := workflowgraph.Import(repoRoot)
+		g, err := rebuildGraph(repoRoot)
 		if err != nil {
 			return // transient — next poll tries again
 		}
@@ -191,7 +221,7 @@ func newHypnosMux(repoRoot string, interactive bool, guarded *guardedGraph, broa
 			}
 			var applied int
 			lockErr := workflowgraph.WithLock(lockPathFor(repoRoot), func() error {
-				g, err := workflowgraph.Import(repoRoot) // always mutate from freshly re-imported disk state
+				g, err := rebuildGraph(repoRoot) // always mutate from freshly re-imported disk state, with cached positions carried forward
 				if err != nil {
 					return err
 				}
@@ -251,7 +281,7 @@ func runApplyPlan(cmd *cobra.Command, repoRoot, planPath string) error {
 	var applied int
 	var applyErr error
 	lockErr := workflowgraph.WithLock(lockPathFor(repoRoot), func() error {
-		g, err := workflowgraph.Import(repoRoot)
+		g, err := rebuildGraph(repoRoot)
 		if err != nil {
 			return err
 		}

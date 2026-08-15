@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // Tier mirrors agent-scaffolding's three tool-binding tiers. Empty on platforms
@@ -154,6 +155,9 @@ func Save(path string, g *Graph) error {
 	data, err := json.MarshalIndent(g, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal graph cache: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create cache dir: %w", err)
 	}
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
