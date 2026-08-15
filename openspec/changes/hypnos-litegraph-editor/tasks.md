@@ -86,7 +86,7 @@
 - [ ] 10.3 Register both commands in the scaffold installer so `dreamland init` writes them alongside the existing per-agent commands
 - [ ] 10.4 Tests: both commands installed on all six platforms per existing scaffold installer test conventions
 
-## 11. Self-hosting bootstrap
+## 11. Self-hosting bootstrap (validation instance, not the feature's primary target)
 
 - [ ] 11.1 Run the live-rebuild importer against this repository's actual installed files, confirming it produces a correct graph without needing a committed cache
 - [ ] 11.2 Hand-resolve any routing edges the importer flagged as unresolved by fixing the source platform file's hand-off sentence to the canonical pattern
