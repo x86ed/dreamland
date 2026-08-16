@@ -530,6 +530,77 @@ func TestWatcherToSSEIntegration(t *testing.T) {
 	}
 }
 
+// TestWatcherPollCarriesSkillAttachmentForward covers
+// persist-skill-attachment-edges' "An attached skill survives the
+// filesystem-watcher's periodic rebuild" scenario, distinctly from the
+// explicit-mutation and restart scenarios covered elsewhere: it wires a real
+// Watcher calling rebuildGraph (exactly as serveGraph does) rather than
+// workflowgraph.Import directly, saves an attachment out-of-band, then makes
+// an unrelated hand-edit to trigger a poll-driven rebuild and asserts the
+// attachment is still present in the graph the watcher publishes.
+func TestWatcherPollCarriesSkillAttachmentForward(t *testing.T) {
+	root := newTestClaudeRepo(t)
+	writeTestSkill(t, root, "openspec-propose")
+	if err := os.WriteFile(filepath.Join(root, ".claude", "agents", "author.md"), []byte("---\nname: author\ndescription: d\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := rebuildGraph(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowgraph.AttachSkill(g, "author", "openspec-propose"); err != nil {
+		t.Fatalf("AttachSkill: unexpected error %v", err)
+	}
+	if err := workflowgraph.SaveSkillAttachments(skillAttachmentsPathFor(root), g); err != nil {
+		t.Fatal(err)
+	}
+
+	guarded := &guardedGraph{}
+	broadcaster := workflowgraph.NewBroadcaster()
+	fired := make(chan struct{}, 4)
+	watcher := workflowgraph.NewWatcher(workflowgraph.WatchPaths(root, ""), 30*time.Millisecond, func() {
+		rg, err := rebuildGraph(root) // the real production rebuild path, not a bare Import
+		if err != nil {
+			return
+		}
+		guarded.Set(rg)
+		broadcaster.Publish()
+		fired <- struct{}{}
+	})
+	watcher.Start()
+	defer watcher.Stop()
+
+	// Make an unrelated hand-edit to advance the watched mtime and trigger a
+	// poll-driven rebuild, with no further mutation of the attachment itself.
+	time.Sleep(60 * time.Millisecond)
+	future := time.Now().Add(time.Second)
+	path := filepath.Join(root, ".claude", "agents", "author.md")
+	newContent := []byte("---\nname: author\ndescription: hand-edited\n---\nbody\n")
+	if err := os.WriteFile(path, newContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watcher never fired after the hand-edit")
+	}
+
+	found := false
+	for _, e := range guarded.Get().Edges {
+		if e.Kind == workflowgraph.EdgeAttachment && e.From == "openspec-propose" && e.To == "author" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected the skill attachment to survive a watcher-poll-triggered rebuild")
+	}
+}
+
 // TestRebuildGraphPreservesPositionAcrossRestart reproduces the real bug
 // found via manual browser testing: Save Positions appeared to work (it
 // persisted across a page reload, served from the same running process's
