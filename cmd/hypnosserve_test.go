@@ -573,6 +573,86 @@ func TestRebuildGraphPreservesPositionAcrossRestart(t *testing.T) {
 	}
 }
 
+// TestRebuildGraphPreservesSkillAttachmentAcrossRestart directly mirrors
+// TestRebuildGraphPreservesPositionAcrossRestart, for
+// persist-skill-attachment-edges' "An attached skill survives a server
+// restart" scenario. Simulates the /api/mutate handler's save sequence
+// (AttachSkill then SaveSkillAttachments), then a fresh rebuildGraph call
+// with no in-memory state carried over — exactly like a real process
+// restart.
+func TestRebuildGraphPreservesSkillAttachmentAcrossRestart(t *testing.T) {
+	root := newTestClaudeRepo(t)
+	writeTestSkill(t, root, "openspec-propose")
+
+	g, err := rebuildGraph(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowgraph.CreateAgent(root, g, "author", "Authors things.", workflowgraph.TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := workflowgraph.AttachSkill(g, "author", "openspec-propose"); err != nil {
+		t.Fatalf("AttachSkill: unexpected error %v", err)
+	}
+	if err := workflowgraph.SaveSkillAttachments(skillAttachmentsPathFor(root), g); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a server restart: a fresh rebuildGraph call.
+	restarted, err := rebuildGraph(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range restarted.Edges {
+		if e.Kind == workflowgraph.EdgeAttachment && e.From == "openspec-propose" && e.To == "author" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected the skill attachment to survive a simulated restart")
+	}
+}
+
+// TestRebuildGraphDropsAttachmentForDeletedSkillOrAgent covers
+// persist-skill-attachment-edges' "Deleting an attached skill or agent does
+// not resurrect a dangling attachment edge on the next rebuild" scenario.
+func TestRebuildGraphDropsAttachmentForDeletedSkillOrAgent(t *testing.T) {
+	root := newTestClaudeRepo(t)
+	writeTestSkill(t, root, "openspec-propose")
+
+	g, err := rebuildGraph(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowgraph.CreateAgent(root, g, "author", "Authors things.", workflowgraph.TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowgraph.AttachSkill(g, "author", "openspec-propose"); err != nil {
+		t.Fatalf("AttachSkill: unexpected error %v", err)
+	}
+	if err := workflowgraph.SaveSkillAttachments(skillAttachmentsPathFor(root), g); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the agent out from under the cache: remove its platform file
+	// directly, so the next Import no longer finds "author" at all.
+	if err := os.Remove(filepath.Join(root, ".claude", "agents", "author.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	rebuilt, err := rebuildGraph(root)
+	if err != nil {
+		t.Fatalf("rebuildGraph after deleting the attached agent: unexpected error %v", err)
+	}
+	for _, e := range rebuilt.Edges {
+		if e.Kind == workflowgraph.EdgeAttachment {
+			t.Errorf("expected no dangling EdgeAttachment edge after the target agent was deleted, found %+v", e)
+		}
+	}
+}
+
 func TestRebuildGraphHandlesNoCacheYet(t *testing.T) {
 	root := newTestClaudeRepo(t)
 	// No cache file exists yet — rebuildGraph must not error, and positions
