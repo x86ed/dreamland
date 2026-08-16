@@ -96,6 +96,37 @@ func TestInitSuccess(t *testing.T) {
 	}
 }
 
+// TestInitGitignoresSkillAttachmentsCache covers
+// persist-skill-attachment-edges tasks.md 4.3: `dreamland init` should
+// gitignore the new `.dreamland/workflow-skill-attachments.json` cache file,
+// mirroring the existing `.dreamland/workflow-positions.json` entry — a
+// regenerated local cache, not committed.
+func TestInitGitignoresSkillAttachmentsCache(t *testing.T) {
+	root := makeGitRepo(t)
+
+	orig := wizardRunner
+	wizardRunner = stubWizard(&wizardResult{
+		tool:           "Claude Code",
+		language:       "Go",
+		testCommand:    "go test ./...",
+		docCommand:     "godoc",
+		versionCommand: "go version",
+	}, nil)
+	t.Cleanup(func() { wizardRunner = orig })
+
+	if _, err := runInitWithBuf(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatalf("expected .gitignore to exist: %v", err)
+	}
+	if !strings.Contains(string(data), ".dreamland/workflow-skill-attachments.json") {
+		t.Errorf("expected .gitignore to contain .dreamland/workflow-skill-attachments.json, got:\n%s", data)
+	}
+}
+
 func TestInitDocCommandSkipped(t *testing.T) {
 	makeGitRepo(t)
 
