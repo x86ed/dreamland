@@ -2,9 +2,10 @@
   "tool": "claude-code",
   "agent": "janus",
   "model": "claude-sonnet-5",
-  "input_tokens": 122309,
-  "output_tokens": 55012769,
-  "cached_tokens": 25708610403,
-  "total_tokens": 55135078,
-  "captured_at": "2026-08-16T08:19:30Z"
+  "thinking_effort": "high",
+  "input_tokens": 122353,
+  "output_tokens": 55027598,
+  "cached_tokens": 25709680137,
+  "total_tokens": 55149951,
+  "captured_at": "2026-08-16T08:19:45Z"
 }
