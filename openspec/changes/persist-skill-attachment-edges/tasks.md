@@ -7,10 +7,10 @@
 
 ## 2. Rebuild merge and save-call-site wiring
 
-- [ ] 2.1 In `cmd/hypnosserve.go`, add `skillAttachmentsPathFor(repoRoot string) string` returning `filepath.Join(repoRoot, ".dreamland", "workflow-skill-attachments.json")`, next to the existing `positionsPathFor`/`lockPathFor`.
-- [ ] 2.2 Extend `rebuildGraph`: after the existing position-merge block, call `workflowgraph.LoadSkillAttachments(skillAttachmentsPathFor(repoRoot))`; for each returned entry, re-add an `EdgeAttachment{Kind: EdgeAttachment, From: SkillID, To: AgentID}` to `g.Edges` only if `g.Skills[SkillID]` and `g.Agents[AgentID]` both exist in the just-imported graph — skip (do not error on) any entry referencing a since-deleted skill or agent. Update `rebuildGraph`'s doc comment to describe both cached fields, not just position.
-- [ ] 2.3 In the `/api/mutate` handler (inside `newHypnosMux`), add a `workflowgraph.SaveSkillAttachments(skillAttachmentsPathFor(repoRoot), g)` call immediately after the existing `workflowgraph.SavePositions(...)` call, inside the same `WithLock` closure, before `guarded.Set(g)`.
-- [ ] 2.4 In `runApplyPlan`, add the equivalent `SaveSkillAttachments` call immediately after the existing `SavePositions` call, inside the same `WithLock` closure, with the same "only overwrite `applyErr` if it was nil" pattern the existing `SavePositions` error handling uses.
+- [x] 2.1 In `cmd/hypnosserve.go`, add `skillAttachmentsPathFor(repoRoot string) string` returning `filepath.Join(repoRoot, ".dreamland", "workflow-skill-attachments.json")`, next to the existing `positionsPathFor`/`lockPathFor`.
+- [x] 2.2 Extend `rebuildGraph`: after the existing position-merge block, call `workflowgraph.LoadSkillAttachments(skillAttachmentsPathFor(repoRoot))`; for each returned entry, re-add an `EdgeAttachment{Kind: EdgeAttachment, From: SkillID, To: AgentID}` to `g.Edges` only if `g.Skills[SkillID]` and `g.Agents[AgentID]` both exist in the just-imported graph — skip (do not error on) any entry referencing a since-deleted skill or agent. Update `rebuildGraph`'s doc comment to describe both cached fields, not just position.
+- [x] 2.3 In the `/api/mutate` handler (inside `newHypnosMux`), add a `workflowgraph.SaveSkillAttachments(skillAttachmentsPathFor(repoRoot), g)` call immediately after the existing `workflowgraph.SavePositions(...)` call, inside the same `WithLock` closure, before `guarded.Set(g)`.
+- [x] 2.4 In `runApplyPlan`, add the equivalent `SaveSkillAttachments` call immediately after the existing `SavePositions` call, inside the same `WithLock` closure, with the same "only overwrite `applyErr` if it was nil" pattern the existing `SavePositions` error handling uses.
 - [x] 2.5 Tests in `cmd/hypnosserve_test.go`:
   - `TestInteractiveModeAttachSkillSurvivesSubsequentMutation`: POST an `OpCreateEdge`/`EdgeAttachment` operation attaching an existing skill to an existing agent via `/api/mutate`, then POST a second, unrelated mutation (e.g. an `OpUpdateNode` position move on a different agent); assert the attachment edge is still present in `guarded.Get()` after the second call, and that `skillAttachmentsPathFor(root)`'s file contains the attached pair.
   - `TestRebuildGraphPreservesSkillAttachmentAcrossRestart`, directly mirroring `TestRebuildGraphPreservesPositionAcrossRestart`: `rebuildGraph`, `AttachSkill`, `SaveSkillAttachments` (simulating the mutate handler's sequence), then a fresh `rebuildGraph` call simulating a restart; assert the attachment edge is present.
@@ -25,13 +25,13 @@
 
 ## 4. Gitignore and scaffold wiring
 
-- [ ] 4.1 Add `.dreamland/workflow-skill-attachments.json` to this repo's own `.gitignore`, directly below the existing `.dreamland/workflow-positions.json` line.
-- [ ] 4.2 In `cmd/init.go`, add a `scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/workflow-skill-attachments.json")` call directly below the existing `.dreamland/workflow-positions.json` call.
+- [x] 4.1 Add `.dreamland/workflow-skill-attachments.json` to this repo's own `.gitignore`, directly below the existing `.dreamland/workflow-positions.json` line.
+- [x] 4.2 In `cmd/init.go`, add a `scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/workflow-skill-attachments.json")` call directly below the existing `.dreamland/workflow-positions.json` call.
 - [x] 4.3 Test in `internal/scaffold` (alongside existing `EnsureGitignoreEntry` coverage, or a `cmd/init_test.go` assertion if that's where the existing `.dreamland/workflow-positions.json`/`.dreamland/hypnos.lock` entries are already asserted post-`dreamland init`): confirm `.dreamland/workflow-skill-attachments.json` is present in `.gitignore` after `dreamland init`.
 
 ## 5. Verify
 
-- [ ] 5.1 Run `go build ./...` and `go vet ./...` — clean.
-- [ ] 5.2 Run `go test ./...` — full suite green, including all new tests from §1-4 and the full existing `internal/workflowgraph` and `cmd` suites with no regressions.
-- [ ] 5.3 Re-read `internal/workflowgraph/writer.go`'s `AttachSkill`/`DetachSkill` functions to confirm they were not modified by this change — persistence is entirely at the `cmd/hypnosserve.go` call-site layer, per design.md's Decisions.
+- [x] 5.1 Run `go build ./...` and `go vet ./...` — clean.
+- [x] 5.2 Run `go test ./...` — full suite green, including all new tests from §1-4 and the full existing `internal/workflowgraph` and `cmd` suites with no regressions.
+- [x] 5.3 Re-read `internal/workflowgraph/writer.go`'s `AttachSkill`/`DetachSkill` functions to confirm they were not modified by this change — persistence is entirely at the `cmd/hypnosserve.go` call-site layer, per design.md's Decisions.
 - [ ] 5.4 Manually exercise the originally reported symptom against a real repo: start `dreamland hypnos-serve --mode=interactive`, attach a skill to an agent node, save, trigger a second mutation (or wait for a watcher poll), and confirm the attachment is still shown on the agent node — not silently dropped.
