@@ -109,3 +109,119 @@ func TestSavePositionsOnlyPersistsPosition(t *testing.T) {
 		}
 	}
 }
+
+// --- SkillAttachment: persist-skill-attachment-edges ------------------------
+//
+// EdgeAttachment (Skill.available_to -> Agent.skills) is the same kind of
+// graph-only state AgentPosition already is: nothing on disk represents it,
+// so Import can never re-derive it, and it needs the identical
+// save/load-as-a-local-cache treatment. See
+// openspec/changes/persist-skill-attachment-edges/design.md.
+
+func TestLoadSkillAttachmentsMissingFileReturnsNilNotError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow-skill-attachments.json")
+
+	attachments, err := LoadSkillAttachments(path)
+	if err != nil {
+		t.Fatalf("LoadSkillAttachments on missing file: unexpected error %v", err)
+	}
+	if attachments != nil {
+		t.Fatalf("LoadSkillAttachments on missing file: expected nil slice, got %+v", attachments)
+	}
+}
+
+func TestSaveSkillAttachmentsCreatesParentDir(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".dreamland", "workflow-skill-attachments.json")
+
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("test setup: .dreamland should not exist yet, stat err = %v", err)
+	}
+
+	if err := SaveSkillAttachments(path, New(root)); err != nil {
+		t.Fatalf("SaveSkillAttachments: unexpected error %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("expected the skill-attachments file to exist: %v", err)
+	}
+}
+
+func TestSaveLoadSkillAttachmentsRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow-skill-attachments.json")
+
+	g := New("/repo")
+	g.Edges = []Edge{
+		{Kind: EdgeAttachment, From: "openspec-propose", To: "hypnos"},
+		{Kind: EdgeAttachment, From: "openspec-apply", To: "morpheus"},
+		{Kind: EdgeRouting, From: "hypnos", To: "morpheus"}, // must not round-trip as an attachment
+	}
+
+	if err := SaveSkillAttachments(path, g); err != nil {
+		t.Fatalf("SaveSkillAttachments: unexpected error %v", err)
+	}
+
+	loaded, err := LoadSkillAttachments(path)
+	if err != nil {
+		t.Fatalf("LoadSkillAttachments: unexpected error %v", err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("expected 2 attachments to round-trip, got %d: %+v", len(loaded), loaded)
+	}
+
+	want := map[string]string{
+		"openspec-propose": "hypnos",
+		"openspec-apply":   "morpheus",
+	}
+	for _, a := range loaded {
+		agentID, ok := want[a.SkillID]
+		if !ok {
+			t.Errorf("unexpected skill id in loaded attachments: %q", a.SkillID)
+			continue
+		}
+		if a.AgentID != agentID {
+			t.Errorf("attachment for skill %q: AgentID = %q, want %q", a.SkillID, a.AgentID, agentID)
+		}
+	}
+}
+
+// TestSaveSkillAttachmentsIsDeterministic asserts two saves of the same edge
+// set, added in different orders, produce byte-identical output — required
+// so repeated saves of an unchanged attachment set don't spuriously dirty the
+// cache file (tasks.md 1.4).
+func TestSaveSkillAttachmentsIsDeterministic(t *testing.T) {
+	pathA := filepath.Join(t.TempDir(), "workflow-skill-attachments.json")
+	pathB := filepath.Join(t.TempDir(), "workflow-skill-attachments.json")
+
+	gA := New("/repo")
+	gA.Edges = []Edge{
+		{Kind: EdgeAttachment, From: "openspec-propose", To: "hypnos"},
+		{Kind: EdgeAttachment, From: "openspec-apply", To: "morpheus"},
+		{Kind: EdgeAttachment, From: "openspec-apply", To: "hypnos"},
+	}
+
+	gB := New("/repo")
+	gB.Edges = []Edge{
+		{Kind: EdgeAttachment, From: "openspec-apply", To: "hypnos"},
+		{Kind: EdgeAttachment, From: "openspec-apply", To: "morpheus"},
+		{Kind: EdgeAttachment, From: "openspec-propose", To: "hypnos"},
+	}
+
+	if err := SaveSkillAttachments(pathA, gA); err != nil {
+		t.Fatalf("SaveSkillAttachments(A): unexpected error %v", err)
+	}
+	if err := SaveSkillAttachments(pathB, gB); err != nil {
+		t.Fatalf("SaveSkillAttachments(B): unexpected error %v", err)
+	}
+
+	dataA, err := os.ReadFile(pathA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataB, err := os.ReadFile(pathB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(dataA) != string(dataB) {
+		t.Errorf("expected identical bytes for the same edge set saved in different orders:\nA:\n%s\nB:\n%s", dataA, dataB)
+	}
+}

@@ -182,6 +182,46 @@ func TestDeleteAgentRemovesFileAndCleansUpEdges(t *testing.T) {
 	}
 }
 
+// TestDeleteAgentDropsDanglingSkillAttachmentEdges is part of
+// persist-skill-attachment-edges (tasks.md 3.2): DeleteAgent already dropped
+// edges sourced from the deleted agent, but an EdgeAttachment edge targeting
+// it (From: skillID, To: agentID) was not covered by that filter. Left
+// unfixed, deleting an agent that has an attached skill would leave a
+// dangling attachment edge in g.Edges, which — once attachment edges are
+// persisted to disk — could be written straight into the new cache file.
+func TestDeleteAgentDropsDanglingSkillAttachmentEdges(t *testing.T) {
+	root := newClaudeRepo(t)
+	skillDir := filepath.Join(root, ".claude", "skills", "openspec-propose")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillContent := "---\nname: openspec-propose\ndescription: Propose a change.\n---\n\nBody.\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g := New(root)
+	if err := CreateAgent(root, g, "author", "Authors things.", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := importSkills(root, g); err != nil {
+		t.Fatal(err)
+	}
+	if err := AttachSkill(g, "author", "openspec-propose"); err != nil {
+		t.Fatalf("AttachSkill: unexpected error %v", err)
+	}
+
+	if err := DeleteAgent(root, g, "author"); err != nil {
+		t.Fatalf("DeleteAgent: unexpected error %v", err)
+	}
+
+	for _, e := range g.Edges {
+		if e.Kind == EdgeAttachment && e.To == "author" {
+			t.Errorf("expected no EdgeAttachment edge referencing deleted agent %q to remain, found %+v", "author", e)
+		}
+	}
+}
+
 func TestAttachDetachHookToProject(t *testing.T) {
 	root := newClaudeRepo(t)
 	g := New(root)
