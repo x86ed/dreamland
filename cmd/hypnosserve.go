@@ -91,6 +91,10 @@ func positionsPathFor(repoRoot string) string {
 	return filepath.Join(repoRoot, ".dreamland", "workflow-positions.json")
 }
 
+func skillAttachmentsPathFor(repoRoot string) string {
+	return filepath.Join(repoRoot, ".dreamland", "workflow-skill-attachments.json")
+}
+
 func lockPathFor(repoRoot string) string {
 	return filepath.Join(repoRoot, ".dreamland", "hypnos.lock")
 }

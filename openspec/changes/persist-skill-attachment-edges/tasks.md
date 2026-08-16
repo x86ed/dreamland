@@ -1,8 +1,8 @@
 ## 1. Cache type and save/load
 
-- [ ] 1.1 In `internal/workflowgraph/graph.go`, add a `SkillAttachment` type (`SkillID`, `AgentID string`, JSON tags `skillId`/`agentId`) directly below `AgentPosition`, with a doc comment cross-referencing `AttachSkill`/`DetachSkill`'s existing doc comment (`writer.go:302-307`) and explaining why this needs the same treatment as position: `Import` has nothing on disk to derive an `EdgeAttachment` from.
-- [ ] 1.2 Add `SaveSkillAttachments(path string, g *Graph) error`: collect every `EdgeAttachment` edge in `g.Edges` into a `[]SkillAttachment` (sorted deterministically — by `SkillID` then `AgentID` — so repeated saves with the same edge set produce byte-identical output), marshal with `json.MarshalIndent`, create the parent dir if absent, write with a trailing newline — same shape as `SavePositions`.
-- [ ] 1.3 Add `LoadSkillAttachments(path string) ([]SkillAttachment, error)`: same shape as `LoadPositions` — missing file returns `nil, nil`, not an error.
+- [x] 1.1 In `internal/workflowgraph/graph.go`, add a `SkillAttachment` type (`SkillID`, `AgentID string`, JSON tags `skillId`/`agentId`) directly below `AgentPosition`, with a doc comment cross-referencing `AttachSkill`/`DetachSkill`'s existing doc comment (`writer.go:302-307`) and explaining why this needs the same treatment as position: `Import` has nothing on disk to derive an `EdgeAttachment` from.
+- [x] 1.2 Add `SaveSkillAttachments(path string, g *Graph) error`: collect every `EdgeAttachment` edge in `g.Edges` into a `[]SkillAttachment` (sorted deterministically — by `SkillID` then `AgentID` — so repeated saves with the same edge set produce byte-identical output), marshal with `json.MarshalIndent`, create the parent dir if absent, write with a trailing newline — same shape as `SavePositions`.
+- [x] 1.3 Add `LoadSkillAttachments(path string) ([]SkillAttachment, error)`: same shape as `LoadPositions` — missing file returns `nil, nil`, not an error.
 - [x] 1.4 Tests in `internal/workflowgraph/graph_test.go`, alongside the existing `TestLoadPositionsMissingFileReturnsNilNotError`/`TestSavePositionsCreatesParentDir`/`TestSaveLoadPositionsRoundTrip` tests: equivalent `TestLoadSkillAttachmentsMissingFileReturnsNilNotError`, `TestSaveSkillAttachmentsCreatesParentDir`, `TestSaveLoadSkillAttachmentsRoundTrip` (attach two skills to two different agents, save, load, assert the pairs round-trip), and a determinism test asserting two saves of the same edge set (added in different orders) produce identical file bytes.
 
 ## 2. Rebuild merge and save-call-site wiring
@@ -19,9 +19,9 @@
 
 ## 3. `DeleteAgent` dangling-attachment-edge fix
 
-- [ ] 3.1 In `internal/workflowgraph/writer.go`'s `DeleteAgent` edge-filtering loop (`writer.go:233-247`), add a branch dropping any edge where `e.Kind == EdgeAttachment && e.To == id` (attachment edges are `From: skillID, To: agentID`), alongside the existing `EdgeHookBinding`/`EdgeRouting`/`e.From == id` branches.
+- [x] 3.1 In `internal/workflowgraph/writer.go`'s `DeleteAgent` edge-filtering loop (`writer.go:233-247`), add a branch dropping any edge where `e.Kind == EdgeAttachment && e.To == id` (attachment edges are `From: skillID, To: agentID`), alongside the existing `EdgeHookBinding`/`EdgeRouting`/`e.From == id` branches.
 - [x] 3.2 Test in `internal/workflowgraph/writer_test.go`: create an agent, attach a skill to it via `AttachSkill`, call `DeleteAgent`, assert no `EdgeAttachment` edge referencing the deleted agent id remains in `g.Edges`.
-- [ ] 3.3 Confirm `TestAttachDetachSkillNeverTouchesSkillFile` (`writer_test.go:322-377`) and every test in `internal/workflowgraph/skillwriter_test.go` still pass unmodified — this task adds a new branch to `DeleteAgent`'s edge filter only; `AttachSkill`/`DetachSkill` themselves are untouched by this whole change.
+- [x] 3.3 Confirm `TestAttachDetachSkillNeverTouchesSkillFile` (`writer_test.go:322-377`) and every test in `internal/workflowgraph/skillwriter_test.go` still pass unmodified — this task adds a new branch to `DeleteAgent`'s edge filter only; `AttachSkill`/`DetachSkill` themselves are untouched by this whole change.
 
 ## 4. Gitignore and scaffold wiring
 

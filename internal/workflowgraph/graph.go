@@ -178,3 +178,60 @@ func LoadPositions(path string) (map[string]AgentPosition, error) {
 	}
 	return positions, nil
 }
+
+// SkillAttachment is one persisted (skill, agent) EdgeAttachment pair — the
+// same treatment as AgentPosition, and for the same reason: AttachSkill/
+// DetachSkill (writer.go) are deliberately edge-only, so an EdgeAttachment
+// lives nowhere but the in-memory Graph. Import has nothing on disk to
+// derive it from (no platform's agent file format has a "skills this agent
+// may invoke" field — see writer.go's AttachSkill doc comment), so without a
+// local cache mirroring this one, every attachment is dropped by the very
+// next rebuild.
+type SkillAttachment struct {
+	SkillID string `json:"skillId"`
+	AgentID string `json:"agentId"`
+}
+
+// SaveSkillAttachments writes every EdgeAttachment edge in g to path as a
+// deterministically sorted JSON array, creating the parent directory if
+// absent — same shape as SavePositions.
+func SaveSkillAttachments(path string, g *Graph) error {
+	var attachments []SkillAttachment
+	for _, e := range g.Edges {
+		if e.Kind == EdgeAttachment {
+			attachments = append(attachments, SkillAttachment{SkillID: e.From, AgentID: e.To})
+		}
+	}
+	sort.Slice(attachments, func(i, j int) bool {
+		if attachments[i].SkillID != attachments[j].SkillID {
+			return attachments[i].SkillID < attachments[j].SkillID
+		}
+		return attachments[i].AgentID < attachments[j].AgentID
+	})
+	data, err := json.MarshalIndent(attachments, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal skill attachments: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create skill attachments dir: %w", err)
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+// LoadSkillAttachments reads a previously-saved skill attachment list.
+// Absence is not an error — a missing file just means no skill has been
+// attached yet.
+func LoadSkillAttachments(path string) ([]SkillAttachment, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read skill attachments: %w", err)
+	}
+	var attachments []SkillAttachment
+	if err := json.Unmarshal(data, &attachments); err != nil {
+		return nil, fmt.Errorf("parse skill attachments: %w", err)
+	}
+	return attachments, nil
+}

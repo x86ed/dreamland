@@ -240,6 +240,9 @@ func DeleteAgent(repoRoot string, g *Graph, id string) error {
 			sourcesToResync[e.From] = true
 			continue
 		}
+		if e.Kind == EdgeAttachment && e.To == id {
+			continue // dangling attachment edge targeting the deleted agent
+		}
 		if e.From == id {
 			continue // any remaining edge sourced from the deleted agent
 		}
