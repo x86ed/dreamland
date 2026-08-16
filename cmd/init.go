@@ -301,6 +301,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if err := scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/workflow-positions.json"); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
 	}
+	if err := scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/workflow-skill-attachments.json"); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
+	}
 	if err := scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/hypnos.lock"); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
 	}

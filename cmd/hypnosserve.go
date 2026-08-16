@@ -100,10 +100,13 @@ func lockPathFor(repoRoot string) string {
 }
 
 // rebuildGraph re-imports the graph from the six live platform directories,
-// then carries forward each agent's node position from the last-saved
-// positions file — the only thing actually persisted locally now (see
-// workflowgraph.AgentPosition's doc comment: nothing else needs a cache,
-// since it's all freshly re-derivable from the platform files every time).
+// then carries forward each cached, non-file-derivable piece of state: each
+// agent's node position from the last-saved positions file, and every still-
+// valid skill-attachment edge from the last-saved skill-attachments file —
+// the only two things actually persisted locally now (see
+// workflowgraph.AgentPosition's and workflowgraph.SkillAttachment's doc
+// comments: nothing else needs a cache, since it's all freshly re-derivable
+// from the platform files every time).
 //
 // Real bug this fixes: position is UI-only state with no representation in
 // any platform file — Import() never derives it from anything, so a bare
@@ -115,8 +118,15 @@ func lockPathFor(repoRoot string) string {
 // reload (served from the same process's in-memory graph) but was lost on
 // an actual server restart (a fresh Import() with no prior state to draw
 // from). This is the one appropriate place for that merge: workflowgraph
-// itself has no opinion on "the positions file path" convention — cmd owns
-// that.
+// itself has no opinion on "the positions/skill-attachments file path"
+// convention — cmd owns that.
+//
+// Skill attachment edges have the identical problem: AttachSkill/DetachSkill
+// (writer.go) are deliberately edge-only, so an EdgeAttachment lives nowhere
+// but the in-memory Graph until this rebuild drops it. An attachment entry
+// whose skill or agent no longer resolves in the freshly-imported graph
+// (deleted elsewhere in the interim) is silently skipped, not resurrected as
+// a dangling edge.
 func rebuildGraph(repoRoot string) (*workflowgraph.Graph, error) {
 	g, err := workflowgraph.Import(repoRoot)
 	if err != nil {
@@ -128,6 +138,17 @@ func rebuildGraph(repoRoot string) (*workflowgraph.Graph, error) {
 				agent.PosX = prev.PosX
 				agent.PosY = prev.PosY
 			}
+		}
+	}
+	if attachments, _ := workflowgraph.LoadSkillAttachments(skillAttachmentsPathFor(repoRoot)); attachments != nil {
+		for _, a := range attachments {
+			if _, ok := g.Skills[a.SkillID]; !ok {
+				continue
+			}
+			if _, ok := g.Agents[a.AgentID]; !ok {
+				continue
+			}
+			g.Edges = append(g.Edges, workflowgraph.Edge{Kind: workflowgraph.EdgeAttachment, From: a.SkillID, To: a.AgentID})
 		}
 	}
 	return g, nil
@@ -242,6 +263,9 @@ func newHypnosMux(repoRoot string, interactive bool, guarded *guardedGraph, broa
 				if err := workflowgraph.SavePositions(positionsPathFor(repoRoot), g); err != nil {
 					return err
 				}
+				if err := workflowgraph.SaveSkillAttachments(skillAttachmentsPathFor(repoRoot), g); err != nil {
+					return err
+				}
 				guarded.Set(g)
 				return nil
 			})
@@ -297,6 +321,9 @@ func runApplyPlan(cmd *cobra.Command, repoRoot, planPath string) error {
 		}
 		applied, applyErr = workflowgraph.ApplyOperations(repoRoot, g, ops)
 		if saveErr := workflowgraph.SavePositions(positionsPathFor(repoRoot), g); saveErr != nil && applyErr == nil {
+			applyErr = saveErr
+		}
+		if saveErr := workflowgraph.SaveSkillAttachments(skillAttachmentsPathFor(repoRoot), g); saveErr != nil && applyErr == nil {
 			applyErr = saveErr
 		}
 		return nil // report applyErr below, not via the lock's own error path
