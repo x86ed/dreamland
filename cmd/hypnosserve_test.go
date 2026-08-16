@@ -51,6 +51,20 @@ func newTestClaudeRepo(t *testing.T) string {
 	return root
 }
 
+// writeTestSkill installs a minimal skill directory at root, so importSkills
+// (called by workflowgraph.Import/rebuildGraph) picks it up as a SkillNode.
+func writeTestSkill(t *testing.T, root, skillID string) {
+	t.Helper()
+	skillDir := filepath.Join(root, ".claude", "skills", skillID)
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: " + skillID + "\ndescription: A test skill.\n---\n\nBody.\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestViewModeHasNoMutateRoute(t *testing.T) {
 	root := newTestClaudeRepo(t)
 	g, err := workflowgraph.Import(root)
@@ -269,6 +283,85 @@ func TestInteractiveModeMutateRouteAppliesAndPersists(t *testing.T) {
 	}
 	if !strings.Contains(string(positionsData), "webagent") {
 		t.Error("expected the positions file to include an entry for the new agent")
+	}
+}
+
+// TestInteractiveModeAttachSkillSurvivesSubsequentMutation covers
+// persist-skill-attachment-edges' "An attached skill survives a subsequent
+// unrelated mutation" scenario (specs/litegraph-workflow-editor/spec.md):
+// rebuildGraph runs on every /api/mutate call, and before this change had no
+// way to carry an EdgeAttachment forward, so a second, unrelated save would
+// silently drop a skill attached by the first.
+func TestInteractiveModeAttachSkillSurvivesSubsequentMutation(t *testing.T) {
+	root := newTestClaudeRepo(t)
+	writeTestSkill(t, root, "openspec-propose")
+
+	g, err := workflowgraph.Import(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowgraph.CreateAgent(root, g, "author", "Authors things.", workflowgraph.TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowgraph.CreateAgent(root, g, "other", "Another agent.", workflowgraph.TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+
+	guarded := &guardedGraph{g: g}
+	broadcaster := workflowgraph.NewBroadcaster()
+
+	mux, err := newHypnosMux(root, true, guarded, broadcaster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// First save: attach the skill to "author".
+	attachOps := []workflowgraph.Operation{
+		{Type: workflowgraph.OpCreateEdge, EdgeKind: workflowgraph.EdgeAttachment, From: "openspec-propose", To: "author"},
+	}
+	body, _ := json.Marshal(attachOps)
+	resp, err := http.Post(srv.URL+"/api/mutate", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("first POST /api/mutate (attach): got %d, want 200", resp.StatusCode)
+	}
+
+	// Second, unrelated save: move a different node.
+	posX, posY := 100.0, 200.0
+	moveOps := []workflowgraph.Operation{
+		{Type: workflowgraph.OpUpdateNode, Kind: workflowgraph.NodeKindAgent, ID: "other", PosX: &posX, PosY: &posY},
+	}
+	body, _ = json.Marshal(moveOps)
+	resp, err = http.Post(srv.URL+"/api/mutate", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("second POST /api/mutate (move): got %d, want 200", resp.StatusCode)
+	}
+
+	found := false
+	for _, e := range guarded.Get().Edges {
+		if e.Kind == workflowgraph.EdgeAttachment && e.From == "openspec-propose" && e.To == "author" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected the skill attachment to survive the second, unrelated mutation")
+	}
+
+	data, err := os.ReadFile(skillAttachmentsPathFor(root))
+	if err != nil {
+		t.Fatalf("expected skill-attachments file written: %v", err)
+	}
+	if !strings.Contains(string(data), "openspec-propose") || !strings.Contains(string(data), "author") {
+		t.Errorf("expected the skill-attachments file to contain the attached pair, got:\n%s", data)
 	}
 }
 
