@@ -179,6 +179,88 @@
     }
   }
 
+  // computeAgentLayout arranges agents by real routing topology instead of a
+  // flat alphabetical row, so distinct flows (e.g. nyx->morpheus->phobetor
+  // vs. hypnos->phobetor->phantasos) visually branch instead of collapsing
+  // into one line. Agents are layered by longest routing-path distance from
+  // an entry point (columns), stacked within a layer (rows). A genuine
+  // cycle in the real data (phobetor <-> morpheus, the validate/fix-bug
+  // loop) is handled by only counting the first-seen direction of any
+  // mutual pair toward layering, so it can't oscillate layers upward.
+  // Agents with zero routing edges at all (broad-routing agents with no
+  // fixed position in the pipeline) get their own row below the layered
+  // flows rather than being layered in at column 0 alongside real entry
+  // points.
+  function computeAgentLayout(agentIds, edges) {
+    var routingEdges = (edges || []).filter(function (e) { return e.kind === "routing"; });
+    var degree = {};
+    agentIds.forEach(function (id) { degree[id] = 0; });
+    routingEdges.forEach(function (e) {
+      if (degree[e.from] !== undefined) degree[e.from]++;
+      if (degree[e.to] !== undefined) degree[e.to]++;
+    });
+
+    var connected = agentIds.filter(function (id) { return degree[id] > 0; });
+    var disconnected = agentIds.filter(function (id) { return degree[id] === 0; });
+
+    // Mutual pairs (A->B and B->A both exist, e.g. phobetor <-> morpheus for
+    // the validate/fix-bug loop) would otherwise oscillate each other's
+    // layer upward every pass. Only the first-seen direction of a mutual
+    // pair counts for layering; the reverse edge still renders as a link
+    // (buildGraph draws straight from data.edges, not from this list) but
+    // doesn't push columns outward.
+    var layoutEdges = [];
+    var seenPair = {};
+    routingEdges.forEach(function (e) {
+      if (seenPair[e.to + ">" + e.from]) return;
+      seenPair[e.from + ">" + e.to] = true;
+      layoutEdges.push(e);
+    });
+
+    var layer = {};
+    connected.forEach(function (id) { layer[id] = 0; });
+    for (var iter = 0; iter < connected.length; iter++) {
+      var changed = false;
+      layoutEdges.forEach(function (e) {
+        if (layer[e.from] === undefined || layer[e.to] === undefined) return;
+        var want = layer[e.from] + 1;
+        if (want > layer[e.to] && want <= connected.length) {
+          layer[e.to] = want;
+          changed = true;
+        }
+      });
+      if (!changed) break;
+    }
+
+    var byLayer = {};
+    connected.forEach(function (id) {
+      var l = layer[id];
+      (byLayer[l] = byLayer[l] || []).push(id);
+    });
+    Object.keys(byLayer).forEach(function (l) { byLayer[l].sort(); });
+
+    // baseY=560: Project node (fixed at x=80,y=80) can grow tall with many
+    // project-scoped hooks/skills widgets (10 in this repo alone); layer-0
+    // agents share Project's x=80 column, so they need headroom below it
+    // rather than colliding at a shallower y.
+    var colSpacing = 280, rowSpacing = 140, baseX = 80, baseY = 560;
+    var positions = {};
+    var layerKeys = Object.keys(byLayer).sort(function (a, b) { return a - b; });
+    layerKeys.forEach(function (l) {
+      byLayer[l].forEach(function (id, row) {
+        positions[id] = [baseX + Number(l) * colSpacing, baseY + row * rowSpacing];
+      });
+    });
+
+    var maxRows = layerKeys.reduce(function (m, l) { return Math.max(m, byLayer[l].length); }, 1);
+    var disconnectedY = baseY + maxRows * rowSpacing + 120;
+    disconnected.sort().forEach(function (id, i) {
+      positions[id] = [baseX + i * colSpacing, disconnectedY];
+    });
+
+    return positions;
+  }
+
   function buildGraph(data) {
     loadingFromServer = true;
     graph.clear();
@@ -191,15 +273,12 @@
     nodesById["project"] = project;
 
     var agentIds = Object.keys(data.agents || {}).sort();
-    agentIds.forEach(function (id, i) {
+    var layoutPositions = computeAgentLayout(agentIds, data.edges);
+    agentIds.forEach(function (id) {
       var a = data.agents[id];
       var node = new DreamlandNodes.AgentNode(a);
-      // Project's default height grows with however many project-scoped
-      // hooks/skills it has (each is a widget row) — this repo alone has 10
-      // (6 hooks + 4 skills), which visually collided with the agent row's
-      // old fixed 260px default. 560 gives headroom for a reasonably busy
-      // Project node before the first-run default layout needs it.
-      node.pos = [a.posX || 80 + i * 260, a.posY || 560];
+      var defaultPos = layoutPositions[id] || [80, 560];
+      node.pos = [a.posX || defaultPos[0], a.posY || defaultPos[1]];
       attachHookSkillWidgets(node, "agent", id, data);
       graph.add(node);
       nodesById["agent:" + id] = node;
