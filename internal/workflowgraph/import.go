@@ -115,6 +115,20 @@ func parseAgentFile(platform, content string) (description, body, toolsRaw strin
 	return description, strings.TrimSpace(b), toolsRaw
 }
 
+// parseAgentRole extracts the frontmatter `role:` field (e.g. "router"),
+// empty string on platforms/files with no frontmatter (Codex's .toml format,
+// or any file with no `role:` line — the common case).
+func parseAgentRole(platform, content string) string {
+	if platform == "codex" {
+		return ""
+	}
+	fm, _, ok := splitFrontmatter(content)
+	if !ok {
+		return ""
+	}
+	return frontmatterField(fm, "role")
+}
+
 // deriveTier reverse-maps a raw tools field (comma list, optionally bracketed)
 // into agent-scaffolding's three tiers. Returns "" for an empty/unparseable
 // value — the caller leaves AgentNode.Tier unset on platforms with no tools
@@ -187,6 +201,7 @@ func importAgents(repoRoot string, g *Graph) error {
 			}
 
 			description, body, toolsRaw := parseAgentFile(platform, string(content))
+			role := parseAgentRole(platform, string(content))
 
 			node, exists := g.Agents[id]
 			if !exists {
@@ -204,6 +219,9 @@ func importAgents(repoRoot string, g *Graph) error {
 				if tier := deriveTier(toolsRaw); tier != "" {
 					node.Tier = tier
 				}
+			}
+			if node.Role == "" {
+				node.Role = role
 			}
 		}
 	}
@@ -225,11 +243,70 @@ var handOffPattern = regexp.MustCompile("hand(?:s)? off directly to `([a-z0-9-]+
 // "flagged, not guessed" design decision: no edge is fabricated from it.
 var nearMissHandOffPattern = regexp.MustCompile(`(?i)\b(hand off|hands off|delegate|delegates|report to|reports to)\b`)
 
+// routingTableHeadingPattern finds a "Routing table:" heading line — the
+// structural entry-point pattern (currently only janus, marked `role:
+// router`) where dispatch targets are a lookup table, not sequential
+// hand-off prose, so handOffPattern never matches them.
+var routingTableHeadingPattern = regexp.MustCompile(`(?im)^routing table:\s*$`)
+
+// routingTableBulletPattern matches one routing-table bullet line, capturing
+// the backtick-quoted agent id(s) before the em/en-dash description (e.g.
+// "- `nyx`/`morpheus` — work a code task...").
+var routingTableBulletPattern = regexp.MustCompile("^-\\s+((?:`[a-z0-9-]+`\\s*/?\\s*)+)\\s*[—–-]\\s")
+
+var routingTableTargetPattern = regexp.MustCompile("`([a-z0-9-]+)`")
+
+// broadRoutingPattern flags an agent that dispatches dynamically to any other
+// agent rather than a fixed hand-off target — real prose already used by
+// iktomi ("You have the same broad routing capability as Janus itself:
+// dispatch directly to any other agent..."), not a fabricated signal.
+var broadRoutingPattern = regexp.MustCompile(`(?i)broad routing capability`)
+
+// extractRoutingTableTargets reads the contiguous bullet block immediately
+// following a "Routing table:" heading and returns every distinct agent id
+// named in it, in first-seen order. Read-only: unlike extractRoutesTo, the
+// table is authored structural content (janus's actual dispatch logic), not
+// writer-regenerated boilerplate, so nothing is stripped from body.
+func extractRoutingTableTargets(body string) []string {
+	loc := routingTableHeadingPattern.FindStringIndex(body)
+	if loc == nil {
+		return nil
+	}
+	var targets []string
+	seen := map[string]bool{}
+	started := false
+	for line := range strings.SplitSeq(body[loc[1]:], "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if started {
+				break
+			}
+			continue
+		}
+		m := routingTableBulletPattern.FindStringSubmatch(line)
+		if m == nil {
+			break
+		}
+		started = true
+		for _, t := range routingTableTargetPattern.FindAllStringSubmatch(m[1], -1) {
+			if id := t[1]; !seen[id] {
+				seen[id] = true
+				targets = append(targets, id)
+			}
+		}
+	}
+	return targets
+}
+
 // importRoutesTo extracts routes_to edges from each agent's instruction body,
 // strips the matched sentence(s) from what's stored (they're regenerated from
 // the edge on every sync — see the "structured routes_to" decision), and flags
 // UnresolvedRouting when the body mentions handing off in some other phrasing
-// the canonical pattern doesn't match.
+// the canonical pattern doesn't match. Entry-point agents (role: router, e.g.
+// janus) additionally get routing edges read straight from their routing
+// table, and any agent whose body claims broad/dynamic routing capability
+// (e.g. iktomi) is flagged via BroadRouting rather than given a fixed edge
+// set it doesn't actually have.
 func importRoutesTo(g *Graph) {
 	ids := make([]string, 0, len(g.Agents))
 	for id := range g.Agents {
@@ -244,6 +321,20 @@ func importRoutesTo(g *Graph) {
 		agent.UnresolvedRouting = unresolved
 		for _, target := range targets {
 			g.Edges = append(g.Edges, Edge{Kind: EdgeRouting, From: id, To: target})
+		}
+
+		if agent.Role == "router" {
+			for _, target := range extractRoutingTableTargets(agent.InstructionBody) {
+				if _, ok := g.Agents[target]; !ok {
+					continue // quoted name isn't a known agent id
+				}
+				g.Edges = append(g.Edges, Edge{Kind: EdgeRouting, From: id, To: target})
+				agent.UnresolvedRouting = false // resolved via the table, not actually unresolved
+			}
+		}
+
+		if broadRoutingPattern.MatchString(agent.InstructionBody) {
+			agent.BroadRouting = true
 		}
 	}
 }

@@ -40,9 +40,16 @@ func handOffSentences(targets []string) string {
 
 // bodyWithHandOffs appends the rendered hand-off sentences to an agent's
 // stored instruction body (which never itself contains them — see the
-// "structured routes_to" design decision).
+// "structured routes_to" design decision). Skipped for role: router agents
+// (currently only janus): their routing targets come from a routing table,
+// not sequential hand-off prose, and appending "hand off directly to X"
+// sentences for every table entry would contradict the agent's own
+// documented dispatch mechanism and duplicate the table itself.
 func bodyWithHandOffs(in renderInputs) string {
 	body := strings.TrimSpace(in.Agent.InstructionBody)
+	if in.Agent.Role == "router" {
+		return body
+	}
 	sentences := handOffSentences(in.RoutesTo)
 	if sentences == "" {
 		return body

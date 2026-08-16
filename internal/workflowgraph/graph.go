@@ -81,7 +81,8 @@ type AgentNode struct {
 	ID                string            `json:"id"`
 	Description       string            `json:"description"`
 	Tier              Tier              `json:"tier,omitempty"`
-	BroadRouting      bool              `json:"broadRouting"`
+	Role              string            `json:"role,omitempty"`         // frontmatter `role:` field, e.g. "router" (currently only janus)
+	BroadRouting      bool              `json:"broadRouting"`           // dispatches dynamically to any agent rather than a fixed set (currently only iktomi)
 	InstructionBody   string            `json:"instructionBody"`
 	PlatformFiles     map[string]string `json:"platformFiles,omitempty"` // platform -> file path
 	PosX              float64           `json:"posX"`
