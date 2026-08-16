@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // Tier mirrors agent-scaffolding's three tool-binding tiers. Empty on platforms
