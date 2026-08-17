@@ -225,3 +225,70 @@ func TestSaveSkillAttachmentsIsDeterministic(t *testing.T) {
 		t.Errorf("expected identical bytes for the same edge set saved in different orders:\nA:\n%s\nB:\n%s", dataA, dataB)
 	}
 }
+
+func TestSaveSkillAttachmentsMkdirAllError(t *testing.T) {
+	root := t.TempDir()
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g := New("/repo")
+	err := SaveSkillAttachments(filepath.Join(blocker, "attachments.json"), g)
+	if err == nil {
+		t.Error("expected an error when the parent path is blocked by a file")
+	}
+}
+
+func TestLoadSkillAttachmentsParseError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "attachments.json")
+	if err := os.WriteFile(path, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSkillAttachments(path); err == nil {
+		t.Error("expected an error parsing malformed skill attachments JSON")
+	}
+}
+
+func TestLoadSkillAttachmentsReadError(t *testing.T) {
+	// Path is a directory, not a file — ReadFile fails with a non-NotExist error.
+	path := filepath.Join(t.TempDir(), "attachments-dir")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSkillAttachments(path); err == nil {
+		t.Error("expected an error reading a path that is a directory")
+	}
+}
+
+func TestSavePositionsMkdirAllError(t *testing.T) {
+	root := t.TempDir()
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g := New("/repo")
+	err := SavePositions(filepath.Join(blocker, "positions.json"), g)
+	if err == nil {
+		t.Error("expected an error when the parent path is blocked by a file")
+	}
+}
+
+func TestLoadPositionsParseError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "positions.json")
+	if err := os.WriteFile(path, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPositions(path); err == nil {
+		t.Error("expected an error parsing malformed positions JSON")
+	}
+}
+
+func TestLoadPositionsReadError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "positions-dir")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPositions(path); err == nil {
+		t.Error("expected an error reading a path that is a directory")
+	}
+}
