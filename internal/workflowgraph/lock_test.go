@@ -1,11 +1,40 @@
 package workflowgraph
 
 import (
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 )
+
+// TestLockAcquireMkdirAllError covers Acquire's create-lock-dir error path:
+// a path component that already exists as a regular file makes MkdirAll fail.
+func TestLockAcquireMkdirAllError(t *testing.T) {
+	root := t.TempDir()
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l := NewLock(filepath.Join(blocker, "hypnos.lock"))
+	if err := l.Acquire(); err == nil {
+		t.Error("expected an error when the lock's parent path is blocked by a file")
+	}
+}
+
+// TestLockAcquireOpenFileError covers Acquire's open-lock-file error path:
+// the lock path itself already exists as a directory, so OpenFile fails.
+func TestLockAcquireOpenFileError(t *testing.T) {
+	root := t.TempDir()
+	lockPath := filepath.Join(root, "hypnos.lock")
+	if err := os.Mkdir(lockPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	l := NewLock(lockPath)
+	if err := l.Acquire(); err == nil {
+		t.Error("expected an error opening a lock file path that is actually a directory")
+	}
+}
 
 func TestLockAcquireRelease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hypnos.lock")

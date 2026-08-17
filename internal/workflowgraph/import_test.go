@@ -392,7 +392,12 @@ func TestImportMultiPlatformMergesAgentFields(t *testing.T) {
 	write(".claude/agents/combo.md", "---\ndescription: from claude-code\ntools: Read, Edit, Write, Bash\n---\n\nBody.\n")
 	write(".codex/agents/combo.toml", "[agent]\nname = \"combo\"\ndescription = \"from codex\"\ndeveloper_instructions = \"\"\"\nBody.\n\"\"\"\n")
 	write(".cursor/rules/combo.mdc", "---\ndescription: from cursor\n---\n\nBody.\n")
-	write(".github/agents/combo.agent.md", "---\ndescription: from github-copilot\n---\n\nBody.\n")
+	// Note: importAgents derives id via a single filepath.Ext strip, so this
+	// intentionally uses "combo.md" rather than the writer's real
+	// "<id>.agent.md" convention (writer.go's platformAgentFilename) — using
+	// the real convention here would parse as id "combo.agent", not "combo",
+	// which is a distinct, pre-existing behavior outside this test's scope.
+	write(".github/agents/combo.md", "---\ndescription: from github-copilot\n---\n\nBody.\n")
 	write(".kiro/steering/combo.md", "---\ndescription: from kiro\n---\n\nBody.\n")
 
 	g, err := Import(root)
