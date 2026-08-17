@@ -301,6 +301,45 @@
     return apiGet("/api/graph").then(buildGraph).then(loadStatus);
   }
 
+  // fitView scales/pans the canvas so every node built by buildGraph (project
+  // + every agent, including the far right/bottom of computeAgentLayout's
+  // layered columns) is on screen at once. Real bug this fixes: litegraph
+  // never auto-fits on load, and computeAgentLayout deliberately starts
+  // agents at baseY=560 with up to 5 layered columns 280px apart — on a
+  // repo with a router agent that fans routing edges out to nearly every
+  // other agent (e.g. this repo's own janus), that's easily 1200+ px wide
+  // and 1100+ px tall of graph, well past a typical window's default
+  // top-left-anchored view (offset [0,0], scale 1). Without this, the
+  // downstream routing "flow" edges (the whole point of this view) sit
+  // below/right of the fold and are never seen unless the user already
+  // knows to manually pan/zoom litegraph's canvas. Only called once, right
+  // after the initial boot load — not after every SSE-triggered reload,
+  // which would fight a user's own manual pan/zoom on every live edit.
+  function fitView() {
+    var keys = Object.keys(nodesById);
+    if (keys.length === 0) return;
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    keys.forEach(function (key) {
+      var b = nodesById[key].getBounding();
+      minX = Math.min(minX, b[0]);
+      minY = Math.min(minY, b[1]);
+      maxX = Math.max(maxX, b[0] + b[2]);
+      maxY = Math.max(maxY, b[1] + b[3]);
+    });
+    var margin = 60;
+    var boxW = Math.max(maxX - minX, 1);
+    var boxH = Math.max(maxY - minY, 1);
+    var scale = Math.min(
+      (canvasEl.width - margin * 2) / boxW,
+      (canvasEl.height - margin * 2) / boxH,
+      1 // never zoom in past 1:1 for a small graph — only zoom out to fit
+    );
+    if (!isFinite(scale) || scale <= 0) return;
+    graphcanvas.ds.scale = scale;
+    graphcanvas.ds.offset = [margin / scale - minX, margin / scale - minY];
+    graph.setDirtyCanvas(true, true);
+  }
+
   // --- task/change status overlay -------------------------------------------
   //
   // Real-data scope note (see cmd/status.go's StatusResponse doc comment):
@@ -479,6 +518,7 @@
       setupToolbar();
       return loadGraph();
     })
+    .then(fitView)
     .then(subscribeEvents)
     .catch(function (err) {
       setStatus("failed to load: " + err.message);
