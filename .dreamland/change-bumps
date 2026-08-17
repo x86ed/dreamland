@@ -6,5 +6,9 @@
   "iktomi-always-handoff-phobetor": {
     "version": "v0.18.0",
     "initialized_at": "2026-08-16T07:51:46Z"
+  },
+  "persist-skill-attachment-edges": {
+    "version": "v0.21.0",
+    "initialized_at": "2026-08-17T17:39:36Z"
   }
 }
