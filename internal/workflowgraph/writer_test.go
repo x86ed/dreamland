@@ -415,3 +415,155 @@ func TestAttachDetachSkillNeverTouchesSkillFile(t *testing.T) {
 		t.Error("DetachSkill modified the skill's own file — it must not")
 	}
 }
+
+func TestPlatformAgentFilename(t *testing.T) {
+	cases := []struct {
+		platform string
+		want     string
+	}{
+		{"claude-code", "myagent.md"},
+		{"kiro", "myagent.md"},
+		{"cursor", "myagent.mdc"},
+		{"codex", "myagent.toml"},
+		{"antigravity", filepath.Join("myagent", "SKILL.md")},
+		{"github-copilot", "myagent.agent.md"},
+	}
+	for _, tt := range cases {
+		got, err := platformAgentFilename(tt.platform, "myagent")
+		if err != nil {
+			t.Errorf("%s: unexpected error %v", tt.platform, err)
+		}
+		if got != tt.want {
+			t.Errorf("%s: got %q, want %q", tt.platform, got, tt.want)
+		}
+	}
+}
+
+func TestPlatformAgentFilenameUnknownPlatform(t *testing.T) {
+	if _, err := platformAgentFilename("bogus", "myagent"); err == nil {
+		t.Error("expected an error for an unknown platform")
+	}
+}
+
+func TestAttachSkillUnknownAgentOrSkill(t *testing.T) {
+	root := newClaudeRepo(t)
+	g := New(root)
+	if err := CreateAgent(root, g, "author", "desc", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateSkill(root, g, "real-skill", "desc"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AttachSkill(g, "ghost-agent", "real-skill"); err == nil {
+		t.Error("expected an error attaching to an unknown agent")
+	}
+	if err := AttachSkill(g, "author", "ghost-skill"); err == nil {
+		t.Error("expected an error attaching an unknown skill")
+	}
+}
+
+func TestAttachSkillIdempotent(t *testing.T) {
+	root := newClaudeRepo(t)
+	g := New(root)
+	if err := CreateAgent(root, g, "author", "desc", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateSkill(root, g, "real-skill", "desc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := AttachSkill(g, "author", "real-skill"); err != nil {
+		t.Fatal(err)
+	}
+	if err := AttachSkill(g, "author", "real-skill"); err != nil {
+		t.Fatalf("second AttachSkill: unexpected error %v", err)
+	}
+	count := 0
+	for _, e := range g.Edges {
+		if e.Kind == EdgeAttachment && e.From == "real-skill" && e.To == "author" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly one attachment edge after attaching twice, got %d", count)
+	}
+}
+
+func TestAddRoutingEdgeUnknownAgents(t *testing.T) {
+	root := newClaudeRepo(t)
+	g := New(root)
+	if err := CreateAgent(root, g, "real", "desc", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddRoutingEdge(root, g, "ghost", "real"); err == nil {
+		t.Error("expected an error for an unknown source agent")
+	}
+	if err := AddRoutingEdge(root, g, "real", "ghost"); err == nil {
+		t.Error("expected an error for an unknown target agent")
+	}
+}
+
+func TestAddRoutingEdgeIdempotent(t *testing.T) {
+	root := newClaudeRepo(t)
+	g := New(root)
+	if err := CreateAgent(root, g, "src", "desc", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateAgent(root, g, "dst", "desc", TierFullEdit); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddRoutingEdge(root, g, "src", "dst"); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddRoutingEdge(root, g, "src", "dst"); err != nil {
+		t.Fatalf("second AddRoutingEdge: unexpected error %v", err)
+	}
+	count := 0
+	for _, e := range g.Edges {
+		if e.Kind == EdgeRouting && e.From == "src" && e.To == "dst" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly one routing edge after adding twice, got %d", count)
+	}
+}
+
+func TestRemoveUnscopedCommand(t *testing.T) {
+	arr := []any{
+		"not-a-map", // non-map entry passed through unchanged
+		map[string]any{
+			"matcher": "SomeTool", // scoped binding, left untouched
+			"hooks":   []any{map[string]any{"type": "command", "command": "keep-me"}},
+		},
+		map[string]any{
+			"matcher": "",
+			"hooks": []any{
+				map[string]any{"type": "command", "command": "remove-me"},
+				map[string]any{"type": "command", "command": "keep-unscoped"},
+			},
+		},
+		map[string]any{
+			"matcher": "",
+			"hooks":   []any{map[string]any{"type": "command", "command": "remove-me"}}, // becomes empty, dropped entirely
+		},
+	}
+
+	out := removeUnscopedCommand(arr, "remove-me")
+
+	if len(out) != 3 {
+		t.Fatalf("expected the fully-emptied unscoped binding dropped, got %d entries: %+v", len(out), out)
+	}
+	if out[0] != "not-a-map" {
+		t.Errorf("expected the non-map entry preserved as-is, got %+v", out[0])
+	}
+	scoped := out[1].(map[string]any)
+	if scoped["matcher"] != "SomeTool" {
+		t.Errorf("expected the scoped binding untouched, got %+v", scoped)
+	}
+	remaining := out[2].(map[string]any)
+	hooks := remaining["hooks"].([]any)
+	if len(hooks) != 1 {
+		t.Errorf("expected exactly one remaining hook after removal, got %+v", hooks)
+	}
+}
