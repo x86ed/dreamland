@@ -1141,8 +1141,8 @@ func TestPerformBump_GoPath_SkipsCollidingLocalTags(t *testing.T) {
 	var tagged string
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
 		switch {
-		case len(args) >= 3 && args[0] == "rev-parse" && args[1] == "-q":
-			name := strings.TrimPrefix(args[2], "refs/tags/")
+		case len(args) >= 4 && args[0] == "rev-parse" && args[1] == "-q":
+			name := strings.TrimPrefix(args[3], "refs/tags/")
 			if existing[name] {
 				return "deadbeef\n", nil
 			}
