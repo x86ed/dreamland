@@ -309,6 +309,152 @@ Body text.
 	}
 }
 
+func TestParseAgentFileCodex(t *testing.T) {
+	content := "[agent]\nname = \"foo\"\ndescription = \"A codex agent.\"\ndeveloper_instructions = \"\"\"\nDo the thing.\n\"\"\"\n"
+	desc, body, tools := parseAgentFile("codex", content)
+	if desc != "A codex agent." {
+		t.Errorf("description = %q, want %q", desc, "A codex agent.")
+	}
+	if body != "Do the thing." {
+		t.Errorf("body = %q, want %q", body, "Do the thing.")
+	}
+	if tools != "" {
+		t.Errorf("toolsRaw = %q, want empty (Codex has no tools field)", tools)
+	}
+}
+
+func TestParseAgentFileCodexMissingFields(t *testing.T) {
+	desc, body, tools := parseAgentFile("codex", "[agent]\nname = \"foo\"\n")
+	if desc != "" || body != "" || tools != "" {
+		t.Errorf("got (%q, %q, %q), want all empty for a codex file missing description/instructions", desc, body, tools)
+	}
+}
+
+func TestParseAgentFileNoFrontmatter(t *testing.T) {
+	desc, body, tools := parseAgentFile("cursor", "Just plain body text.\n")
+	if desc != "" || tools != "" {
+		t.Errorf("got description=%q toolsRaw=%q, want both empty for content with no frontmatter", desc, tools)
+	}
+	if body != "Just plain body text." {
+		t.Errorf("body = %q, want the trimmed raw content", body)
+	}
+}
+
+func TestParseAgentFileWithFrontmatter(t *testing.T) {
+	content := "---\ndescription: A cursor agent.\ntools: Read, Bash\n---\n\nDo the work.\n"
+	desc, body, tools := parseAgentFile("cursor", content)
+	if desc != "A cursor agent." {
+		t.Errorf("description = %q, want %q", desc, "A cursor agent.")
+	}
+	if body != "Do the work." {
+		t.Errorf("body = %q, want %q", body, "Do the work.")
+	}
+	if tools != "Read, Bash" {
+		t.Errorf("toolsRaw = %q, want %q", tools, "Read, Bash")
+	}
+}
+
+func TestParseAgentRole(t *testing.T) {
+	if got := parseAgentRole("codex", "[agent]\nname = \"foo\"\n"); got != "" {
+		t.Errorf("codex: parseAgentRole = %q, want empty (Codex has no frontmatter)", got)
+	}
+	if got := parseAgentRole("claude-code", "---\nrole: router\n---\n\nBody.\n"); got != "router" {
+		t.Errorf("with role: got %q, want %q", got, "router")
+	}
+	if got := parseAgentRole("claude-code", "---\ndescription: no role here\n---\n\nBody.\n"); got != "" {
+		t.Errorf("no role field: got %q, want empty", got)
+	}
+	if got := parseAgentRole("claude-code", "No frontmatter at all.\n"); got != "" {
+		t.Errorf("no frontmatter: got %q, want empty", got)
+	}
+}
+
+// TestImportMultiPlatformMergesAgentFields exercises Import's iteration over
+// every platform directory (this repo's own fixtures only cover claude-code —
+// see TestImportAgainstThisRepo), confirming PlatformFiles is populated per
+// platform and the first platform (alphabetically) to set a field wins.
+func TestImportMultiPlatformMergesAgentFields(t *testing.T) {
+	root := t.TempDir()
+
+	write := func(rel, content string) {
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// antigravity sorts first among the six platform keys, so its description
+	// should win the merge.
+	write(".agents/skills/combo/SKILL.md", "---\ndescription: from antigravity\n---\n\nBody.\n")
+	write(".claude/agents/combo.md", "---\ndescription: from claude-code\ntools: Read, Edit, Write, Bash\n---\n\nBody.\n")
+	write(".codex/agents/combo.toml", "[agent]\nname = \"combo\"\ndescription = \"from codex\"\ndeveloper_instructions = \"\"\"\nBody.\n\"\"\"\n")
+	write(".cursor/rules/combo.mdc", "---\ndescription: from cursor\n---\n\nBody.\n")
+	write(".github/agents/combo.agent.md", "---\ndescription: from github-copilot\n---\n\nBody.\n")
+	write(".kiro/steering/combo.md", "---\ndescription: from kiro\n---\n\nBody.\n")
+
+	g, err := Import(root)
+	if err != nil {
+		t.Fatalf("Import: unexpected error %v", err)
+	}
+
+	agent, ok := g.Agents["combo"]
+	if !ok {
+		t.Fatal("expected agent \"combo\" to be imported")
+	}
+	if agent.Description != "from antigravity" {
+		t.Errorf("Description = %q, want %q (first platform alphabetically wins)", agent.Description, "from antigravity")
+	}
+	for _, platform := range []string{"antigravity", "claude-code", "codex", "cursor", "github-copilot", "kiro"} {
+		if agent.PlatformFiles[platform] == "" {
+			t.Errorf("expected a %s platform file recorded for combo", platform)
+		}
+	}
+}
+
+// TestImportHooksReturnsErrorOnMalformedSettings covers importHooks' error
+// path: importWorkspaceHooks failing to unmarshal .claude/settings.json
+// propagates straight back out.
+func TestImportHooksReturnsErrorOnMalformedSettings(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g := New(root)
+	if err := importHooks(root, g); err == nil {
+		t.Error("expected an error importing hooks from malformed settings.json")
+	}
+}
+
+// TestImportHooksSkipsUnrecognizedEventKey covers importWorkspaceHooks'
+// unrecognized-event-key skip branch.
+func TestImportHooksSkipsUnrecognizedEventKey(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settings := `{"hooks":{"NotARealEvent":[{"hooks":[{"type":"command","command":"echo hi"}]}]}}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(settings), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g := New(root)
+	if err := importHooks(root, g); err != nil {
+		t.Fatalf("importHooks: unexpected error %v", err)
+	}
+	if len(g.Hooks) != 0 {
+		t.Errorf("expected no hooks imported for an unrecognized event key, got %+v", g.Hooks)
+	}
+}
+
 func TestImportSkillsOwner(t *testing.T) {
 	root := t.TempDir()
 	writeSkill := func(id, extra string) {
