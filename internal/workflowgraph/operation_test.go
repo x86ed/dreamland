@@ -287,11 +287,13 @@ func TestApplyOneDeleteEdgeVariants(t *testing.T) {
 		if e.Kind == EdgeRouting && e.From == "src" && e.To == "dst" {
 			t.Error("expected the routing edge to be removed")
 		}
-		if e.Kind == EdgeAttachment {
+		if e.Kind == EdgeAttachment && e.From == "a-skill" && e.To == "dst" {
 			t.Error("expected the attachment edge to be removed")
 		}
-		if e.Kind == EdgeHookBinding {
-			t.Error("expected both hookbinding edges to be removed")
+	}
+	for _, h := range g.Hooks {
+		if h.Command == "dreamland custom-check" || h.Command == "dreamland agent-check" {
+			t.Errorf("expected the deleted hook %q to no longer exist", h.Command)
 		}
 	}
 
