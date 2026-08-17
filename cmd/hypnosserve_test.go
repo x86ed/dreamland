@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -868,5 +869,157 @@ func TestRunApplyPlanStopsAtFirstRuntimeErrorAndReportsPartialCount(t *testing.T
 	}
 	if _, statErr := os.Stat(filepath.Join(root, ".claude", "agents", "first.md")); statErr != nil {
 		t.Errorf("expected the first (successful) operation's file to exist: %v", statErr)
+	}
+}
+
+func TestModeLabel(t *testing.T) {
+	if got := modeLabel(true); got != "interactive" {
+		t.Errorf("modeLabel(true) = %q, want %q", got, "interactive")
+	}
+	if got := modeLabel(false); got != "view" {
+		t.Errorf("modeLabel(false) = %q, want %q", got, "view")
+	}
+}
+
+func TestOpenBrowserUsesPlatformCommand(t *testing.T) {
+	gotName, gotArgs := withStubbedBrowser(t)
+
+	openBrowser("http://example.com/")
+
+	var wantName string
+	switch runtime.GOOS {
+	case "darwin":
+		wantName = "open"
+	case "windows":
+		wantName = "rundll32"
+	default:
+		wantName = "xdg-open"
+	}
+	if *gotName != wantName {
+		t.Errorf("execCommand called with %q, want %q", *gotName, wantName)
+	}
+	if len(*gotArgs) == 0 || (*gotArgs)[len(*gotArgs)-1] != "http://example.com/" {
+		t.Errorf("expected the URL as the last arg, got %v", *gotArgs)
+	}
+}
+
+func TestRunHypnosServeRequiresMode(t *testing.T) {
+	resetHypnosServeFlags(t)
+	root := newTestClaudeRepo(t)
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdirTemp(t, root)
+	hypnosServeMode = ""
+
+	c := newTestCommand()
+	err := runHypnosServe(c, nil)
+	if err == nil || !strings.Contains(err.Error(), "--mode is required") {
+		t.Errorf("expected a --mode-is-required error, got %v", err)
+	}
+}
+
+func TestRunHypnosServeRejectsUnknownMode(t *testing.T) {
+	resetHypnosServeFlags(t)
+	root := newTestClaudeRepo(t)
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdirTemp(t, root)
+	hypnosServeMode = "bogus"
+
+	c := newTestCommand()
+	err := runHypnosServe(c, nil)
+	if err == nil || !strings.Contains(err.Error(), "unknown --mode") {
+		t.Errorf("expected an unknown-mode error, got %v", err)
+	}
+}
+
+func TestRunHypnosServeOutsideRepoReturnsError(t *testing.T) {
+	resetHypnosServeFlags(t)
+	dir := t.TempDir()
+	chdirTemp(t, dir)
+	hypnosServeMode = "view"
+
+	c := newTestCommand()
+	if err := runHypnosServe(c, nil); err == nil {
+		t.Error("expected an error running hypnos-serve outside a repo")
+	}
+}
+
+func TestRunHypnosServeApplyPlanMode(t *testing.T) {
+	resetHypnosServeFlags(t)
+	root := newTestClaudeRepo(t)
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdirTemp(t, root)
+	ops := []workflowgraph.Operation{
+		{Type: workflowgraph.OpCreateNode, Kind: workflowgraph.NodeKindAgent, ID: "viaentry", Description: "d", Tier: workflowgraph.TierFullEdit},
+	}
+	planPath := writePlanFile(t, t.TempDir(), ops)
+	hypnosServeMode = "apply-plan"
+	hypnosServePlan = planPath
+
+	c := newTestCommand()
+	if err := runHypnosServe(c, nil); err != nil {
+		t.Fatalf("runHypnosServe apply-plan mode: unexpected error %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claude", "agents", "viaentry.md")); err != nil {
+		t.Errorf("expected viaentry.md written: %v", err)
+	}
+}
+
+// TestServeGraphListensAndServes exercises serveGraph end to end: it starts
+// the real listener, watcher, and mux, hits a route over real HTTP, and
+// confirms the printed listening line and mode label — all with the browser
+// launch stubbed out (see withStubbedBrowser) so no real browser opens.
+func TestServeGraphListensAndServes(t *testing.T) {
+	withStubbedBrowser(t)
+	root := newTestClaudeRepo(t)
+
+	buf := &syncBuffer{}
+	c := newTestCommand()
+	c.SetOut(buf)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serveGraph(c, root, false)
+	}()
+
+	var url string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-errCh:
+			t.Fatalf("serveGraph returned early: %v", err)
+		default:
+		}
+		if s := buf.String(); strings.Contains(s, "listening on ") {
+			idx := strings.Index(s, "http://")
+			url = strings.TrimSpace(s[idx:])
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if url == "" {
+		t.Fatal("serveGraph never printed a listening URL")
+	}
+	if !strings.Contains(buf.String(), "(view mode)") {
+		t.Errorf("expected the view-mode label in output, got %q", buf.String())
+	}
+
+	resp, err := http.Get(url + "api/mode")
+	if err != nil {
+		t.Fatalf("GET api/mode: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET api/mode: got %d, want 200", resp.StatusCode)
+	}
+	var got map[string]bool
+	json.NewDecoder(resp.Body).Decode(&got)
+	if got["interactive"] {
+		t.Errorf("expected interactive=false in view mode, got %v", got)
 	}
 }
