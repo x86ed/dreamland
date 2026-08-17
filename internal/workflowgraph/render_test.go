@@ -1,8 +1,9 @@
 package workflowgraph
 
-import "strings"
-
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRenderCursor(t *testing.T) {
 	in := renderInputs{
@@ -96,10 +97,10 @@ func TestRenderAntigravity(t *testing.T) {
 
 func TestTitleCase(t *testing.T) {
 	cases := map[string]string{
-		"hypnos":            "Hypnos",
-		"hypnos-serve":      "Hypnos Serve",
-		"multi-word-agent":  "Multi Word Agent",
-		"":                  "",
+		"hypnos":              "Hypnos",
+		"hypnos-serve":        "Hypnos Serve",
+		"multi-word-agent":    "Multi Word Agent",
+		"":                    "",
 		"leading--doubledash": "Leading  Doubledash",
 	}
 	for in, want := range cases {
