@@ -339,15 +339,19 @@ func runApplyPlan(cmd *cobra.Command, repoRoot, planPath string) error {
 	return nil
 }
 
+// execCommand is exec.Command by default, overridden in tests so opening a
+// browser never actually shells out to a real "open"/"xdg-open"/"rundll32".
+var execCommand = exec.Command
+
 func openBrowser(url string) {
 	var c *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		c = exec.Command("open", url)
+		c = execCommand("open", url)
 	case "windows":
-		c = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		c = execCommand("rundll32", "url.dll,FileProtocolHandler", url)
 	default:
-		c = exec.Command("xdg-open", url)
+		c = execCommand("xdg-open", url)
 	}
 	_ = c.Start() // best-effort — printing the URL above is the fallback
 }

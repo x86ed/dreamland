@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +20,64 @@ import (
 
 	"dreamland/internal/workflowgraph"
 )
+
+// syncBuffer is a mutex-guarded byte buffer, safe to write from a goroutine
+// running serveGraph while the test goroutine polls its contents.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// withStubbedBrowser overrides execCommand so openBrowser's exec.Cmd never
+// actually shells out to a real "open"/"xdg-open"/"rundll32" — it runs "true"
+// instead, an always-succeeding no-op, so tests that exercise serveGraph or
+// openBrowser directly never launch a real browser.
+func withStubbedBrowser(t *testing.T) (gotName *string, gotArgs *[]string) {
+	t.Helper()
+	orig := execCommand
+	var name string
+	var args []string
+	execCommand = func(n string, a ...string) *exec.Cmd {
+		name = n
+		args = a
+		return exec.Command("true")
+	}
+	t.Cleanup(func() { execCommand = orig })
+	return &name, &args
+}
+
+func resetHypnosServeFlags(t *testing.T) {
+	t.Helper()
+	origMode, origPlan := hypnosServeMode, hypnosServePlan
+	t.Cleanup(func() {
+		hypnosServeMode = origMode
+		hypnosServePlan = origPlan
+	})
+}
+
+func chdirTemp(t *testing.T, dir string) {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+}
 
 func newTestCommand() *cobra.Command {
 	c := &cobra.Command{}
