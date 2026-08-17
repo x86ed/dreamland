@@ -1,11 +1,11 @@
 {
   "tool": "claude-code",
-  "agent": "janus",
+  "agent": "baku",
   "model": "claude-sonnet-5",
   "thinking_effort": "high",
-  "input_tokens": 127777,
-  "output_tokens": 56527910,
-  "cached_tokens": 25867057274,
-  "total_tokens": 56655687,
-  "captured_at": "2026-08-17T16:53:40Z"
+  "input_tokens": 127903,
+  "output_tokens": 56561681,
+  "cached_tokens": 25871101356,
+  "total_tokens": 56689584,
+  "captured_at": "2026-08-17T16:53:47Z"
 }
