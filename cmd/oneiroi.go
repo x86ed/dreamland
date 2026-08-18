@@ -84,85 +84,119 @@ func oneiroiRepoRoot() (string, error) {
 }
 
 func runOneiroiSeed(cmd *cobra.Command, args []string) error {
-	if !validOneiroiToolTiers[oneiroiSeedToolTier] {
-		return Blocking(fmt.Errorf("invalid --tool-tier %q; must be one of router, read-dispatch-only, full-edit, write-only-no-edit", oneiroiSeedToolTier))
-	}
-
 	repoRoot, err := oneiroiRepoRoot()
 	if err != nil {
 		return Blocking(err)
 	}
+	name, err := oneiroiSeedCore(repoRoot, oneiroiSeedRole, oneiroiSeedToolTier)
+	if err != nil {
+		return Blocking(err)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), name)
+	return nil
+}
+
+func runOneiroiRevise(cmd *cobra.Command, args []string) error {
+	repoRoot, err := oneiroiRepoRoot()
+	if err != nil {
+		return Blocking(err)
+	}
+	name, err := oneiroiReviseCore(repoRoot, oneiroiReviseAgent, oneiroiReviseReason)
+	if err != nil {
+		return Blocking(err)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), name)
+	return nil
+}
+
+func runOneiroiFork(cmd *cobra.Command, args []string) error {
+	repoRoot, err := oneiroiRepoRoot()
+	if err != nil {
+		return Blocking(err)
+	}
+	name, _, err := oneiroiForkCore(repoRoot, oneiroiForkAgent, oneiroiForkRole, oneiroiForkToolTier)
+	if err != nil {
+		return Blocking(err)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), name)
+	return nil
+}
+
+// oneiroiSeedCore implements `dreamland oneiroi seed`'s full behavior — name
+// generation, registry write, scaffold, routing-table stub edges, and the
+// self-authored commit — independent of the Cobra command layer, so both
+// runOneiroiSeed (CLI) and the oneiroi_seed MCP tool handler (cmd/mcp_serve.go) call
+// identical logic (design.md decision 8).
+func oneiroiSeedCore(repoRoot, role, toolTier string) (string, error) {
+	if !validOneiroiToolTiers[toolTier] {
+		return "", fmt.Errorf("invalid --tool-tier %q; must be one of router, read-dispatch-only, full-edit, write-only-no-edit", toolTier)
+	}
 
 	pool, err := seedwords.Load()
 	if err != nil {
-		return Blocking(fmt.Errorf("load seed words: %w", err))
+		return "", fmt.Errorf("load seed words: %w", err)
 	}
 
 	reg, err := oneiroi.Load(repoRoot)
 	if err != nil {
-		return Blocking(fmt.Errorf("load registry: %w", err))
+		return "", fmt.Errorf("load registry: %w", err)
 	}
 
 	word1, word2, err := oneiroi.GenerateFamily(pool, reg)
 	if err != nil {
-		return Blocking(err)
+		return "", err
 	}
 	name := word1 + "-" + word2
 
 	entry := oneiroi.Entry{
 		Name:      name,
 		Words:     []string{word1, word2},
-		Role:      oneiroiSeedRole,
-		ToolTier:  oneiroiSeedToolTier,
+		Role:      role,
+		ToolTier:  toolTier,
 		Parent:    nil,
 		Created:   time.Now().UTC(),
 		Revisions: []oneiroi.Revision{},
 	}
 	reg.Agents = append(reg.Agents, entry)
 
-	paths, err := scaffoldOneiroiAgent(repoRoot, name, oneiroiSeedRole, oneiroiSeedToolTier, reg)
+	paths, err := scaffoldOneiroiAgent(repoRoot, name, role, toolTier, reg)
 	if err != nil {
-		return Blocking(err)
+		return "", err
 	}
 
-	subject := fmt.Sprintf("oneiroi: seed %s (%s tier)", name, oneiroiSeedToolTier)
+	subject := fmt.Sprintf("oneiroi: seed %s (%s tier)", name, toolTier)
 	if err := oneiroi.CommitScaffold(repoRoot, paths, subject); err != nil {
-		return Blocking(err)
+		return "", err
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), name)
-	return nil
+	return name, nil
 }
 
-func runOneiroiRevise(cmd *cobra.Command, args []string) error {
-	if oneiroiReviseAgent == "" {
-		return Blocking(fmt.Errorf("--agent is required"))
-	}
-
-	repoRoot, err := oneiroiRepoRoot()
-	if err != nil {
-		return Blocking(err)
+// oneiroiReviseCore implements `dreamland oneiroi revise`'s full behavior.
+func oneiroiReviseCore(repoRoot, agent, reason string) (string, error) {
+	if agent == "" {
+		return "", fmt.Errorf("--agent is required")
 	}
 
 	pool, err := seedwords.Load()
 	if err != nil {
-		return Blocking(fmt.Errorf("load seed words: %w", err))
+		return "", fmt.Errorf("load seed words: %w", err)
 	}
 
 	reg, err := oneiroi.Load(repoRoot)
 	if err != nil {
-		return Blocking(fmt.Errorf("load registry: %w", err))
+		return "", fmt.Errorf("load registry: %w", err)
 	}
 
 	idx := -1
 	for i, e := range reg.Agents {
-		if e.Name == oneiroiReviseAgent {
+		if e.Name == agent {
 			idx = i
 			break
 		}
 	}
 	if idx == -1 {
-		return Blocking(fmt.Errorf("no registered oneiroi named %q", oneiroiReviseAgent))
+		return "", fmt.Errorf("no registered oneiroi named %q", agent)
 	}
 	entry := &reg.Agents[idx]
 
@@ -177,14 +211,14 @@ func runOneiroiRevise(cmd *cobra.Command, args []string) error {
 
 	word3, err := oneiroi.GenerateThirdWord(pool, familyWords, exclude)
 	if err != nil {
-		return Blocking(err)
+		return "", err
 	}
 
 	oldName := entry.Name
 	if len(entry.Words) >= 3 {
 		entry.Revisions = append(entry.Revisions, oneiroi.Revision{
 			Word:   entry.Words[2],
-			Reason: oneiroiReviseReason,
+			Reason: reason,
 			At:     time.Now().UTC(),
 		})
 		entry.Words[2] = word3
@@ -196,54 +230,50 @@ func runOneiroiRevise(cmd *cobra.Command, args []string) error {
 
 	paths, err := renameOneiroiAgentFiles(repoRoot, oldName, newName, reg)
 	if err != nil {
-		return Blocking(err)
+		return "", err
 	}
 
 	subject := fmt.Sprintf("oneiroi: revise %s -> %s", oldName, newName)
 	if err := oneiroi.CommitScaffold(repoRoot, paths, subject); err != nil {
-		return Blocking(err)
+		return "", err
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), newName)
-	return nil
+	return newName, nil
 }
 
-func runOneiroiFork(cmd *cobra.Command, args []string) error {
-	if oneiroiForkAgent == "" {
-		return Blocking(fmt.Errorf("--agent is required"))
-	}
-
-	repoRoot, err := oneiroiRepoRoot()
-	if err != nil {
-		return Blocking(err)
+// oneiroiForkCore implements `dreamland oneiroi fork`'s full behavior, returning the
+// new fork's name and its parent's name.
+func oneiroiForkCore(repoRoot, agent, role, toolTierOverride string) (name, parentName string, err error) {
+	if agent == "" {
+		return "", "", fmt.Errorf("--agent is required")
 	}
 
 	pool, err := seedwords.Load()
 	if err != nil {
-		return Blocking(fmt.Errorf("load seed words: %w", err))
+		return "", "", fmt.Errorf("load seed words: %w", err)
 	}
 
 	reg, err := oneiroi.Load(repoRoot)
 	if err != nil {
-		return Blocking(fmt.Errorf("load registry: %w", err))
+		return "", "", fmt.Errorf("load registry: %w", err)
 	}
 
 	var parent *oneiroi.Entry
 	for i, e := range reg.Agents {
-		if e.Name == oneiroiForkAgent {
+		if e.Name == agent {
 			parent = &reg.Agents[i]
 			break
 		}
 	}
 	if parent == nil {
-		return Blocking(fmt.Errorf("no registered oneiroi named %q", oneiroiForkAgent))
+		return "", "", fmt.Errorf("no registered oneiroi named %q", agent)
 	}
 	if len(parent.Words) < 2 {
-		return Blocking(fmt.Errorf("parent oneiroi %q has fewer than 2 family words", oneiroiForkAgent))
+		return "", "", fmt.Errorf("parent oneiroi %q has fewer than 2 family words", agent)
 	}
 
 	familyWords := parent.Words[:2]
-	exclude := []string{}
+	var exclude []string
 	if len(parent.Words) >= 3 {
 		exclude = append(exclude, parent.Words[2])
 	}
@@ -255,23 +285,22 @@ func runOneiroiFork(cmd *cobra.Command, args []string) error {
 
 	word3, err := oneiroi.GenerateThirdWord(pool, familyWords, exclude)
 	if err != nil {
-		return Blocking(err)
+		return "", "", err
 	}
 
-	toolTier := oneiroiForkToolTier
+	toolTier := toolTierOverride
 	if toolTier == "" {
 		toolTier = parent.ToolTier
 	}
 	if !validOneiroiToolTiers[toolTier] {
-		return Blocking(fmt.Errorf("invalid --tool-tier %q; must be one of router, read-dispatch-only, full-edit, write-only-no-edit", toolTier))
+		return "", "", fmt.Errorf("invalid --tool-tier %q; must be one of router, read-dispatch-only, full-edit, write-only-no-edit", toolTier)
 	}
 
-	role := oneiroiForkRole
-	name := familyWords[0] + "-" + familyWords[1] + "-" + word3
-	parentName := parent.Name
+	forkName := familyWords[0] + "-" + familyWords[1] + "-" + word3
+	parentName = parent.Name
 
 	entry := oneiroi.Entry{
-		Name:      name,
+		Name:      forkName,
 		Words:     []string{familyWords[0], familyWords[1], word3},
 		Role:      role,
 		ToolTier:  toolTier,
@@ -281,18 +310,17 @@ func runOneiroiFork(cmd *cobra.Command, args []string) error {
 	}
 	reg.Agents = append(reg.Agents, entry)
 
-	paths, err := scaffoldOneiroiAgent(repoRoot, name, role, toolTier, reg)
+	paths, err := scaffoldOneiroiAgent(repoRoot, forkName, role, toolTier, reg)
 	if err != nil {
-		return Blocking(err)
+		return "", "", err
 	}
 
-	subject := fmt.Sprintf("oneiroi: fork %s from %s (%s tier)", name, parentName, toolTier)
+	subject := fmt.Sprintf("oneiroi: fork %s from %s (%s tier)", forkName, parentName, toolTier)
 	if err := oneiroi.CommitScaffold(repoRoot, paths, subject); err != nil {
-		return Blocking(err)
+		return "", "", err
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), name)
-	return nil
+	return forkName, parentName, nil
 }
 
 // scaffoldOneiroiAgent writes the registry, the six stub agent files, the per-agent
