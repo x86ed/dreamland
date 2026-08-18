@@ -59,6 +59,13 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 	if coauthorTrailer != "" {
 		// --trailer mode: invoked by prepare-commit-msg git hook.
 		// args[0] (via --trailer flag value) is the commit message file path.
+		if hasGeneratedByTrailer, err := commitMessageHasGeneratedByTrailer(coauthorTrailer); err != nil {
+			return err
+		} else if hasGeneratedByTrailer {
+			// Script-authored commit (e.g. dreamland oneiroi seed/revise/fork) — already
+			// complete and self-describing; skip both the Co-authored-by and Tokens appends.
+			return nil
+		}
 		if err := appendCoauthorTrailer(coauthorTrailer, cfg.ModelID, suffix); err != nil {
 			return err
 		}
@@ -196,6 +203,28 @@ func installPrepareCommitMsgHook(repoDir string) error {
 		return err
 	}
 	return os.WriteFile(hookPath, []byte(prepareCommitMsgContent), 0o755)
+}
+
+// commitMessageHasGeneratedByTrailer reports whether msgFile already contains a
+// `Generated-By:` trailer line (e.g. `Generated-By: dreamland-oneiroi-seed`) — the
+// marker `dreamland oneiroi seed`/`revise`/`fork` writes on its own self-authored
+// commits (see the oneiroi-seed-naming capability). A missing file is treated as not
+// having the trailer, matching the other append helpers' fail-open-on-missing-file
+// posture (callers only invoke this once the hook has confirmed the file exists).
+func commitMessageHasGeneratedByTrailer(msgFile string) (bool, error) {
+	data, err := os.ReadFile(msgFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "Generated-By:") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // appendCoauthorTrailer appends a Co-authored-by trailer for the model to the commit
