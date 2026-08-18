@@ -374,7 +374,7 @@ func TestCurrentGitIdentityName_UsesConfiguredGitIdentity(t *testing.T) {
 	})
 
 	cfg := &config.Config{CodingTool: "GitHub Copilot"}
-	got := currentGitIdentityName(cfg)
+	got := currentGitIdentityName(cfg, "")
 	if got != "morpheus" {
 		t.Errorf("got %q, want morpheus (from git config)", got)
 	}

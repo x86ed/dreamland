@@ -372,7 +372,7 @@ func TestAgentNameFromHookPayloadFrom_InvalidJSON(t *testing.T) {
 func TestResolveEnforcedAgentName_ClaudeCodeFallback(t *testing.T) {
 	// Claude Code without a hook payload should fall back to janus, not the tool name
 	cfg := &config.Config{CodingTool: "Claude Code"}
-	got := resolveEnforcedAgentName(cfg)
+	got := resolveEnforcedAgentName(cfg, "")
 	if got != "janus" {
 		t.Errorf("got %q, want janus for Claude Code fallback", got)
 	}
@@ -524,7 +524,7 @@ func TestRunCoauthor_ClaudeCodeSubagentStopResolvesRealAgent(t *testing.T) {
 func TestResolveEnforcedAgentName_OtherPlatformFallback(t *testing.T) {
 	// Other platforms should fall back to the tool name
 	cfg := &config.Config{CodingTool: "GitHub Copilot"}
-	got := resolveEnforcedAgentName(cfg)
+	got := resolveEnforcedAgentName(cfg, "")
 	if got != "GitHub Copilot" {
 		t.Errorf("got %q, want GitHub Copilot fallback", got)
 	}
