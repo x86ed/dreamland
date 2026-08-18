@@ -1,9 +1,9 @@
 ## 1. Seed word list
 
-- [ ] 1.1 Create `internal/oneiroi/seedwords/gen/main.go`: fetches https://en.wikipedia.org/wiki/List_of_U.S._Department_of_Defense_and_partner_code_names, parses the code-name table(s), splits each multi-word code name on whitespace, lowercases, dedupes, and writes `internal/oneiroi/seedwords/words.json` as `{"words": [...]}` (sorted for deterministic diffs). Document at the top of the file that it is a one-off generator, not part of `dreamland`'s command tree, and not run in CI.
-- [ ] 1.2 Run `internal/oneiroi/seedwords/gen/main.go` once and commit the resulting `internal/oneiroi/seedwords/words.json`.
-- [ ] 1.3 Add `internal/oneiroi/seedwords/words.go` with a `//go:embed words.json` directive and a `Load() ([]string, error)` function returning the parsed word list, so `dreamland oneiroi` reads the embedded copy (no filesystem read at install time), matching the `agent-scaffolding` capability's "Agent templates are embedded in the binary" precedent.
-- [ ] 1.4 Unit test: `words.json` parses, contains >100 entries, no duplicates, all lowercase.
+- [x] 1.1 Create `internal/oneiroi/seedwords/gen/main.go`: fetches https://en.wikipedia.org/wiki/List_of_U.S._Department_of_Defense_and_partner_code_names, parses the code-name table(s), splits each multi-word code name on whitespace, lowercases, dedupes, and writes `internal/oneiroi/seedwords/words.json` as `{"words": [...]}` (sorted for deterministic diffs). Document at the top of the file that it is a one-off generator, not part of `dreamland`'s command tree, and not run in CI.
+- [x] 1.2 Run `internal/oneiroi/seedwords/gen/main.go` once and commit the resulting `internal/oneiroi/seedwords/words.json`.
+- [x] 1.3 Add `internal/oneiroi/seedwords/words.go` with a `//go:embed words.json` directive and a `Load() ([]string, error)` function returning the parsed word list, so `dreamland oneiroi` reads the embedded copy (no filesystem read at install time), matching the `agent-scaffolding` capability's "Agent templates are embedded in the binary" precedent.
+- [x] 1.4 Unit test: `words.json` parses, contains >100 entries, no duplicates, all lowercase.
 
 ## 2. Open agent registry
 
