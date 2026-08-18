@@ -3,9 +3,9 @@
   "agent": "morpheus",
   "model": "claude-sonnet-5",
   "thinking_effort": "high",
-  "input_tokens": 160805,
-  "output_tokens": 71525376,
-  "cached_tokens": 27258750910,
-  "total_tokens": 71686181,
-  "captured_at": "2026-08-18T05:42:13Z"
+  "input_tokens": 161117,
+  "output_tokens": 71695515,
+  "cached_tokens": 27275317014,
+  "total_tokens": 71856632,
+  "captured_at": "2026-08-18T05:42:15Z"
 }
