@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -68,10 +69,10 @@ func init() {
 // validOneiroiToolTiers is the closed set --tool-tier accepts, per the tool-binding
 // matrix (agent-scaffolding capability).
 var validOneiroiToolTiers = map[string]bool{
-	"router":              true,
-	"read-dispatch-only":  true,
-	"full-edit":           true,
-	"write-only-no-edit":  true,
+	"router":             true,
+	"read-dispatch-only": true,
+	"full-edit":          true,
+	"write-only-no-edit": true,
 }
 
 func oneiroiRepoRoot() (string, error) {
@@ -351,5 +352,5 @@ func renameOneiroiAgentFiles(repoRoot, oldName, newName string, reg *oneiroi.Reg
 }
 
 func registryFilePath(repoRoot string) string {
-	return repoRoot + "/.dreamland/oneiroi/registry.json"
+	return filepath.Join(repoRoot, ".dreamland", "oneiroi", "registry.json")
 }
