@@ -393,8 +393,45 @@ func writeBranchBumps(path string, bumps map[string]branchBumpEntry) error {
 	return os.Rename(tmp, path)
 }
 
+// gitLockRetryAttempts/gitLockRetryDelay are exposed as vars so tests can shrink the
+// delay rather than waiting on real sleeps.
+var (
+	gitLockRetryAttempts = 3
+	gitLockRetryDelay    = 150 * time.Millisecond
+)
+
+// gitExec runs git with a short bounded retry on lock contention: with multiple
+// dreamland-driven agent sessions concurrently committing to the same working tree
+// (coauthor/commit/version-bump all shell out through here), two writers can race on
+// creating .git/index.lock or .git/config.lock at the same instant. That's expected,
+// transient, and clears within milliseconds once the other writer finishes — surfacing
+// it as a hard failure on the very first collision (observed live, repeatedly, in a
+// heavily concurrent dogfood session) is needless churn. A real, persistent failure
+// still surfaces exactly as before once retries are exhausted.
 func gitExec(args ...string) (string, error) {
-	return runCmd("git", args...)
+	var out string
+	var err error
+	for attempt := 1; attempt <= gitLockRetryAttempts; attempt++ {
+		out, err = runCmd("git", args...)
+		if err == nil || !isGitLockContention(err) || attempt == gitLockRetryAttempts {
+			return out, err
+		}
+		time.Sleep(gitLockRetryDelay)
+	}
+	return out, err
+}
+
+// isGitLockContention reports whether err is git's transient "Unable to create
+// '.git/index.lock' (or config.lock): File exists" failure, as opposed to any other
+// git error (invalid arguments, detached HEAD, permission issues, etc.), which must
+// still fail immediately and not be masked by a retry loop.
+func isGitLockContention(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	stderr := string(exitErr.Stderr)
+	return strings.Contains(stderr, "Unable to create") && strings.Contains(stderr, ".lock")
 }
 
 // tagExists reports whether a git tag with the given name already exists locally.
