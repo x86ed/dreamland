@@ -36,11 +36,11 @@
 
 ## 6. Self-authored commit provenance
 
-- [ ] 6.1 In `internal/oneiroi/commit.go`, add `CommitScaffold(repoRoot string, paths []string, subject string) error`: stages exactly `paths` (`git add -- <paths...>`, never `-A`), writes a commit message file containing `<subject>\n\nTokens: input=0 output=0 cached=0 total=0\nGenerated-By: dreamland-oneiroi-seed\n`, and runs `git commit --author "dreamland-oneiroi-seed <oneiroi-seed@github.com>" -F <tmpfile>`.
-- [ ] 6.2 Wire `CommitScaffold` as the final step of `runOneiroiSeed`/`runOneiroiRevise`/`runOneiroiFork`, passing the exact file list each accumulated.
-- [ ] 6.3 In `cmd/coauthor.go`'s `--trailer` handling (`appendCoauthorTrailer`/its caller), add a check at the top: if the commit message file already contains a line matching `^Generated-By:`, return immediately with no modification (skip both `appendCoauthorTrailer` and `appendTokensReport`).
-- [ ] 6.4 Unit tests: `dreamland coauthor --trailer <file>` on a message containing `Generated-By: dreamland-oneiroi-seed` leaves the file byte-for-byte unchanged, even when a fake telemetry snapshot with non-zero tokens is present; a message without that trailer still gets the existing `Co-authored-by:`/`Tokens:` treatment (regression check against the base `dev-workflow-hooks` behavior).
-- [ ] 6.5 Integration-style test (temp git repo, real `git commit`): after `dreamland oneiroi seed` runs, `git config --local user.name` is unchanged from whatever it was set to beforehand, and `git log -1 --format=%an` on the new commit reads `dreamland-oneiroi-seed`.
+- [x] 6.1 In `internal/oneiroi/commit.go`, add `CommitScaffold(repoRoot string, paths []string, subject string) error`: stages exactly `paths` (`git add -- <paths...>`, never `-A`), writes a commit message file containing `<subject>\n\nTokens: input=0 output=0 cached=0 total=0\nGenerated-By: dreamland-oneiroi-seed\n`, and runs `git commit --author "dreamland-oneiroi-seed <oneiroi-seed@github.com>" -F <tmpfile>`.
+- [x] 6.2 Wire `CommitScaffold` as the final step of `runOneiroiSeed`/`runOneiroiRevise`/`runOneiroiFork`, passing the exact file list each accumulated.
+- [x] 6.3 In `cmd/coauthor.go`'s `--trailer` handling (`appendCoauthorTrailer`/its caller), add a check at the top: if the commit message file already contains a line matching `^Generated-By:`, return immediately with no modification (skip both `appendCoauthorTrailer` and `appendTokensReport`).
+- [x] 6.4 Unit tests: `dreamland coauthor --trailer <file>` on a message containing `Generated-By: dreamland-oneiroi-seed` leaves the file byte-for-byte unchanged, even when a fake telemetry snapshot with non-zero tokens is present; a message without that trailer still gets the existing `Co-authored-by:`/`Tokens:` treatment (regression check against the base `dev-workflow-hooks` behavior).
+- [x] 6.5 Integration-style test (temp git repo, real `git commit`): after `dreamland oneiroi seed` runs, `git config --local user.name` is unchanged from whatever it was set to beforehand, and `git log -1 --format=%an` on the new commit reads `dreamland-oneiroi-seed`.
 
 ## 7. Hypnos instruction updates (all six platforms)
 
@@ -50,9 +50,9 @@
 
 ## 8. MCP exposure
 
-- [ ] 8.1 Add an MCP server dependency (evaluate `github.com/modelcontextprotocol/go-sdk` or an equivalent minimal Go MCP library; if none is suitable, implement the minimal stdio JSON-RPC subset needed for `tools/list`/`tools/call` directly — document the choice in a code comment).
-- [ ] 8.2 Create `cmd/mcp_serve.go`: `dreamland mcp-serve` registers `oneiroi_seed`, `oneiroi_revise`, `oneiroi_fork` tools, each handler parsing its JSON arguments (`role`, `tool_tier`, `agent`, `reason`) and calling the same `internal/oneiroi` functions tasks 5.2-5.4 use, returning the generated name (and, for `fork`, the parent) as the tool result.
-- [ ] 8.3 Unit test: a fake MCP client sends a `tools/call` for `oneiroi_seed` with `{"role": "example"}` over an in-process pipe; assert the response matches what calling `runOneiroiSeed` directly would produce (registry entry present, files written).
+- [x] 8.1 Add an MCP server dependency (evaluate `github.com/modelcontextprotocol/go-sdk` or an equivalent minimal Go MCP library; if none is suitable, implement the minimal stdio JSON-RPC subset needed for `tools/list`/`tools/call` directly — document the choice in a code comment).
+- [x] 8.2 Create `cmd/mcp_serve.go`: `dreamland mcp-serve` registers `oneiroi_seed`, `oneiroi_revise`, `oneiroi_fork` tools, each handler parsing its JSON arguments (`role`, `tool_tier`, `agent`, `reason`) and calling the same `internal/oneiroi` functions tasks 5.2-5.4 use, returning the generated name (and, for `fork`, the parent) as the tool result.
+- [x] 8.3 Unit test: a fake MCP client sends a `tools/call` for `oneiroi_seed` with `{"role": "example"}` over an in-process pipe; assert the response matches what calling `runOneiroiSeed` directly would produce (registry entry present, files written).
 
 ## 9. Verification
 
