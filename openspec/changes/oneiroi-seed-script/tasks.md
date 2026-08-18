@@ -56,7 +56,7 @@
 
 ## 9. Verification
 
-- [ ] 9.1 Run `go build ./...` and `go test ./...`; confirm no regressions in `cmd/coauthor_test.go`, `internal/agentidentity/agentidentity_test.go`, `internal/scaffold/scaffold_test.go`.
-- [ ] 9.2 In a scratch repo scaffolded for Claude Code, run `dreamland oneiroi seed --role "test role"`; confirm stub files exist on all six platforms, `.dreamland/oneiroi/registry.json` has the new entry, the slash command file exists, and `git log -1` shows the `dreamland-oneiroi-seed` author with no `Co-authored-by:` trailer.
-- [ ] 9.3 In the same scratch repo, run `dreamland oneiroi revise --agent <generated-name> --reason "test revision"` and `dreamland oneiroi fork --agent <generated-name> --role "fork role"`; confirm the versioning behavior in decision 3 of `design.md` (revise replaces the third word, fork creates a sibling sharing the family pair).
-- [ ] 9.4 Run `openspec validate --change oneiroi-seed-script` (or equivalent) to confirm the delta specs apply cleanly against the base specs.
+- [x] 9.1 Run `go build ./...` and `go test ./...`; confirm no regressions in `cmd/coauthor_test.go`, `internal/agentidentity/agentidentity_test.go`, `internal/scaffold/scaffold_test.go`.
+- [x] 9.2 In a scratch repo scaffolded for Claude Code, run `dreamland oneiroi seed --role "test role"`; confirm stub files exist on all six platforms, `.dreamland/oneiroi/registry.json` has the new entry, the slash command file exists, and `git log -1` shows the `dreamland-oneiroi-seed` author with no `Co-authored-by:` trailer.
+- [x] 9.3 In the same scratch repo, run `dreamland oneiroi revise --agent <generated-name> --reason "test revision"` and `dreamland oneiroi fork --agent <generated-name> --role "fork role"`; confirm the versioning behavior in decision 3 of `design.md` (revise replaces the third word, fork creates a sibling sharing the family pair).
+- [x] 9.4 Run `openspec validate --change oneiroi-seed-script` (or equivalent) to confirm the delta specs apply cleanly against the base specs.
