@@ -100,32 +100,19 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 }
 
 // isRegisteredAgent reports whether name is a registered dreamland agent — one of the
-// ten built-ins or a name present in the current repo's oneiroi registry — see the
+// ten built-ins or a name present in repoRoot's oneiroi registry — see the
 // session-agent-identity capability for why a candidate identity resolved from a hook
 // payload that isn't in this set must be treated as unresolved.
-func isRegisteredAgent(name string) bool {
-	repoRoot, err := config.FindRepoRoot(mustGetwd())
-	if err != nil {
-		repoRoot = ""
-	}
+func isRegisteredAgent(name, repoRoot string) bool {
 	return agentidentity.IsRegistered(name, repoRoot)
-}
-
-// mustGetwd returns the current working directory, or "" on error — isRegisteredAgent's
-// repoRoot resolution degrades to the built-in-ten-only behavior in that case rather
-// than failing the caller.
-func mustGetwd() string {
-	cwd, err := osGetwd()
-	if err != nil {
-		return ""
-	}
-	return cwd
 }
 
 // resolveEnforcedAgentName returns the correct agent name using the full resolution
 // sequence: hook payload (if --hook set), env vars, coding tool fallback, or janus for Claude Code.
-// Extracted so it can be shared between coauthor and commit.
-func resolveEnforcedAgentName(cfg *config.Config) string {
+// Extracted so it can be shared between coauthor and commit. repoRoot resolves the oneiroi
+// open registry (see agentidentity.IsRegistered); callers pass "" when no repo root could
+// be resolved, which degrades to built-in-ten-only behavior.
+func resolveEnforcedAgentName(cfg *config.Config, repoRoot string) string {
 	agentName := resolveAgentName(cfg.CodingTool)
 	// Claude Code has no per-agent env var and no sub-agent identifier on its
 	// SessionStart/Stop payloads — only on PreToolUse/PostToolUse for the Task/Agent tool
@@ -133,7 +120,7 @@ func resolveEnforcedAgentName(cfg *config.Config) string {
 	// Anthropic's hooks reference) — so absent a valid hook-resolved identity, the coding
 	// tool name is not a real agent and must not become the git identity. Other platforms
 	// keep the coding-tool-name fallback unchanged.
-	if cfg.CodingTool == "Claude Code" && !isRegisteredAgent(agentName) {
+	if cfg.CodingTool == "Claude Code" && !isRegisteredAgent(agentName, repoRoot) {
 		agentName = "janus"
 	}
 	return agentName
