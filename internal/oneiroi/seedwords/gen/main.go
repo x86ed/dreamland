@@ -153,6 +153,10 @@ func extractWords(body string) []string {
 // extractCodeName cleans one bulleted line's wikitext and returns the code name phrase —
 // the text before the entry's first dash separator, with wiki-link/template/ref/HTML
 // markup, parenthetical asides, and leading "Operation"/"Exercise" labels stripped.
+// Returns "" for a line with no dash separator at all: without one, there is no
+// reliable boundary between the code name and its free-text description, and treating
+// the whole line as the "code name" would pollute the pool with prose (e.g. "was the
+// code name of a ... warrantless surveillance program ...").
 func extractCodeName(raw string) string {
 	s := raw
 	s = reRefPair.ReplaceAllString(s, "")
@@ -163,9 +167,11 @@ func extractCodeName(raw string) string {
 	s = reHTMLTag.ReplaceAllString(s, "")
 	s = reBoldItalic.ReplaceAllString(s, "")
 
-	if idx := reDashSplit.FindStringIndex(s); idx != nil {
-		s = s[:idx[0]]
+	idx := reDashSplit.FindStringIndex(s)
+	if idx == nil {
+		return ""
 	}
+	s = s[:idx[0]]
 
 	s = reParenthetic.ReplaceAllString(s, "")
 	s = reOpPrefix.ReplaceAllString(s, "")
