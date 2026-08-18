@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -235,7 +236,10 @@ func oneiroiReviseCore(repoRoot, agent, reason string) (string, error) {
 		return "", err
 	}
 
-	oldName := entry.Name
+	// The registry entry's Name field is its immutable, creation-time --agent lookup
+	// key (design.md decision 3) — it is never rewritten here. The agent's actual live
+	// identity (used for git/hook/file naming) is derived fresh from Words each time.
+	oldLiveName := strings.Join(entry.Words, "-")
 	if len(entry.Words) >= 3 {
 		entry.Revisions = append(entry.Revisions, oneiroi.Revision{
 			Word:   entry.Words[2],
@@ -246,15 +250,14 @@ func oneiroiReviseCore(repoRoot, agent, reason string) (string, error) {
 	} else {
 		entry.Words = append(entry.Words, word3)
 	}
-	newName := entry.Words[0] + "-" + entry.Words[1] + "-" + entry.Words[2]
-	entry.Name = newName
+	newName := strings.Join(entry.Words, "-")
 
-	paths, err := renameOneiroiAgentFiles(repoRoot, oldName, newName, reg)
+	paths, err := renameOneiroiAgentFiles(repoRoot, oldLiveName, newName, reg)
 	if err != nil {
 		return "", err
 	}
 
-	subject := fmt.Sprintf("oneiroi: revise %s -> %s", oldName, newName)
+	subject := fmt.Sprintf("oneiroi: revise %s -> %s", oldLiveName, newName)
 	if err := oneiroi.CommitScaffold(repoRoot, paths, subject); err != nil {
 		return "", err
 	}

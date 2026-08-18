@@ -87,11 +87,16 @@ func (r *Registry) Save(repoRoot string) error {
 	return os.Rename(tmpName, target)
 }
 
-// Names returns every live agent name currently in the registry.
+// Names returns every entry's current live name — its Words joined with "-" — which is
+// what's actually used for git identity/hook bindings/file names (design.md decision
+// 3): an entry's stored Name field is its immutable creation-time identifier (the
+// stable --agent lookup key `dreamland oneiroi revise`/`fork` matches against, which
+// does not change when revise replaces the third word), so it can go stale relative to
+// Words after a revision — Names() always reflects the current, not the original, name.
 func (r *Registry) Names() []string {
 	names := make([]string, 0, len(r.Agents))
 	for _, e := range r.Agents {
-		names = append(names, e.Name)
+		names = append(names, strings.Join(e.Words, "-"))
 	}
 	return names
 }
