@@ -176,7 +176,7 @@ func TestFromPayload_SubagentStopUnregisteredAgentType(t *testing.T) {
 	if got != "Explore" {
 		t.Errorf("got %q, want Explore", got)
 	}
-	if IsRegistered(got) {
+	if IsRegistered(got, t.TempDir()) {
 		t.Errorf("%q should not be a registered dreamland agent", got)
 	}
 }
