@@ -423,7 +423,9 @@ func TestRunVersionBump_IdempotentBranch(t *testing.T) {
 
 	origFlags := [4]interface{}{vbMajor, vbMinor, vbPatch, vbVersion}
 	vbMajor, vbMinor, vbPatch, vbVersion = false, false, false, ""
-	t.Cleanup(func() { vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string) })
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string)
+	})
 
 	if err := runVersionBump(versionBumpCmd, nil); err != nil {
 		t.Fatalf("runVersionBump: %v", err)
@@ -445,7 +447,9 @@ func TestRunVersionBump_PatchMode_NoChanges(t *testing.T) {
 
 	origFlags := [4]interface{}{vbMajor, vbMinor, vbPatch, vbVersion}
 	vbMajor, vbMinor, vbPatch, vbVersion = false, false, true, ""
-	t.Cleanup(func() { vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string) })
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string)
+	})
 
 	if err := runVersionBump(versionBumpCmd, nil); err != nil {
 		t.Fatalf("expected silent exit, got: %v", err)
@@ -480,7 +484,9 @@ func TestRunVersionBump_NewBranch_MinorBump(t *testing.T) {
 
 	origFlags := [4]interface{}{vbMajor, vbMinor, vbPatch, vbVersion}
 	vbMajor, vbMinor, vbPatch, vbVersion = false, false, false, ""
-	t.Cleanup(func() { vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string) })
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string)
+	})
 
 	if err := runVersionBump(versionBumpCmd, nil); err != nil {
 		t.Fatalf("runVersionBump: %v", err)
@@ -891,7 +897,9 @@ func TestRunVersionBump_GitCurrentBranchError(t *testing.T) {
 
 	origFlags := [4]interface{}{vbMajor, vbMinor, vbPatch, vbVersion}
 	vbMajor, vbMinor, vbPatch, vbVersion = false, false, false, ""
-	t.Cleanup(func() { vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string) })
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string)
+	})
 
 	callCount := 0
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
@@ -962,7 +970,9 @@ func TestRunVersionBump_MinorFlagLevel(t *testing.T) {
 
 	origFlags := [4]interface{}{vbMajor, vbMinor, vbPatch, vbVersion}
 	vbMajor, vbMinor, vbPatch, vbVersion = false, true, false, ""
-	t.Cleanup(func() { vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string) })
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string)
+	})
 
 	var taggedVersion string
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
@@ -1001,7 +1011,9 @@ func TestRunVersionBump_ExplicitVersionLevel(t *testing.T) {
 
 	origFlags := [4]interface{}{vbMajor, vbMinor, vbPatch, vbVersion}
 	vbMajor, vbMinor, vbPatch, vbVersion = false, false, false, "v5.0.0"
-	t.Cleanup(func() { vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string) })
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string)
+	})
 
 	var taggedVersion string
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
@@ -1040,7 +1052,9 @@ func TestRunVersionBump_PerformBumpError(t *testing.T) {
 
 	origFlags := [4]interface{}{vbMajor, vbMinor, vbPatch, vbVersion}
 	vbMajor, vbMinor, vbPatch, vbVersion = false, false, false, ""
-	t.Cleanup(func() { vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string) })
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string)
+	})
 
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
 		joined := strings.Join(args, " ")
@@ -1071,7 +1085,9 @@ func TestRunVersionBump_GitLastTagErrorAfterBump(t *testing.T) {
 
 	origFlags := [4]interface{}{vbMajor, vbMinor, vbPatch, vbVersion}
 	vbMajor, vbMinor, vbPatch, vbVersion = false, false, false, ""
-	t.Cleanup(func() { vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string) })
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string)
+	})
 
 	tagCount := 0
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
@@ -1123,7 +1139,9 @@ func TestRunVersionBump_WriteBranchBumpsError(t *testing.T) {
 
 	origFlags := [4]interface{}{vbMajor, vbMinor, vbPatch, vbVersion}
 	vbMajor, vbMinor, vbPatch, vbVersion = false, false, false, ""
-	t.Cleanup(func() { vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string) })
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string)
+	})
 
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
 		joined := strings.Join(args, " ")
@@ -1152,7 +1170,9 @@ func TestRunVersionBump_GitPushError_IsBestEffort(t *testing.T) {
 
 	origFlags := [4]interface{}{vbMajor, vbMinor, vbPatch, vbVersion}
 	vbMajor, vbMinor, vbPatch, vbVersion = false, false, false, ""
-	t.Cleanup(func() { vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string) })
+	t.Cleanup(func() {
+		vbMajor, vbMinor, vbPatch, vbVersion = origFlags[0].(bool), origFlags[1].(bool), origFlags[2].(bool), origFlags[3].(string)
+	})
 
 	taggedVersion := ""
 	stubRunCmd(t, func(_ string, args ...string) (string, error) {
