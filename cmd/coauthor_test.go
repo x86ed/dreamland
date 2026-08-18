@@ -998,6 +998,93 @@ func TestAppendTokensReport_AppendsWithTrailingNewline(t *testing.T) {
 	}
 }
 
+// --- Generated-By trailer short-circuit (task 6.3/6.4, oneiroi-seed-script) ---
+
+// TestRunCoauthor_TrailerMode_GeneratedByTrailer_LeavesFileByteForByteUnchanged covers
+// the "Commit message declares zero tokens and no coauthor" / self-authored-commit
+// posture: a commit message already carrying a `Generated-By: dreamland-oneiroi-seed`
+// trailer (written by internal/oneiroi's CommitScaffold, task 6.1) must be treated as
+// complete — `dreamland coauthor --trailer` must skip both the Co-authored-by append and
+// the Tokens: append entirely, even when a non-zero telemetry snapshot is available that
+// would otherwise cause appendTokensReport to write a line.
+func TestRunCoauthor_TrailerMode_GeneratedByTrailer_LeavesFileByteForByteUnchanged(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	root := makeCoauthorRepo(t, config.Config{ModelID: "claude-sonnet-4-6"})
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	// Fake non-zero telemetry snapshot — must be ignored because Generated-By is present.
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{
+		InputTokens: 999, OutputTokens: 999, CachedTokens: 999, TotalTokens: 2997,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	original := "oneiroi: seed amber-falcon (full-edit tier)\n\n" +
+		"Tokens: input=0 output=0 cached=0 total=0\n" +
+		"Generated-By: dreamland-oneiroi-seed\n"
+	msgFile := filepath.Join(root, "COMMIT_EDITMSG")
+	if err := os.WriteFile(msgFile, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coauthorTrailer = msgFile
+	t.Cleanup(func() { coauthorTrailer = "" })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(msgFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Errorf("Generated-By commit message was modified, byte-for-byte diff:\nwant:\n%q\ngot:\n%q", original, string(data))
+	}
+}
+
+// TestRunCoauthor_TrailerMode_NoGeneratedByTrailer_StillAppendsCoauthorAndTokens is the
+// explicit regression check that a normal (non-oneiroi-generated) commit message is
+// unaffected by the new Generated-By short-circuit — it still gets the existing
+// Co-authored-by:/Tokens: treatment.
+func TestRunCoauthor_TrailerMode_NoGeneratedByTrailer_StillAppendsCoauthorAndTokens(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	root := makeCoauthorRepo(t, config.Config{ModelID: "claude-sonnet-4-6"})
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{
+		InputTokens: 100, OutputTokens: 50, CachedTokens: 10, TotalTokens: 160,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	msgFile := filepath.Join(root, "COMMIT_EDITMSG")
+	if err := os.WriteFile(msgFile, []byte("feat: something\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coauthorTrailer = msgFile
+	t.Cleanup(func() { coauthorTrailer = "" })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(msgFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Co-authored-by: claude-sonnet-4-6") {
+		t.Errorf("expected Co-authored-by trailer appended for a non-Generated-By message, got:\n%s", content)
+	}
+	if !strings.Contains(content, "Tokens: input=100 output=50 cached=10 total=160") {
+		t.Errorf("expected Tokens line appended for a non-Generated-By message, got:\n%s", content)
+	}
+}
+
 func TestAppendTokensReport_AppendsWithoutTrailingNewline(t *testing.T) {
 	root := t.TempDir()
 	if err := telemetry.Write(root, &telemetry.SnapshotResult{Tool: "claude-code", InputTokens: 5, OutputTokens: 1}); err != nil {
