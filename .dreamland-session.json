@@ -3,9 +3,17 @@
   "agent": "janus",
   "model": "claude-sonnet-5",
   "thinking_effort": "high",
+<<<<<<< Updated upstream
   "input_tokens": 179513,
   "output_tokens": 81789015,
   "cached_tokens": 28308880440,
   "total_tokens": 81968528,
   "captured_at": "2026-08-18T06:30:32Z"
+=======
+  "input_tokens": 14217,
+  "output_tokens": 4867493,
+  "cached_tokens": 730810030,
+  "total_tokens": 4881710,
+  "captured_at": "2026-08-14T00:33:33Z"
+>>>>>>> Stashed changes
 }
