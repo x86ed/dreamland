@@ -223,6 +223,10 @@ func TestTelemetryWriteClaudeCode_AgentNameFlagOverridesPayload(t *testing.T) {
 	root := telemetryGitRepo(t)
 	rootCmd.SetIn(strings.NewReader(`{"hook_event_name":"Stop","session_id":"s1"}`))
 	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	// telemetryAgentName is a package-level var bound by StringVar; pflag only writes it
+	// when --agent-name is actually passed, so it must be explicitly reset after this test
+	// or its value leaks into any later test that omits the flag.
+	t.Cleanup(func() { telemetryAgentName = "" })
 	if _, _, err := execCLI(t, "telemetry", "write", "--tool", "claude-code", "--agent-name", "morpheus"); err != nil {
 		t.Fatalf("expected success: %v", err)
 	}
@@ -260,6 +264,7 @@ func TestTelemetryWriteClaudeCode_UnregisteredAgentNameFlagIgnored(t *testing.T)
 	root := telemetryGitRepo(t)
 	rootCmd.SetIn(strings.NewReader(`{}`))
 	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	t.Cleanup(func() { telemetryAgentName = "" })
 	if _, _, err := execCLI(t, "telemetry", "write", "--tool", "claude-code", "--agent-name", "not-a-real-agent"); err != nil {
 		t.Fatalf("expected success: %v", err)
 	}
