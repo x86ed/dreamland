@@ -21,10 +21,16 @@ func IsRegistered(name string) bool {
 // FromPayload extracts a sub-agent identity from a hook payload already unmarshaled
 // into a generic map, checking every shape a supported platform is confirmed to emit:
 //   - GitHub Copilot: top-level "agent_type" (e.g. "morpheus") on SubagentStart/SubagentStop payloads.
-//   - Claude Code: "tool_input.subagent_type" (e.g. "morpheus") on the PreToolUse/PostToolUse
-//     payload for the Task/Agent tool call — Claude Code emits no top-level "agent_type".
+//   - Claude Code: top-level "agent_type" (e.g. "morpheus") on SubagentStop payloads (confirmed
+//     against Anthropic's published hooks reference: SubagentStop input includes "agent_id",
+//     "agent_type", "agent_transcript_path", and "last_assistant_message" in addition to the
+//     common fields — an earlier assumption in this codebase that Claude Code's SubagentStop
+//     payload carries no sub-agent identifier at all was wrong and has been corrected), and
+//     "tool_input.subagent_type" (e.g. "morpheus") on the PreToolUse/PostToolUse payload for
+//     the Task/Agent tool call itself.
 //
-// Returns "" if neither shape is present.
+// Returns "" if none of these shapes is present (e.g. SessionStart/Stop payloads, which carry
+// neither field).
 func FromPayload(payload map[string]any) string {
 	if v, ok := payload["agent_type"].(string); ok && v != "" {
 		return v

@@ -112,8 +112,9 @@ func isRegisteredAgent(name string) bool {
 func resolveEnforcedAgentName(cfg *config.Config) string {
 	agentName := resolveAgentName(cfg.CodingTool)
 	// Claude Code has no per-agent env var and no sub-agent identifier on its
-	// SessionStart/Stop/SubagentStop payloads (only on PreToolUse/PostToolUse for the
-	// Task/Agent tool call itself) — so absent a valid hook-resolved identity, the coding
+	// SessionStart/Stop payloads — only on PreToolUse/PostToolUse for the Task/Agent tool
+	// call ("tool_input.subagent_type") and on SubagentStop ("agent_type", confirmed against
+	// Anthropic's hooks reference) — so absent a valid hook-resolved identity, the coding
 	// tool name is not a real agent and must not become the git identity. Other platforms
 	// keep the coding-tool-name fallback unchanged.
 	if cfg.CodingTool == "Claude Code" && !isRegisteredAgent(agentName) {
@@ -145,12 +146,16 @@ func resolveAgentName(codingTool string) string {
 // with no timeout (correct because hook-binding callers always write and close promptly).
 // Confirmed from live GitHub Copilot SubagentStart/SubagentStop hook payloads: the field
 // is "agent_type" (e.g. "morpheus", "iktomi") — undocumented but consistently present.
-// Claude Code carries no top-level "agent_type" at all; the sub-agent identifier only
-// appears as "tool_input.subagent_type" on the PreToolUse/PostToolUse payload for the
-// Task/Agent tool call itself. SessionStart/Stop/SubagentStop payloads on Claude Code
-// (which aren't about a specific sub-agent, or don't carry the tool call's input) don't
-// carry either field, so the existing env-var/coding-tool fallback in resolveAgentName
-// still applies for those. Returns "" whenever no matching payload is found.
+// Claude Code's PreToolUse/PostToolUse payload for the Task/Agent tool call carries the
+// sub-agent identifier as "tool_input.subagent_type"; its SubagentStop payload carries it
+// as a top-level "agent_type" instead (confirmed against Anthropic's published hooks
+// reference — SubagentStop input includes "agent_id", "agent_type", "agent_transcript_path",
+// and "last_assistant_message" alongside the common fields). An earlier version of this
+// comment claimed Claude Code's SubagentStop payload carried no sub-agent identifier at
+// all; that was an unverified assumption and was wrong — see agentidentity.FromPayload.
+// SessionStart/Stop payloads on Claude Code (which aren't about a specific sub-agent) carry
+// neither field, so the existing env-var/coding-tool fallback in resolveAgentName still
+// applies for those. Returns "" whenever no matching payload is found.
 func agentNameFromHookPayloadFrom(r io.Reader) string {
 	data, err := io.ReadAll(io.LimitReader(r, 1<<16))
 	if err != nil || len(data) == 0 {
