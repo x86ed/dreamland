@@ -44,9 +44,9 @@
 
 ## 7. Hypnos instruction updates (all six platforms)
 
-- [ ] 7.1 Update `internal/scaffold/templates/agents/claude-code/hypnos.md`'s numbered responsibilities per the `agent-lifecycle-management` delta spec: step 1 becomes `dreamland oneiroi seed`, persona-prose editing becomes step 2, routing-table/slash-command finalization become steps 3-4, add step 5 for `revise`/`fork` routing.
-- [ ] 7.2 Apply the equivalent update to `internal/scaffold/templates/agents/{codex,cursor,kiro,antigravity,github-copilot}/hypnos.*`, preserving each platform's existing frontmatter/format conventions.
-- [ ] 7.3 Grep the six updated files for any remaining language implying `hypnos` invents the new agent's name itself; remove/rewrite it.
+- [x] 7.1 Update `internal/scaffold/templates/agents/claude-code/hypnos.md`'s numbered responsibilities per the `agent-lifecycle-management` delta spec: step 1 becomes `dreamland oneiroi seed`, persona-prose editing becomes step 2, routing-table/slash-command finalization become steps 3-4, add step 5 for `revise`/`fork` routing.
+- [x] 7.2 Apply the equivalent update to `internal/scaffold/templates/agents/{codex,cursor,kiro,antigravity,github-copilot}/hypnos.*`, preserving each platform's existing frontmatter/format conventions.
+- [x] 7.3 Grep the six updated files for any remaining language implying `hypnos` invents the new agent's name itself; remove/rewrite it.
 
 ## 8. MCP exposure
 
