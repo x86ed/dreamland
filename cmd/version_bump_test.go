@@ -1133,6 +1133,36 @@ func TestPerformBump_GoPath_GitTagError(t *testing.T) {
 	}
 }
 
+func TestPerformBump_GoPath_SkipsCollidingLocalTags(t *testing.T) {
+	// v1.1.0 and v1.2.0 already exist locally (e.g. left behind by another
+	// concurrent session sharing this working copy); the next free minor bump
+	// starting from v1.0.0 is v1.3.0.
+	existing := map[string]bool{"v1.1.0": true, "v1.2.0": true}
+	var tagged string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		switch {
+		case len(args) >= 4 && args[0] == "rev-parse" && args[1] == "-q":
+			name := strings.TrimPrefix(args[3], "refs/tags/")
+			if existing[name] {
+				return "deadbeef\n", nil
+			}
+			return "", errors.New("not found")
+		case len(args) > 0 && args[0] == "tag":
+			tagged = args[2]
+			return "", nil
+		default:
+			return "", nil
+		}
+	})
+	cfg := &config.Config{}
+	if err := performBump(nil, cfg, t.TempDir(), "v1.0.0", "minor", ""); err != nil {
+		t.Fatalf("performBump: %v", err)
+	}
+	if tagged != "v1.3.0" {
+		t.Errorf("tagged %q, want v1.3.0 (skipping colliding v1.1.0, v1.2.0)", tagged)
+	}
+}
+
 func TestPerformBump_DelegatedPath_ExplicitArg(t *testing.T) {
 	// When explicit != "", arg = explicit (not level)
 	var delegatedArg string

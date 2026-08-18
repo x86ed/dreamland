@@ -1,7 +1,9 @@
 # janus-router-agent
 
-## Requirements
+## Purpose
 
+Defines Janus, the pure-router agent every scaffolded platform installs: its router-only marker and restricted (no file-editing) tool bindings, its routing table and dispatch rules to the other nine agents, and which hand-offs are deterministic (agent-to-agent direct) versus require Janus's own judgment.
+## Requirements
 ### Requirement: Janus is installed as the router agent, replacing Hypnos in that role
 
 The scaffold installer SHALL install an agent named `janus` (in place of `orchestrator`, and in place of the router role Hypnos held earlier in this change's own history) on every supported platform. `hypnos` is not deleted — it is redefined elsewhere as the agent-authoring agent (see the `agent-lifecycle-management` capability); it no longer performs any routing function. Janus's definition SHALL carry a router-only marker distinguishing it from the other nine agents:
@@ -216,7 +218,7 @@ This applies uniformly on every platform. On GitHub Copilot specifically, both t
 
 ### Requirement: Janus dispatches agent-roster tasks to Hypnos or Meng Po via /opsx:apply
 
-For a change drafted by `phantasos` whose `tasks.md` describes creating or retiring an agent (rather than writing code), Janus's routing table SHALL name `hypnos` and `mengpo` as `/opsx:apply` task-implementer targets, the same dispatch mechanism used for `nyx`/`morpheus` on code tasks: `hypnos` when the task creates a new agent, `mengpo` when the task retires one.
+For a change drafted by `phantasos` whose `tasks.md` describes creating or retiring an agent, or describes a workflow-graph-structural change (a routing-edge change, or a hook/skill attach/detach) rather than application code, Janus's routing table SHALL name `hypnos` and `mengpo` as `/opsx:apply` task-implementer targets, the same dispatch mechanism used for `nyx`/`morpheus` on code tasks: `hypnos` when the task creates a new agent or describes a workflow-graph-structural change, `mengpo` when the task retires an agent.
 
 #### Scenario: Agent-creation task dispatched to Hypnos
 
@@ -227,6 +229,11 @@ For a change drafted by `phantasos` whose `tasks.md` describes creating or retir
 
 - **WHEN** Janus routes a task from an OpenSpec change whose `tasks.md` describes retiring an existing agent
 - **THEN** it delegates to `mengpo`
+
+#### Scenario: Workflow-graph-structural task dispatched to Hypnos, in place of a coding agent
+
+- **WHEN** Janus routes a task from an OpenSpec change whose `tasks.md` describes a routing-edge change or a hook/skill attach/detach, rather than application code
+- **THEN** it delegates to `hypnos`, in place of `morpheus`, and `hypnos` implements the task by authoring a plan and running `dreamland hypnos-serve --mode=apply-plan`
 
 ### Requirement: Janus refuses to act outside the dispatch role
 
@@ -241,3 +248,4 @@ Beyond the existing tool-binding restriction (no `Edit`/`Write`), Janus's instru
 
 - **WHEN** Janus needs information to decide where to route a request
 - **THEN** its instructions limit that investigation to what's needed for the routing decision (e.g. `openspec status`), not open-ended exploration of the codebase on Janus's own behalf
+

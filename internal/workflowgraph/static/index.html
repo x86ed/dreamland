@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>dreamland workflow graph</title>
+<link rel="stylesheet" type="text/css" href="/vendor/litegraph.css">
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #111; }
+  #toolbar {
+    font-family: -apple-system, sans-serif;
+    font-size: 13px;
+    padding: 8px 10px;
+    background: #1a1d24;
+    color: #ddd;
+    border-bottom: 1px solid #333;
+  }
+  #toolbar button {
+    margin-right: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  #status { margin-left: 10px; opacity: 0.7; }
+  #graph-canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="toolbar">Loading&hellip;</div>
+<canvas id="graph-canvas"></canvas>
+
+<script src="/vendor/litegraph.min.js"></script>
+<script src="/growable.js"></script>
+<script src="/nodes.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

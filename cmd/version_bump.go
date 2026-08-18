@@ -246,17 +246,38 @@ func runChangeBump(cfg *config.Config, repoRoot, lastTag string) error {
 	return writeBranchBumps(bumpsFile, bumps)
 }
 
+// maxTagCollisionRetries bounds the tag-name collision retry loop in performBump.
+// This working copy can be shared across many concurrent agent sessions/branches
+// that each run version-bump locally without pushing tags upstream, so local-only
+// tags can pile up and collide with a freshly computed "next" version even though
+// they belong to unrelated work. 1000 is comfortably above any collision run seen
+// in practice and keeps the loop bounded.
+const maxTagCollisionRetries = 1000
+
 func performBump(_ *cobra.Command, cfg *config.Config, _ string, lastTag, level, explicit string) error {
 	if cfg.VersionBumpCommand == "" {
-		// Go path: manage git tags directly.
-		newVer, err := bumpSemver(lastTag, level, explicit)
-		if err != nil {
-			return err
+		// Go path: manage git tags directly. Skip past any tag name that already
+		// exists locally (e.g. an orphaned tag left behind by another concurrent
+		// session sharing this working copy) instead of failing on `git tag`'s
+		// "already exists" — that would otherwise abort the bump (and, for
+		// --change bumps, leave the change's slug unrecorded in change-bumps,
+		// forcing a re-run every time).
+		base := lastTag
+		for attempts := 0; attempts < maxTagCollisionRetries; attempts++ {
+			newVer, err := bumpSemver(base, level, explicit)
+			if err != nil {
+				return err
+			}
+			if explicit == "" && tagExists(newVer) {
+				base = newVer
+				continue
+			}
+			if _, err := gitExec("tag", "-a", newVer, "-m", newVer); err != nil {
+				return fmt.Errorf("git tag %s: %w", newVer, err)
+			}
+			return nil
 		}
-		if _, err := gitExec("tag", "-a", newVer, "-m", newVer); err != nil {
-			return fmt.Errorf("git tag %s: %w", newVer, err)
-		}
-		return nil
+		return fmt.Errorf("git tag: exhausted %d attempts avoiding local tag-name collisions starting from %s", maxTagCollisionRetries, lastTag)
 	}
 
 	// Delegated path.
@@ -374,6 +395,12 @@ func writeBranchBumps(path string, bumps map[string]branchBumpEntry) error {
 
 func gitExec(args ...string) (string, error) {
 	return runCmd("git", args...)
+}
+
+// tagExists reports whether a git tag with the given name already exists locally.
+func tagExists(name string) bool {
+	out, err := runCmd("git", "rev-parse", "-q", "--verify", "refs/tags/"+name)
+	return err == nil && strings.TrimSpace(out) != ""
 }
 
 // runCmd executes a command and returns combined stdout output.
