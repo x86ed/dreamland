@@ -99,11 +99,27 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// isRegisteredAgent reports whether name is one of the ten registered dreamland
-// agents — see the session-agent-identity capability for why a candidate identity
-// resolved from a hook payload that isn't in this set must be treated as unresolved.
+// isRegisteredAgent reports whether name is a registered dreamland agent — one of the
+// ten built-ins or a name present in the current repo's oneiroi registry — see the
+// session-agent-identity capability for why a candidate identity resolved from a hook
+// payload that isn't in this set must be treated as unresolved.
 func isRegisteredAgent(name string) bool {
-	return agentidentity.IsRegistered(name)
+	repoRoot, err := config.FindRepoRoot(mustGetwd())
+	if err != nil {
+		repoRoot = ""
+	}
+	return agentidentity.IsRegistered(name, repoRoot)
+}
+
+// mustGetwd returns the current working directory, or "" on error — isRegisteredAgent's
+// repoRoot resolution degrades to the built-in-ten-only behavior in that case rather
+// than failing the caller.
+func mustGetwd() string {
+	cwd, err := osGetwd()
+	if err != nil {
+		return ""
+	}
+	return cwd
 }
 
 // resolveEnforcedAgentName returns the correct agent name using the full resolution
