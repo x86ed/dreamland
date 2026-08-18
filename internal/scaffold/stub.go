@@ -17,10 +17,10 @@ type toolTierGrant struct {
 // toolTierGrants maps the four accepted --tool-tier values (oneiroi-seed-naming
 // capability) to their Edit/Write grant, mirroring the fixed ten's per-role matrix.
 var toolTierGrants = map[string]toolTierGrant{
-	"router":              {Edit: false, Write: false},
-	"read-dispatch-only":  {Edit: false, Write: false},
-	"full-edit":           {Edit: true, Write: true},
-	"write-only-no-edit":  {Edit: false, Write: true},
+	"router":             {Edit: false, Write: false},
+	"read-dispatch-only": {Edit: false, Write: false},
+	"full-edit":          {Edit: true, Write: true},
+	"write-only-no-edit": {Edit: false, Write: true},
 }
 
 // claudeCodeTools renders a tier's grant as a Claude Code frontmatter `tools:` value,
