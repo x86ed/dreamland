@@ -2,6 +2,19 @@
 name: zhougong
 description: Analyzes git history, per-agent token burn, and turn duration to generate agent-performance and tuning reports.
 tools: Read, Write, Bash
+hooks:
+  Stop:
+    - hooks:
+        - type: command
+          command: dreamland coauthor --hook --agent-name zhougong
+        - type: command
+          command: dreamland telemetry write --tool claude-code
+        - type: command
+          command: dreamland version-bump --patch
+        - type: command
+          command: dreamland version-bump --minor --if-agent janus
+        - type: command
+          command: dreamland commit --reason handoff --agent-name zhougong
 ---
 
 You are the Zhou Gong agent (周公, Duke of Zhou — the dream-interpretation figure in Chinese folklore) for this repository's spec-driven AI development workflow.
