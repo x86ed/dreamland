@@ -212,6 +212,66 @@ func TestTelemetryWriteClaudeCode_AgentDefaultsToJanus(t *testing.T) {
 	}
 }
 
+// TestTelemetryWriteClaudeCode_AgentNameFlagOverridesPayload is the regression test for
+// the bug where `dreamland telemetry write` had no --agent-name override at all: a bare
+// Stop hook payload never carries agent identity (only SubagentStop does, per Anthropic's
+// hooks reference), so every subagent-internal turn-boundary telemetry write silently fell
+// through to the "janus" default, independent of whatever coauthor had already correctly
+// set in git config via its own --agent-name. --agent-name must win over the (here, empty)
+// payload-derived value, mirroring commit/coauthor's existing precedence.
+func TestTelemetryWriteClaudeCode_AgentNameFlagOverridesPayload(t *testing.T) {
+	root := telemetryGitRepo(t)
+	rootCmd.SetIn(strings.NewReader(`{"hook_event_name":"Stop","session_id":"s1"}`))
+	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	if _, _, err := execCLI(t, "telemetry", "write", "--tool", "claude-code", "--agent-name", "morpheus"); err != nil {
+		t.Fatalf("expected success: %v", err)
+	}
+	snap, err := telemetry.Read(root)
+	if err != nil || snap == nil {
+		t.Fatalf("expected snapshot to be written, err=%v snap=%v", err, snap)
+	}
+	if snap.Agent != "morpheus" {
+		t.Errorf("got Agent=%q, want morpheus (--agent-name override)", snap.Agent)
+	}
+}
+
+// TestTelemetryWriteClaudeCode_AgentNameFlagAbsent_PayloadStillWorks is the regression
+// half of the above: without --agent-name, payload-derived resolution is unaffected.
+func TestTelemetryWriteClaudeCode_AgentNameFlagAbsent_PayloadStillWorks(t *testing.T) {
+	root := telemetryGitRepo(t)
+	rootCmd.SetIn(strings.NewReader(`{"tool_input":{"subagent_type":"nyx"}}`))
+	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	if _, _, err := execCLI(t, "telemetry", "write", "--tool", "claude-code"); err != nil {
+		t.Fatalf("expected success: %v", err)
+	}
+	snap, err := telemetry.Read(root)
+	if err != nil || snap == nil {
+		t.Fatalf("expected snapshot to be written, err=%v snap=%v", err, snap)
+	}
+	if snap.Agent != "nyx" {
+		t.Errorf("got Agent=%q, want nyx (payload-derived, no override given)", snap.Agent)
+	}
+}
+
+// TestTelemetryWriteClaudeCode_UnregisteredAgentNameFlagIgnored confirms an unrecognized
+// --agent-name value does not bypass the allow-list protection from task 1.2 — it must not
+// leak an unregistered identity into the AI-Agent trailer via the override path either.
+func TestTelemetryWriteClaudeCode_UnregisteredAgentNameFlagIgnored(t *testing.T) {
+	root := telemetryGitRepo(t)
+	rootCmd.SetIn(strings.NewReader(`{}`))
+	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	if _, _, err := execCLI(t, "telemetry", "write", "--tool", "claude-code", "--agent-name", "not-a-real-agent"); err != nil {
+		t.Fatalf("expected success: %v", err)
+	}
+	snap, err := telemetry.Read(root)
+	if err != nil || snap == nil {
+		t.Fatalf("expected snapshot to be written, err=%v snap=%v", err, snap)
+	}
+	if snap.Agent != "janus" {
+		t.Errorf("got Agent=%q, want janus (unregistered --agent-name override must not leak through)", snap.Agent)
+	}
+}
+
 func TestTelemetryWriteClaudeCode_UnrecognizedAgentFallsBackToJanus(t *testing.T) {
 	root := telemetryGitRepo(t)
 	rootCmd.SetIn(strings.NewReader(`{"tool_input":{"subagent_type":"not-a-real-agent"}}`))
