@@ -114,9 +114,27 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	}
 	message := fmt.Sprintf("chore: %s checkpoint (%s)", commitReason, agentName)
 	if out, err := gitExec("commit", "-m", message); err != nil {
+		// A concurrent writer (another agent session committing to this same working
+		// tree) can land its own commit between our status check above and this commit
+		// call, covering the exact same staged changes — our index then diffs identical
+		// against the (now-moved) HEAD and git reports "nothing to commit" rather than a
+		// real failure. Treat that specific case as the benign no-op it is, same as the
+		// clean-tree check above, instead of blocking on someone else having already done
+		// the work. Any other git commit failure still blocks exactly as before.
+		if isNothingToCommit(out) {
+			return nil
+		}
 		return Blocking(fmt.Errorf("git commit: %w\n%s", err, out))
 	}
 	return nil
+}
+
+// isNothingToCommit reports whether git commit's output indicates the working tree
+// (relative to the current index) has no changes to record — git's own message for
+// this is "nothing to commit, working tree clean" (with variants like "nothing added
+// to commit but untracked files present" for other clean-index states).
+func isNothingToCommit(gitCommitOutput string) bool {
+	return strings.Contains(gitCommitOutput, "nothing to commit")
 }
 
 // currentGitIdentityName reads the git-configured user.name (set by coauthor) and
