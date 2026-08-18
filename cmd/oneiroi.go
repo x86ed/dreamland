@@ -83,12 +83,24 @@ func oneiroiRepoRoot() (string, error) {
 	return config.FindRepoRoot(cwd)
 }
 
+// flagStringOrDefault avoids a package-level flag var leaking a previous invocation's
+// explicit value into a later one that omits the flag (cobra/pflag only resets a flag
+// to its registered default at process start, not between repeated Execute() calls in
+// the same process — as every CLI test in this package does via execCLI).
+func flagStringOrDefault(cmd *cobra.Command, name, current, def string) string {
+	if cmd.Flags().Changed(name) {
+		return current
+	}
+	return def
+}
+
 func runOneiroiSeed(cmd *cobra.Command, args []string) error {
 	repoRoot, err := oneiroiRepoRoot()
 	if err != nil {
 		return Blocking(err)
 	}
-	name, err := oneiroiSeedCore(repoRoot, oneiroiSeedRole, oneiroiSeedToolTier)
+	toolTier := flagStringOrDefault(cmd, "tool-tier", oneiroiSeedToolTier, "full-edit")
+	name, err := oneiroiSeedCore(repoRoot, oneiroiSeedRole, toolTier)
 	if err != nil {
 		return Blocking(err)
 	}
@@ -114,7 +126,8 @@ func runOneiroiFork(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return Blocking(err)
 	}
-	name, _, err := oneiroiForkCore(repoRoot, oneiroiForkAgent, oneiroiForkRole, oneiroiForkToolTier)
+	toolTier := flagStringOrDefault(cmd, "tool-tier", oneiroiForkToolTier, "")
+	name, _, err := oneiroiForkCore(repoRoot, oneiroiForkAgent, oneiroiForkRole, toolTier)
 	if err != nil {
 		return Blocking(err)
 	}
