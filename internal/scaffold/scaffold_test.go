@@ -307,7 +307,7 @@ func TestInstall_ClaudeCode_AgentScopedHooks(t *testing.T) {
 		}
 
 		wantCoauthor := "dreamland coauthor --hook --agent-name " + name
-		wantTelemetry := "dreamland telemetry write --tool claude-code"
+		wantTelemetry := "dreamland telemetry write --tool claude-code --agent-name " + name
 		wantVersionBumpPatch := "dreamland version-bump --patch"
 		wantVersionBumpJanus := "dreamland version-bump --minor --if-agent janus"
 		wantCommit := "dreamland commit --reason handoff --agent-name " + name
@@ -316,12 +316,6 @@ func TestInstall_ClaudeCode_AgentScopedHooks(t *testing.T) {
 			if !strings.Contains(content, want) {
 				t.Errorf("%s.md hooks.Stop block missing %q", name, want)
 			}
-		}
-
-		// telemetry write must NOT carry --agent-name — it has no agent-identity
-		// concept in its collector path, the flag would be a no-op there.
-		if strings.Contains(content, "telemetry write --tool claude-code --agent-name") {
-			t.Errorf("%s.md's telemetry write command carries --agent-name, which it should not (no-op flag)", name)
 		}
 
 		// Order: coauthor, telemetry write, version-bump --patch, version-bump --minor
