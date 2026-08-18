@@ -15,9 +15,9 @@
 
 ## 3. Name generation
 
-- [ ] 3.1 Create `internal/oneiroi/seed.go`: `GenerateFamily(pool []string, existing *Registry) (word1, word2 string, err error)` — draws two distinct random words via `math/rand/v2`, retries on collision against `existing.HasFamily`, up to 50 attempts, returns a descriptive error on exhaustion.
-- [ ] 3.2 Add `GenerateThirdWord(pool []string, familyWords []string, excludeWords []string) (string, error)` — draws one word not in `familyWords` or `excludeWords`, same retry/exhaustion behavior.
-- [ ] 3.3 Table-driven unit tests: fresh family generation with no collisions; forced collision (small fake pool) triggers redraw; exhaustion after all combinations forced to collide returns an error, not a panic or silent fallback.
+- [x] 3.1 Create `internal/oneiroi/seed.go`: `GenerateFamily(pool []string, existing *Registry) (word1, word2 string, err error)` — draws two distinct random words via `math/rand/v2`, retries on collision against `existing.HasFamily`, up to 50 attempts, returns a descriptive error on exhaustion.
+- [x] 3.2 Add `GenerateThirdWord(pool []string, familyWords []string, excludeWords []string) (string, error)` — draws one word not in `familyWords` or `excludeWords`, same retry/exhaustion behavior.
+- [x] 3.3 Table-driven unit tests: fresh family generation with no collisions; forced collision (small fake pool) triggers redraw; exhaustion after all combinations forced to collide returns an error, not a panic or silent fallback.
 
 ## 4. Generalized scaffold installer entry point
 
