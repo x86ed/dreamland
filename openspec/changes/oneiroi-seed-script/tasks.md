@@ -21,10 +21,10 @@
 
 ## 4. Generalized scaffold installer entry point
 
-- [ ] 4.1 In `internal/scaffold/scaffold.go`, extract the per-platform template-rendering logic (`installFlatAgents`, `installFlatCommands`, `installSkills`, `platformAgentSpec`, `platformCommandSpec`) into a shape that accepts an explicit `(name, role, toolTier string)` in addition to today's fixed ten-name iteration; add `InstallAgentStub(cfg Config, name, role, toolTier string) ([]Result, error)` as the new externally callable entry point, rendering a stub (frontmatter/hook block per tier, placeholder instruction body) at the same per-platform path convention the fixed ten use, for all six platforms.
-- [ ] 4.2 Add `InstallAgentCommand(cfg Config, name string) ([]Result, error)` mirroring the existing per-agent slash-command installation for an arbitrary name, reusing `platformCommandSpec`.
-- [ ] 4.3 Verify the fixed-ten install path (`Install`, `installAgents`, `installCommands`) is unchanged in behavior — no new tests should be needed to pass for the existing `internal/scaffold/scaffold_test.go` suite; run it to confirm.
-- [ ] 4.4 Unit tests for `InstallAgentStub`/`InstallAgentCommand`: given `name="amber-falcon"`, `toolTier="full-edit"`, files are written at the correct path for all six platforms with the correct `Edit`/`Write`/`Read`/`Bash` grant and a placeholder body; given an unknown `toolTier` value, return an error.
+- [x] 4.1 In `internal/scaffold/scaffold.go`, extract the per-platform template-rendering logic (`installFlatAgents`, `installFlatCommands`, `installSkills`, `platformAgentSpec`, `platformCommandSpec`) into a shape that accepts an explicit `(name, role, toolTier string)` in addition to today's fixed ten-name iteration; add `InstallAgentStub(cfg Config, name, role, toolTier string) ([]Result, error)` as the new externally callable entry point, rendering a stub (frontmatter/hook block per tier, placeholder instruction body) at the same per-platform path convention the fixed ten use, for all six platforms.
+- [x] 4.2 Add `InstallAgentCommand(cfg Config, name string) ([]Result, error)` mirroring the existing per-agent slash-command installation for an arbitrary name, reusing `platformCommandSpec`.
+- [x] 4.3 Verify the fixed-ten install path (`Install`, `installAgents`, `installCommands`) is unchanged in behavior — no new tests should be needed to pass for the existing `internal/scaffold/scaffold_test.go` suite; run it to confirm.
+- [x] 4.4 Unit tests for `InstallAgentStub`/`InstallAgentCommand`: given `name="amber-falcon"`, `toolTier="full-edit"`, files are written at the correct path for all six platforms with the correct `Edit`/`Write`/`Read`/`Bash` grant and a placeholder body; given an unknown `toolTier` value, return an error.
 
 ## 5. dreamland oneiroi CLI commands
 
