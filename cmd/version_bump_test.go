@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"dreamland/internal/config"
 )
@@ -19,6 +20,82 @@ func stubRunCmd(t *testing.T, fn func(name string, args ...string) (string, erro
 	orig := runCmd
 	runCmd = fn
 	t.Cleanup(func() { runCmd = orig })
+}
+
+// TestGitExec_RetriesOnLockContention is the regression test for the recurring live
+// "Error: git add -A: exit status 128" / "git config user.name: exit status 255" Stop
+// hook feedback observed repeatedly in this heavily concurrent dogfood session: a
+// transient .git/{index,config}.lock collision must be retried, not surfaced as a hard
+// failure on the first collision.
+func TestGitExec_RetriesOnLockContention(t *testing.T) {
+	origAttempts, origDelay := gitLockRetryAttempts, gitLockRetryDelay
+	gitLockRetryDelay = time.Millisecond
+	t.Cleanup(func() { gitLockRetryAttempts, gitLockRetryDelay = origAttempts, origDelay })
+
+	lockErr := &exec.ExitError{Stderr: []byte("fatal: Unable to create '.git/index.lock': File exists.")}
+	calls := 0
+	stubRunCmd(t, func(_ string, _ ...string) (string, error) {
+		calls++
+		if calls < 3 {
+			return "", lockErr
+		}
+		return "ok", nil
+	})
+
+	out, err := gitExec("add", "-A")
+	if err != nil {
+		t.Fatalf("expected eventual success, got: %v", err)
+	}
+	if out != "ok" {
+		t.Errorf("got %q, want ok", out)
+	}
+	if calls != 3 {
+		t.Errorf("got %d calls, want 3 (2 failures + 1 success)", calls)
+	}
+}
+
+// TestGitExec_LockContention_ExhaustsRetriesAndReturnsError confirms a persistent lock
+// failure (never clears) still surfaces as an error once retries are exhausted, rather
+// than retrying forever.
+func TestGitExec_LockContention_ExhaustsRetriesAndReturnsError(t *testing.T) {
+	origAttempts, origDelay := gitLockRetryAttempts, gitLockRetryDelay
+	gitLockRetryAttempts = 3
+	gitLockRetryDelay = time.Millisecond
+	t.Cleanup(func() { gitLockRetryAttempts, gitLockRetryDelay = origAttempts, origDelay })
+
+	lockErr := &exec.ExitError{Stderr: []byte("fatal: Unable to create '.git/config.lock': File exists.")}
+	calls := 0
+	stubRunCmd(t, func(_ string, _ ...string) (string, error) {
+		calls++
+		return "", lockErr
+	})
+
+	_, err := gitExec("config", "--local", "user.name", "morpheus")
+	if err == nil {
+		t.Fatal("expected error after exhausting retries")
+	}
+	if calls != gitLockRetryAttempts {
+		t.Errorf("got %d calls, want %d (retries exhausted)", calls, gitLockRetryAttempts)
+	}
+}
+
+// TestGitExec_NonLockError_NoRetry confirms a real (non-lock-contention) git failure
+// fails immediately on the first attempt — the retry loop must not mask or slow down
+// genuine errors (bad arguments, detached HEAD, permission issues, etc.).
+func TestGitExec_NonLockError_NoRetry(t *testing.T) {
+	calls := 0
+	stubRunCmd(t, func(_ string, _ ...string) (string, error) {
+		calls++
+		return "", errors.New("fatal: not a git repository")
+	})
+
+	_, err := gitExec("status")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if calls != 1 {
+		t.Errorf("got %d calls, want 1 (no retry for non-lock error)", calls)
+	}
 }
 
 // makeVersionBumpRepo sets up a temp dir with a .git dir, a .dreamland.json, and
