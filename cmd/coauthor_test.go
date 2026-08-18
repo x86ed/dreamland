@@ -289,6 +289,35 @@ func TestAgentNameFromHookPayloadFrom_CopilotAgentType(t *testing.T) {
 	}
 }
 
+// TestAgentNameFromHookPayloadFrom_ClaudeCodeSubagentStopAgentType tests that Claude
+// Code's real SubagentStop payload shape — a top-level "agent_type" field alongside
+// "agent_id"/"agent_transcript_path"/"last_assistant_message"/"stop_hook_active"
+// (confirmed against Anthropic's published hooks reference) — resolves to the finishing
+// sub-agent's name rather than falling through to "". This is the shape the
+// .claude/settings.json SubagentStop hook chain (`dreamland coauthor --hook` then
+// `dreamland commit --reason handoff`) actually receives on every sub-agent hand-off.
+func TestAgentNameFromHookPayloadFrom_ClaudeCodeSubagentStopAgentType(t *testing.T) {
+	payload := `{
+		"session_id": "abc123",
+		"transcript_path": "~/.claude/projects/.../abc123.jsonl",
+		"cwd": "/Users/example",
+		"permission_mode": "default",
+		"hook_event_name": "SubagentStop",
+		"stop_hook_active": false,
+		"agent_id": "def456",
+		"agent_type": "phantasos",
+		"agent_transcript_path": "~/.claude/projects/.../abc123/subagents/agent-def456.jsonl",
+		"last_assistant_message": "Analysis complete.",
+		"background_tasks": [],
+		"session_crons": []
+	}`
+	reader := bytes.NewReader([]byte(payload))
+	got := agentNameFromHookPayloadFrom(reader)
+	if got != "phantasos" {
+		t.Errorf("got %q, want phantasos", got)
+	}
+}
+
 // TestAgentNameFromHookPayloadFrom_ClaudeCodeSubagentType tests that the function
 // correctly parses Claude Code's tool_input.subagent_type field.
 func TestAgentNameFromHookPayloadFrom_ClaudeCodeSubagentType(t *testing.T) {
@@ -434,6 +463,61 @@ func TestRunCoauthor_AgentNameFlagAbsent_FallsBackToExistingChain(t *testing.T) 
 	}
 	if !found {
 		t.Errorf("expected fallback chain to resolve iktomi from hook payload, got calls: %v", gitCalls)
+	}
+}
+
+// TestRunCoauthor_ClaudeCodeSubagentStopResolvesRealAgent is the regression test for the
+// bug where .claude/settings.json's SubagentStop hook chain (`dreamland coauthor --hook`
+// then `dreamland commit --reason handoff`) silently fell back to "janus" on every
+// sub-agent hand-off instead of the sub-agent that actually finished. It failed under the
+// stale (pre-fix) assumption that Claude Code's SubagentStop payload carries no sub-agent
+// identifier at all; the real payload carries a top-level "agent_type" field, which
+// resolveEnforcedAgentName/agentNameFromHookPayloadFrom must resolve to git config
+// user.name, not the janus default.
+func TestRunCoauthor_ClaudeCodeSubagentStopResolvesRealAgent(t *testing.T) {
+	makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
+	withPipedStdin(t, `{
+		"session_id": "abc123",
+		"transcript_path": "~/.claude/projects/.../abc123.jsonl",
+		"cwd": "/Users/example",
+		"permission_mode": "default",
+		"hook_event_name": "SubagentStop",
+		"stop_hook_active": false,
+		"agent_id": "def456",
+		"agent_type": "phantasos",
+		"agent_transcript_path": "~/.claude/projects/.../abc123/subagents/agent-def456.jsonl",
+		"last_assistant_message": "Analysis complete.",
+		"background_tasks": [],
+		"session_crons": []
+	}`)
+
+	var gitCalls []string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		gitCalls = append(gitCalls, strings.Join(args, " "))
+		return "", nil
+	})
+
+	origTrailer, origHook, origAgentName := coauthorTrailer, coauthorHook, coauthorAgentName
+	coauthorTrailer = ""
+	coauthorHook = true
+	coauthorAgentName = ""
+	t.Cleanup(func() { coauthorTrailer = origTrailer; coauthorHook = origHook; coauthorAgentName = origAgentName })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("runCoauthor: %v", err)
+	}
+
+	found := false
+	for _, c := range gitCalls {
+		if c == "config --local user.name phantasos" {
+			found = true
+		}
+		if c == "config --local user.name janus" {
+			t.Errorf("resolved to janus fallback instead of the real finishing sub-agent phantasos, calls: %v", gitCalls)
+		}
+	}
+	if !found {
+		t.Errorf("expected git config user.name phantasos, got calls: %v", gitCalls)
 	}
 }
 
