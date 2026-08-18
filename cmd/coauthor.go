@@ -71,15 +71,20 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	repoRoot, rrErr := config.FindRepoRoot(cwd)
+	if rrErr != nil {
+		repoRoot = ""
+	}
+
 	// Default mode: set agent git identity and install the hook. --agent-name is an
 	// explicit override (from the agent-scoped Stop hook, which knows its own agent
 	// identity statically) and takes precedence over the env/stdin agent_type lookup.
 	agentName := coauthorAgentName
 	if agentName == "" {
-		agentName = resolveEnforcedAgentName(cfg)
+		agentName = resolveEnforcedAgentName(cfg, repoRoot)
 		if coauthorHook {
 			// --hook flag set: read hook payload from stdin (only when invoked by hook templates)
-			if hookAgent := agentNameFromHookPayloadFrom(os.Stdin); hookAgent != "" && isRegisteredAgent(hookAgent) {
+			if hookAgent := agentNameFromHookPayloadFrom(os.Stdin); hookAgent != "" && isRegisteredAgent(hookAgent, repoRoot) {
 				agentName = hookAgent
 			}
 		}

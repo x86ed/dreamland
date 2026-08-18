@@ -35,8 +35,13 @@ func (c *ClaudeCollector) Collect(stdin io.Reader, cfg *config.Config) (*telemet
 	var rawPayload map[string]any
 	_ = json.Unmarshal(data, &rawPayload) // best-effort; proceed even on parse failure
 
+	repoRoot := ""
+	if cfg != nil {
+		repoRoot = cfg.RepoRoot
+	}
+
 	agent := agentidentity.FromPayload(rawPayload)
-	if !agentidentity.IsRegistered(agent) {
+	if !agentidentity.IsRegistered(agent, repoRoot) {
 		// No sub-agent dispatch has occurred yet (plain SessionStart/Stop) or the payload
 		// carried an unrecognized value — default to janus, same as dreamland coauthor,
 		// so telemetry never records a stray/unregistered identity (session-agent-identity).

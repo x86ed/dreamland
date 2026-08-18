@@ -121,7 +121,7 @@ func runTelemetryWrite(cmd *cobra.Command, _ []string) error {
 	// boundary, independent of whatever coauthor had already correctly set in git config.
 	// Still gated by the registered-agent allow-list so an unrecognized override value can't
 	// leak an unregistered identity into the AI-Agent trailer.
-	if telemetryAgentName != "" && isRegisteredAgent(telemetryAgentName) {
+	if telemetryAgentName != "" && isRegisteredAgent(telemetryAgentName, repoRoot) {
 		result.Agent = telemetryAgentName
 	}
 

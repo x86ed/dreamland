@@ -110,7 +110,7 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	// as the commit author — see currentGitIdentityName.
 	agentName := commitAgentName
 	if agentName == "" {
-		agentName = currentGitIdentityName(cfg)
+		agentName = currentGitIdentityName(cfg, repoRoot)
 	}
 	message := fmt.Sprintf("chore: %s checkpoint (%s)", commitReason, agentName)
 	if out, err := gitExec("commit", "-m", message); err != nil {
@@ -141,7 +141,7 @@ func isNothingToCommit(gitCommitOutput string) bool {
 // returns it if non-empty, otherwise falls back to resolveEnforcedAgentName.
 // This ensures the commit subject always matches the actual git author, even when
 // commit runs at a different lifecycle event than coauthor with a different payload shape.
-func currentGitIdentityName(cfg *config.Config) string {
+func currentGitIdentityName(cfg *config.Config, repoRoot string) string {
 	name, err := runCmd("git", "config", "--local", "--get", "user.name")
 	if err == nil {
 		name = strings.TrimSpace(name)
@@ -150,5 +150,5 @@ func currentGitIdentityName(cfg *config.Config) string {
 		}
 	}
 	// Fallback: resolve fresh if not configured
-	return resolveEnforcedAgentName(cfg)
+	return resolveEnforcedAgentName(cfg, repoRoot)
 }
