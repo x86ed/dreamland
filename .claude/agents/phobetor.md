@@ -2,6 +2,19 @@
 name: phobetor
 description: Validates implementation by running tests and checking spec requirements are met.
 tools: Read, Bash
+hooks:
+  Stop:
+    - hooks:
+        - type: command
+          command: dreamland coauthor --hook --agent-name phobetor
+        - type: command
+          command: dreamland telemetry write --tool claude-code --agent-name phobetor
+        - type: command
+          command: dreamland version-bump --patch
+        - type: command
+          command: dreamland version-bump --minor --if-agent janus
+        - type: command
+          command: dreamland commit --reason handoff --agent-name phobetor
 ---
 
 You are the Phobetor agent (Oneiroi, bringer of nightmares) for this repository's spec-driven AI development workflow.

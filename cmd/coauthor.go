@@ -59,6 +59,13 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 	if coauthorTrailer != "" {
 		// --trailer mode: invoked by prepare-commit-msg git hook.
 		// args[0] (via --trailer flag value) is the commit message file path.
+		if hasGeneratedByTrailer, err := commitMessageHasGeneratedByTrailer(coauthorTrailer); err != nil {
+			return err
+		} else if hasGeneratedByTrailer {
+			// Script-authored commit (e.g. dreamland oneiroi seed/revise/fork) — already
+			// complete and self-describing; skip both the Co-authored-by and Tokens appends.
+			return nil
+		}
 		if err := appendCoauthorTrailer(coauthorTrailer, cfg.ModelID, suffix); err != nil {
 			return err
 		}
@@ -71,15 +78,20 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	repoRoot, rrErr := config.FindRepoRoot(cwd)
+	if rrErr != nil {
+		repoRoot = ""
+	}
+
 	// Default mode: set agent git identity and install the hook. --agent-name is an
 	// explicit override (from the agent-scoped Stop hook, which knows its own agent
 	// identity statically) and takes precedence over the env/stdin agent_type lookup.
 	agentName := coauthorAgentName
 	if agentName == "" {
-		agentName = resolveEnforcedAgentName(cfg)
+		agentName = resolveEnforcedAgentName(cfg, repoRoot)
 		if coauthorHook {
 			// --hook flag set: read hook payload from stdin (only when invoked by hook templates)
-			if hookAgent := agentNameFromHookPayloadFrom(os.Stdin); hookAgent != "" && isRegisteredAgent(hookAgent) {
+			if hookAgent := agentNameFromHookPayloadFrom(os.Stdin); hookAgent != "" && isRegisteredAgent(hookAgent, repoRoot) {
 				agentName = hookAgent
 			}
 		}
@@ -99,24 +111,28 @@ func runCoauthor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// isRegisteredAgent reports whether name is one of the ten registered dreamland
-// agents — see the session-agent-identity capability for why a candidate identity
-// resolved from a hook payload that isn't in this set must be treated as unresolved.
-func isRegisteredAgent(name string) bool {
-	return agentidentity.IsRegistered(name)
+// isRegisteredAgent reports whether name is a registered dreamland agent — one of the
+// ten built-ins or a name present in repoRoot's oneiroi registry — see the
+// session-agent-identity capability for why a candidate identity resolved from a hook
+// payload that isn't in this set must be treated as unresolved.
+func isRegisteredAgent(name, repoRoot string) bool {
+	return agentidentity.IsRegistered(name, repoRoot)
 }
 
 // resolveEnforcedAgentName returns the correct agent name using the full resolution
 // sequence: hook payload (if --hook set), env vars, coding tool fallback, or janus for Claude Code.
-// Extracted so it can be shared between coauthor and commit.
-func resolveEnforcedAgentName(cfg *config.Config) string {
+// Extracted so it can be shared between coauthor and commit. repoRoot resolves the oneiroi
+// open registry (see agentidentity.IsRegistered); callers pass "" when no repo root could
+// be resolved, which degrades to built-in-ten-only behavior.
+func resolveEnforcedAgentName(cfg *config.Config, repoRoot string) string {
 	agentName := resolveAgentName(cfg.CodingTool)
 	// Claude Code has no per-agent env var and no sub-agent identifier on its
-	// SessionStart/Stop/SubagentStop payloads (only on PreToolUse/PostToolUse for the
-	// Task/Agent tool call itself) — so absent a valid hook-resolved identity, the coding
+	// SessionStart/Stop payloads — only on PreToolUse/PostToolUse for the Task/Agent tool
+	// call ("tool_input.subagent_type") and on SubagentStop ("agent_type", confirmed against
+	// Anthropic's hooks reference) — so absent a valid hook-resolved identity, the coding
 	// tool name is not a real agent and must not become the git identity. Other platforms
 	// keep the coding-tool-name fallback unchanged.
-	if cfg.CodingTool == "Claude Code" && !isRegisteredAgent(agentName) {
+	if cfg.CodingTool == "Claude Code" && !isRegisteredAgent(agentName, repoRoot) {
 		agentName = "janus"
 	}
 	return agentName
@@ -145,12 +161,16 @@ func resolveAgentName(codingTool string) string {
 // with no timeout (correct because hook-binding callers always write and close promptly).
 // Confirmed from live GitHub Copilot SubagentStart/SubagentStop hook payloads: the field
 // is "agent_type" (e.g. "morpheus", "iktomi") — undocumented but consistently present.
-// Claude Code carries no top-level "agent_type" at all; the sub-agent identifier only
-// appears as "tool_input.subagent_type" on the PreToolUse/PostToolUse payload for the
-// Task/Agent tool call itself. SessionStart/Stop/SubagentStop payloads on Claude Code
-// (which aren't about a specific sub-agent, or don't carry the tool call's input) don't
-// carry either field, so the existing env-var/coding-tool fallback in resolveAgentName
-// still applies for those. Returns "" whenever no matching payload is found.
+// Claude Code's PreToolUse/PostToolUse payload for the Task/Agent tool call carries the
+// sub-agent identifier as "tool_input.subagent_type"; its SubagentStop payload carries it
+// as a top-level "agent_type" instead (confirmed against Anthropic's published hooks
+// reference — SubagentStop input includes "agent_id", "agent_type", "agent_transcript_path",
+// and "last_assistant_message" alongside the common fields). An earlier version of this
+// comment claimed Claude Code's SubagentStop payload carried no sub-agent identifier at
+// all; that was an unverified assumption and was wrong — see agentidentity.FromPayload.
+// SessionStart/Stop payloads on Claude Code (which aren't about a specific sub-agent) carry
+// neither field, so the existing env-var/coding-tool fallback in resolveAgentName still
+// applies for those. Returns "" whenever no matching payload is found.
 func agentNameFromHookPayloadFrom(r io.Reader) string {
 	data, err := io.ReadAll(io.LimitReader(r, 1<<16))
 	if err != nil || len(data) == 0 {
@@ -183,6 +203,28 @@ func installPrepareCommitMsgHook(repoDir string) error {
 		return err
 	}
 	return os.WriteFile(hookPath, []byte(prepareCommitMsgContent), 0o755)
+}
+
+// commitMessageHasGeneratedByTrailer reports whether msgFile already contains a
+// `Generated-By:` trailer line (e.g. `Generated-By: dreamland-oneiroi-seed`) — the
+// marker `dreamland oneiroi seed`/`revise`/`fork` writes on its own self-authored
+// commits (see the oneiroi-seed-naming capability). A missing file is treated as not
+// having the trailer, matching the other append helpers' fail-open-on-missing-file
+// posture (callers only invoke this once the hook has confirmed the file exists).
+func commitMessageHasGeneratedByTrailer(msgFile string) (bool, error) {
+	data, err := os.ReadFile(msgFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "Generated-By:") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // appendCoauthorTrailer appends a Co-authored-by trailer for the model to the commit

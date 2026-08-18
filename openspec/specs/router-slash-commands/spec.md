@@ -1,7 +1,5 @@
 # router-slash-commands
-
 ## Requirements
-
 ### Requirement: A generic slash command routes directly to Janus
 
 The scaffold installer SHALL install a `drmlnd`-prefixed generic routing command on every supported platform that invokes Janus directly, for requests not already covered by an existing `/opsx:*` command. This command is also the entry point for free-form requests that don't fit the OpenSpec-driven flow at all — Janus delegates those to `iktomi` (see the `janus-router-agent` capability). The prefix's separator and the invocation mechanism are platform-native:
@@ -48,7 +46,7 @@ The scaffold installer SHALL install a `drmlnd`-prefixed generic routing command
 
 ### Requirement: Each non-router agent has an explicit, named direct-invoke slash command
 
-The scaffold installer SHALL install one routing command per non-router agent — `phantasos`, `nyx`, `morpheus`, `phobetor`, `baku`, `iktomi`, `zhougong`, `hypnos`, `mengpo` — on every supported platform, each carrying the `drmlnd` prefix (platform-native separator, per the table in the generic-routing-command requirement above). Each command invokes Janus with an explicit instruction to route directly to the named agent, overriding Janus's own judgment about which agent fits the request. Unlike the generic routing command, these commands do not ask Janus to decide; they force a specific destination while still going through Janus, so the identity/telemetry/hand-off machinery (`dreamland coauthor`, `dreamland telemetry write`) applies exactly as it does for every other delegation.
+The scaffold installer SHALL install one routing command per non-router agent — every one of the fixed nine (`phantasos`, `nyx`, `morpheus`, `phobetor`, `baku`, `iktomi`, `zhougong`, `hypnos`, `mengpo`) and every agent seeded via `dreamland oneiroi seed`/`fork` (see the `oneiroi-seed-naming` capability) — on every supported platform, each carrying the `drmlnd` prefix (platform-native separator, per the table in the generic-routing-command requirement above). Each command invokes Janus with an explicit instruction to route directly to the named agent, overriding Janus's own judgment about which agent fits the request. Unlike the generic routing command, these commands do not ask Janus to decide; they force a specific destination while still going through Janus, so the identity/telemetry/hand-off machinery (`dreamland coauthor`, `dreamland telemetry write`) applies exactly as it does for every other delegation. A seeded oneiroi's slash command is written by `dreamland oneiroi seed`/`fork` itself, using the same per-platform template/target-path conventions the scaffold installer uses for the fixed nine (see the `agent-scaffolding` capability's generalized-installer requirement) — not a separate mechanism.
 
 This gives three tiers of entry point: the `/opsx:*` commands (OpenSpec-lifecycle-specific, either a deterministic bypass or the two-flow decision — unchanged by this capability's `drmlnd` naming, since they are not dreamland-specific), the generic routing command (Janus decides which agent), and these per-agent commands (explicit — the caller decides which agent, Janus still performs the hand-off).
 
@@ -94,6 +92,16 @@ This gives three tiers of entry point: the `/opsx:*` commands (OpenSpec-lifecycl
 
 - **WHEN** the selected coding tool is "Codex CLI" and `dreamland init` completes successfully
 - **THEN** `.codex/skills/drmlnd-<agent>/SKILL.md` exists for each of the nine agents
+
+#### Scenario: A seeded oneiroi's slash command is installed at seed time, not at the next dreamland init
+
+- **WHEN** `dreamland oneiroi seed --role "example role"` generates the name `amber-falcon` on a repository already scaffolded for Claude Code
+- **THEN** `.claude/commands/drmlnd/amber-falcon.md` exists immediately after the seed command completes, following the same `drmlnd:<agent>` convention as the fixed nine, without requiring a subsequent `dreamland init` run
+
+#### Scenario: A forked oneiroi gets its own slash command, distinct from its parent's
+
+- **WHEN** `dreamland oneiroi fork --agent amber-falcon --role "variant role"` generates `amber-falcon-onyx`
+- **THEN** `.claude/commands/drmlnd/amber-falcon-onyx.md` exists as a new file, and `.claude/commands/drmlnd/amber-falcon.md` (the parent's) is unmodified
 
 ### Requirement: OpenSpec lifecycle commands with one deterministic target route directly, bypassing Janus
 
@@ -179,3 +187,49 @@ The full set of user-invocable entry points for the OpenSpec lifecycle and per-a
 - **WHEN** `.cursor/commands/phantasos.md` exists from a prior version (filename `phantasos.md`, no `name:` frontmatter or `name: phantasos`) and the user runs `dreamland init` again with "Cursor" selected
 - **THEN** the file's content is replaced so its frontmatter reads `name: drmlnd-phantasos`, so `/phantasos` no longer resolves and `/drmlnd-phantasos` does
 - **AND** `.claude/commands/opsx/*.md` is left untouched
+
+### Requirement: Bare, unprefixed slash commands are installed alongside the drmlnd-prefixed set
+
+In addition to the `drmlnd`-prefixed generic routing command and the nine `drmlnd`-prefixed per-agent commands (see the existing requirements in this capability), the scaffold installer SHALL install a second, bare-named (unprefixed) command for the same targets on every supported platform:
+
+- Two bare generic entry points, `/dreamland` and `/janus`, both equivalent in content and behavior to the `drmlnd`-prefixed generic routing command (routes to Janus, which decides the target agent). Janus has no `drmlnd`-prefixed "force route directly to janus" counterpart to alias — forcing the destination to Janus is what the generic routing command already does — so both bare names are generated from the generic routing template, not a per-agent direct-route template.
+- One bare per-agent command per non-router agent — `/phantasos`, `/nyx`, `/morpheus`, `/phobetor`, `/baku`, `/iktomi`, `/zhougong`, `/hypnos`, `/mengpo` — equivalent in content and behavior to its `drmlnd`-prefixed counterpart.
+
+This is an additive alias, not a replacement: the `drmlnd`-prefixed set (and the "No unprefixed dreamland command artifacts remain after install" requirement governing it) is unchanged and continues to be installed. This intentionally reintroduces the possibility of a naming collision with a user's own pre-existing, unrelated command of the same bare name — see the next requirement for how that collision is handled.
+
+Each bare command file is generated from the same template as its `drmlnd`-prefixed counterpart (the generic routing template for `/dreamland` and `/janus`, the matching per-agent template for the other nine), differing only in file location/frontmatter `name` (whichever the platform uses to determine invocation name) so there is exactly one prompt body per target, not two to keep in sync.
+
+#### Scenario: Bare /dreamland command installed on Claude Code
+
+- **WHEN** the selected coding tool is "Claude Code" and `dreamland init` completes successfully
+- **THEN** `.claude/commands/dreamland.md` exists with the same routing instructions as `.claude/commands/drmlnd/route.md`
+
+#### Scenario: Bare per-agent commands installed on Claude Code
+
+- **WHEN** the selected coding tool is "Claude Code" and `dreamland init` completes successfully
+- **THEN** `.claude/commands/nyx.md`, `.claude/commands/phobetor.md`, and the remaining seven bare per-agent command files all exist, each with the same explicit "route to `<agent>`" instruction as its `.claude/commands/drmlnd/<agent>.md` counterpart
+
+#### Scenario: Bare /janus command installed on Claude Code
+
+- **WHEN** the selected coding tool is "Claude Code" and `dreamland init` completes successfully
+- **THEN** `.claude/commands/janus.md` exists with the same generic routing instructions as `.claude/commands/dreamland.md` and `.claude/commands/drmlnd/route.md`
+
+#### Scenario: Bare commands installed alongside, not instead of, the drmlnd-prefixed set
+
+- **WHEN** `dreamland init` completes successfully for any supported platform
+- **THEN** both the bare command files and their `drmlnd`-prefixed equivalents exist — neither set is omitted
+
+### Requirement: A pre-existing bare command not authored by dreamland is left untouched
+
+Because bare command names are not namespaced, `dreamland init` SHALL NOT overwrite a bare command file that already exists at the target path and was not itself written by a prior `dreamland init` run. Detection: a dreamland-authored bare command file carries a recognizable marker (e.g. a generated-file comment or frontmatter field consistent with the rest of that platform's dreamland-authored files); a file lacking that marker is treated as user-owned and skipped, with a warning printed to stderr naming the skipped path and the agent it would have installed.
+
+#### Scenario: User's own /janus command is not overwritten
+
+- **WHEN** `.claude/commands/janus.md` already exists and does not carry the dreamland-authored marker, and `dreamland init` runs
+- **THEN** the file is left unchanged and a warning is printed naming `.claude/commands/janus.md` as skipped
+
+#### Scenario: A dreamland-authored bare command is safely updated on re-init
+
+- **WHEN** `.claude/commands/janus.md` already exists and does carry the dreamland-authored marker (installed by a prior `dreamland init` run), and `dreamland init` runs again
+- **THEN** the file is overwritten with the current template content, same as any other dreamland-managed file
+

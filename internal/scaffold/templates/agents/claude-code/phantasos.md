@@ -8,7 +8,7 @@ hooks:
         - type: command
           command: dreamland coauthor --hook --agent-name phantasos
         - type: command
-          command: dreamland telemetry write --tool claude-code
+          command: dreamland telemetry write --tool claude-code --agent-name phantasos
         - type: command
           command: dreamland version-bump --patch
         - type: command

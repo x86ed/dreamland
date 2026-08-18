@@ -289,6 +289,35 @@ func TestAgentNameFromHookPayloadFrom_CopilotAgentType(t *testing.T) {
 	}
 }
 
+// TestAgentNameFromHookPayloadFrom_ClaudeCodeSubagentStopAgentType tests that Claude
+// Code's real SubagentStop payload shape — a top-level "agent_type" field alongside
+// "agent_id"/"agent_transcript_path"/"last_assistant_message"/"stop_hook_active"
+// (confirmed against Anthropic's published hooks reference) — resolves to the finishing
+// sub-agent's name rather than falling through to "". This is the shape the
+// .claude/settings.json SubagentStop hook chain (`dreamland coauthor --hook` then
+// `dreamland commit --reason handoff`) actually receives on every sub-agent hand-off.
+func TestAgentNameFromHookPayloadFrom_ClaudeCodeSubagentStopAgentType(t *testing.T) {
+	payload := `{
+		"session_id": "abc123",
+		"transcript_path": "~/.claude/projects/.../abc123.jsonl",
+		"cwd": "/Users/example",
+		"permission_mode": "default",
+		"hook_event_name": "SubagentStop",
+		"stop_hook_active": false,
+		"agent_id": "def456",
+		"agent_type": "phantasos",
+		"agent_transcript_path": "~/.claude/projects/.../abc123/subagents/agent-def456.jsonl",
+		"last_assistant_message": "Analysis complete.",
+		"background_tasks": [],
+		"session_crons": []
+	}`
+	reader := bytes.NewReader([]byte(payload))
+	got := agentNameFromHookPayloadFrom(reader)
+	if got != "phantasos" {
+		t.Errorf("got %q, want phantasos", got)
+	}
+}
+
 // TestAgentNameFromHookPayloadFrom_ClaudeCodeSubagentType tests that the function
 // correctly parses Claude Code's tool_input.subagent_type field.
 func TestAgentNameFromHookPayloadFrom_ClaudeCodeSubagentType(t *testing.T) {
@@ -343,7 +372,7 @@ func TestAgentNameFromHookPayloadFrom_InvalidJSON(t *testing.T) {
 func TestResolveEnforcedAgentName_ClaudeCodeFallback(t *testing.T) {
 	// Claude Code without a hook payload should fall back to janus, not the tool name
 	cfg := &config.Config{CodingTool: "Claude Code"}
-	got := resolveEnforcedAgentName(cfg)
+	got := resolveEnforcedAgentName(cfg, "")
 	if got != "janus" {
 		t.Errorf("got %q, want janus for Claude Code fallback", got)
 	}
@@ -437,10 +466,65 @@ func TestRunCoauthor_AgentNameFlagAbsent_FallsBackToExistingChain(t *testing.T) 
 	}
 }
 
+// TestRunCoauthor_ClaudeCodeSubagentStopResolvesRealAgent is the regression test for the
+// bug where .claude/settings.json's SubagentStop hook chain (`dreamland coauthor --hook`
+// then `dreamland commit --reason handoff`) silently fell back to "janus" on every
+// sub-agent hand-off instead of the sub-agent that actually finished. It failed under the
+// stale (pre-fix) assumption that Claude Code's SubagentStop payload carries no sub-agent
+// identifier at all; the real payload carries a top-level "agent_type" field, which
+// resolveEnforcedAgentName/agentNameFromHookPayloadFrom must resolve to git config
+// user.name, not the janus default.
+func TestRunCoauthor_ClaudeCodeSubagentStopResolvesRealAgent(t *testing.T) {
+	makeCoauthorRepo(t, config.Config{CodingTool: "Claude Code"})
+	withPipedStdin(t, `{
+		"session_id": "abc123",
+		"transcript_path": "~/.claude/projects/.../abc123.jsonl",
+		"cwd": "/Users/example",
+		"permission_mode": "default",
+		"hook_event_name": "SubagentStop",
+		"stop_hook_active": false,
+		"agent_id": "def456",
+		"agent_type": "phantasos",
+		"agent_transcript_path": "~/.claude/projects/.../abc123/subagents/agent-def456.jsonl",
+		"last_assistant_message": "Analysis complete.",
+		"background_tasks": [],
+		"session_crons": []
+	}`)
+
+	var gitCalls []string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		gitCalls = append(gitCalls, strings.Join(args, " "))
+		return "", nil
+	})
+
+	origTrailer, origHook, origAgentName := coauthorTrailer, coauthorHook, coauthorAgentName
+	coauthorTrailer = ""
+	coauthorHook = true
+	coauthorAgentName = ""
+	t.Cleanup(func() { coauthorTrailer = origTrailer; coauthorHook = origHook; coauthorAgentName = origAgentName })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("runCoauthor: %v", err)
+	}
+
+	found := false
+	for _, c := range gitCalls {
+		if c == "config --local user.name phantasos" {
+			found = true
+		}
+		if c == "config --local user.name janus" {
+			t.Errorf("resolved to janus fallback instead of the real finishing sub-agent phantasos, calls: %v", gitCalls)
+		}
+	}
+	if !found {
+		t.Errorf("expected git config user.name phantasos, got calls: %v", gitCalls)
+	}
+}
+
 func TestResolveEnforcedAgentName_OtherPlatformFallback(t *testing.T) {
 	// Other platforms should fall back to the tool name
 	cfg := &config.Config{CodingTool: "GitHub Copilot"}
-	got := resolveEnforcedAgentName(cfg)
+	got := resolveEnforcedAgentName(cfg, "")
 	if got != "GitHub Copilot" {
 		t.Errorf("got %q, want GitHub Copilot fallback", got)
 	}
@@ -911,6 +995,93 @@ func TestAppendTokensReport_AppendsWithTrailingNewline(t *testing.T) {
 	data, _ := os.ReadFile(msgFile)
 	if !strings.Contains(string(data), "Tokens: input=100 output=20") {
 		t.Errorf("expected Tokens line appended, got:\n%s", data)
+	}
+}
+
+// --- Generated-By trailer short-circuit (task 6.3/6.4, oneiroi-seed-script) ---
+
+// TestRunCoauthor_TrailerMode_GeneratedByTrailer_LeavesFileByteForByteUnchanged covers
+// the "Commit message declares zero tokens and no coauthor" / self-authored-commit
+// posture: a commit message already carrying a `Generated-By: dreamland-oneiroi-seed`
+// trailer (written by internal/oneiroi's CommitScaffold, task 6.1) must be treated as
+// complete — `dreamland coauthor --trailer` must skip both the Co-authored-by append and
+// the Tokens: append entirely, even when a non-zero telemetry snapshot is available that
+// would otherwise cause appendTokensReport to write a line.
+func TestRunCoauthor_TrailerMode_GeneratedByTrailer_LeavesFileByteForByteUnchanged(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	root := makeCoauthorRepo(t, config.Config{ModelID: "claude-sonnet-4-6"})
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	// Fake non-zero telemetry snapshot — must be ignored because Generated-By is present.
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{
+		InputTokens: 999, OutputTokens: 999, CachedTokens: 999, TotalTokens: 2997,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	original := "oneiroi: seed amber-falcon (full-edit tier)\n\n" +
+		"Tokens: input=0 output=0 cached=0 total=0\n" +
+		"Generated-By: dreamland-oneiroi-seed\n"
+	msgFile := filepath.Join(root, "COMMIT_EDITMSG")
+	if err := os.WriteFile(msgFile, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coauthorTrailer = msgFile
+	t.Cleanup(func() { coauthorTrailer = "" })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(msgFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Errorf("Generated-By commit message was modified, byte-for-byte diff:\nwant:\n%q\ngot:\n%q", original, string(data))
+	}
+}
+
+// TestRunCoauthor_TrailerMode_NoGeneratedByTrailer_StillAppendsCoauthorAndTokens is the
+// explicit regression check that a normal (non-oneiroi-generated) commit message is
+// unaffected by the new Generated-By short-circuit — it still gets the existing
+// Co-authored-by:/Tokens: treatment.
+func TestRunCoauthor_TrailerMode_NoGeneratedByTrailer_StillAppendsCoauthorAndTokens(t *testing.T) {
+	withCoauthorFlags(t, "", false)
+	root := makeCoauthorRepo(t, config.Config{ModelID: "claude-sonnet-4-6"})
+	orig := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = orig })
+
+	if err := telemetry.Write(root, &telemetry.SnapshotResult{
+		InputTokens: 100, OutputTokens: 50, CachedTokens: 10, TotalTokens: 160,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	msgFile := filepath.Join(root, "COMMIT_EDITMSG")
+	if err := os.WriteFile(msgFile, []byte("feat: something\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coauthorTrailer = msgFile
+	t.Cleanup(func() { coauthorTrailer = "" })
+
+	if err := runCoauthor(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(msgFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Co-authored-by: claude-sonnet-4-6") {
+		t.Errorf("expected Co-authored-by trailer appended for a non-Generated-By message, got:\n%s", content)
+	}
+	if !strings.Contains(content, "Tokens: input=100 output=50 cached=10 total=160") {
+		t.Errorf("expected Tokens line appended for a non-Generated-By message, got:\n%s", content)
 	}
 }
 
