@@ -1,7 +1,5 @@
 # router-slash-commands
-
 ## Requirements
-
 ### Requirement: A generic slash command routes directly to Janus
 
 The scaffold installer SHALL install a `drmlnd`-prefixed generic routing command on every supported platform that invokes Janus directly, for requests not already covered by an existing `/opsx:*` command. This command is also the entry point for free-form requests that don't fit the OpenSpec-driven flow at all — Janus delegates those to `iktomi` (see the `janus-router-agent` capability). The prefix's separator and the invocation mechanism are platform-native:
@@ -48,7 +46,7 @@ The scaffold installer SHALL install a `drmlnd`-prefixed generic routing command
 
 ### Requirement: Each non-router agent has an explicit, named direct-invoke slash command
 
-The scaffold installer SHALL install one routing command per non-router agent — `phantasos`, `nyx`, `morpheus`, `phobetor`, `baku`, `iktomi`, `zhougong`, `hypnos`, `mengpo` — on every supported platform, each carrying the `drmlnd` prefix (platform-native separator, per the table in the generic-routing-command requirement above). Each command invokes Janus with an explicit instruction to route directly to the named agent, overriding Janus's own judgment about which agent fits the request. Unlike the generic routing command, these commands do not ask Janus to decide; they force a specific destination while still going through Janus, so the identity/telemetry/hand-off machinery (`dreamland coauthor`, `dreamland telemetry write`) applies exactly as it does for every other delegation.
+The scaffold installer SHALL install one routing command per non-router agent — every one of the fixed nine (`phantasos`, `nyx`, `morpheus`, `phobetor`, `baku`, `iktomi`, `zhougong`, `hypnos`, `mengpo`) and every agent seeded via `dreamland oneiroi seed`/`fork` (see the `oneiroi-seed-naming` capability) — on every supported platform, each carrying the `drmlnd` prefix (platform-native separator, per the table in the generic-routing-command requirement above). Each command invokes Janus with an explicit instruction to route directly to the named agent, overriding Janus's own judgment about which agent fits the request. Unlike the generic routing command, these commands do not ask Janus to decide; they force a specific destination while still going through Janus, so the identity/telemetry/hand-off machinery (`dreamland coauthor`, `dreamland telemetry write`) applies exactly as it does for every other delegation. A seeded oneiroi's slash command is written by `dreamland oneiroi seed`/`fork` itself, using the same per-platform template/target-path conventions the scaffold installer uses for the fixed nine (see the `agent-scaffolding` capability's generalized-installer requirement) — not a separate mechanism.
 
 This gives three tiers of entry point: the `/opsx:*` commands (OpenSpec-lifecycle-specific, either a deterministic bypass or the two-flow decision — unchanged by this capability's `drmlnd` naming, since they are not dreamland-specific), the generic routing command (Janus decides which agent), and these per-agent commands (explicit — the caller decides which agent, Janus still performs the hand-off).
 
@@ -94,6 +92,16 @@ This gives three tiers of entry point: the `/opsx:*` commands (OpenSpec-lifecycl
 
 - **WHEN** the selected coding tool is "Codex CLI" and `dreamland init` completes successfully
 - **THEN** `.codex/skills/drmlnd-<agent>/SKILL.md` exists for each of the nine agents
+
+#### Scenario: A seeded oneiroi's slash command is installed at seed time, not at the next dreamland init
+
+- **WHEN** `dreamland oneiroi seed --role "example role"` generates the name `amber-falcon` on a repository already scaffolded for Claude Code
+- **THEN** `.claude/commands/drmlnd/amber-falcon.md` exists immediately after the seed command completes, following the same `drmlnd:<agent>` convention as the fixed nine, without requiring a subsequent `dreamland init` run
+
+#### Scenario: A forked oneiroi gets its own slash command, distinct from its parent's
+
+- **WHEN** `dreamland oneiroi fork --agent amber-falcon --role "variant role"` generates `amber-falcon-onyx`
+- **THEN** `.claude/commands/drmlnd/amber-falcon-onyx.md` exists as a new file, and `.claude/commands/drmlnd/amber-falcon.md` (the parent's) is unmodified
 
 ### Requirement: OpenSpec lifecycle commands with one deterministic target route directly, bypassing Janus
 
@@ -179,3 +187,4 @@ The full set of user-invocable entry points for the OpenSpec lifecycle and per-a
 - **WHEN** `.cursor/commands/phantasos.md` exists from a prior version (filename `phantasos.md`, no `name:` frontmatter or `name: phantasos`) and the user runs `dreamland init` again with "Cursor" selected
 - **THEN** the file's content is replaced so its frontmatter reads `name: drmlnd-phantasos`, so `/phantasos` no longer resolves and `/drmlnd-phantasos` does
 - **AND** `.claude/commands/opsx/*.md` is left untouched
+

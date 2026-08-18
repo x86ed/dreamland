@@ -1,7 +1,5 @@
 # dev-workflow-hooks
-
 ## Requirements
-
 ### Requirement: Four lifecycle commands added to the dreamland binary
 
 The `dreamland` binary SHALL expose four new cobra subcommands that implement agent lifecycle hook logic. These commands are the same across all platforms; only the binding files that invoke them differ.
@@ -109,13 +107,13 @@ Version bump is dispatched to the language-appropriate tool from `.dreamland.jso
 
 **a. Set agent git identity (repository-local scope):**
 
-AgentName is read from the platform's current-agent env var at runtime (e.g., `CLAUDE_AGENT_ID`); falls back to the coding tool name in `.dreamland.json`. AgentEmail is derived by cleaning AgentName and appending `email_suffix` from `.dreamland.json` (default `@github.com`).
+AgentName is read from the platform's current-agent env var at runtime (e.g., `CLAUDE_AGENT_ID`), a hook payload's identity field (see the `session-agent-identity` capability), or falls back to the coding tool name in `.dreamland.json`. AgentEmail is derived by cleaning AgentName and appending `email_suffix` from `.dreamland.json` (default `@github.com`).
 
 Email cleaning: lowercase → replace spaces and underscores with `-` → strip characters not in `[a-z0-9.\-]` → trim leading/trailing `-` and `.`.
 
 `git config --local user.name` is set to AgentName. `git config --local user.email` is set to AgentEmail.
 
-This identity logic is identical for every scaffolded agent (Janus, Phantasos, Nyx, Morpheus, Phobetor, Baku, Iktomi, Zhou Gong, Hypnos, Meng Po) — none of them get special-cased behavior; only the AgentName value read from the env var differs per invocation.
+This identity logic is identical for every scaffolded agent — every one of the ten built-in agents (Janus, Phantasos, Nyx, Morpheus, Phobetor, Baku, Iktomi, Zhou Gong, Hypnos, Meng Po) and every agent seeded via `dreamland oneiroi seed`/`revise`/`fork` (see the `oneiroi-seed-naming` capability) — none of them get special-cased behavior; only the AgentName value read from the env var/hook payload differs per invocation, and whether a candidate name is trusted is governed by `internal/agentidentity.IsRegistered`, which recognizes both the built-in ten and any name present in `.dreamland/oneiroi/registry.json`.
 
 **b. Install a `prepare-commit-msg` git hook:**
 
@@ -126,7 +124,7 @@ Write (or update) `.git/hooks/prepare-commit-msg` as a minimal shell wrapper tha
 dreamland coauthor --trailer "$1" "$2" "$3"
 ```
 
-When invoked with `--trailer`, `dreamland coauthor` reads `$1` (commit message file path), constructs model identity from `.dreamland.json`, and appends to the file if no matching trailer is already present:
+When invoked with `--trailer`, `dreamland coauthor` reads `$1` (commit message file path) and first checks whether the message already contains a `Generated-By:` trailer. If it does, the message is treated as complete and self-describing — `dreamland coauthor --trailer` makes no changes to it at all (no `Co-authored-by:` append, no `Tokens:` append; see the `oneiroi-seed-naming` capability's self-authored-commit requirement, which is what produces this trailer). Otherwise, it constructs model identity from `.dreamland.json` and appends to the file, if no matching trailer is already present:
 
 ```text
 Co-authored-by: <model-name> <model-email>
@@ -171,7 +169,7 @@ The hook file is written with mode 0755. If `.git/hooks/prepare-commit-msg` alre
 
 #### Scenario: Co-authored-by trailer appended by --trailer mode
 
-- **WHEN** `dreamland coauthor --trailer <file>` runs and the commit message does not contain a matching `Co-authored-by:` line
+- **WHEN** `dreamland coauthor --trailer <file>` runs and the commit message does not contain a matching `Co-authored-by:` line or a `Generated-By:` trailer
 - **THEN** `Co-authored-by: <model-name> <model-email>` is appended to the file
 
 #### Scenario: Co-authored-by trailer not duplicated
@@ -188,6 +186,11 @@ The hook file is written with mode 0755. If `.git/hooks/prepare-commit-msg` alre
 
 - **WHEN** `dreamland coauthor --trailer <file>` runs and no telemetry data is available for the current turn
 - **THEN** the `Co-authored-by:` trailer is still appended and the `Tokens:` line is omitted
+
+#### Scenario: Generated-By trailer suppresses both auto-appends
+
+- **WHEN** `dreamland coauthor --trailer <file>` runs and the commit message already contains a `Generated-By:` trailer (e.g. `Generated-By: dreamland-oneiroi-seed`)
+- **THEN** the file is left completely unchanged — no `Co-authored-by:` line and no `Tokens:` line are appended, even if telemetry data is available for the current turn
 
 ### Requirement: init accepts --email-suffix to configure the agent/model email domain
 
@@ -534,3 +537,4 @@ The existing `version-bump` (minor/major, no `--patch`) behavior fires once per 
 
 - **WHEN** `baku` finalizes a change whose `proposal.md` contains no **BREAKING** marker
 - **THEN** it does not run `dreamland version-bump --breaking`
+
