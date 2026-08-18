@@ -20,6 +20,8 @@ var telemetryCmd = &cobra.Command{
 	Short: "Session telemetry commands",
 }
 
+var telemetryAgentName string
+
 func init() {
 	rootCmd.AddCommand(telemetryCmd)
 	registerCollectors()
@@ -31,6 +33,7 @@ func init() {
 	}
 	writeCmd.Flags().String("tool", "", "tool name (claude-code, codex, cursor, kiro, antigravity, github-copilot)")
 	writeCmd.Flags().String("phase", "", "kiro phase: start or stop")
+	writeCmd.Flags().StringVar(&telemetryAgentName, "agent-name", "", "explicit agent name, takes precedence over hook-payload-derived value (mirrors coauthor/commit --agent-name)")
 	_ = writeCmd.MarkFlagRequired("tool")
 	telemetryCmd.AddCommand(writeCmd)
 
@@ -108,6 +111,20 @@ func runTelemetryWrite(cmd *cobra.Command, _ []string) error {
 	if result == nil {
 		return nil
 	}
+
+	// --agent-name is an explicit override (from the agent-scoped Stop hook, which knows
+	// its own agent identity statically) and takes precedence over whatever the collector
+	// derived from the hook payload — same precedence rule as coauthor/commit's --agent-name.
+	// A bare Stop payload never carries agent identity at all (only SubagentStop does, per
+	// Anthropic's hooks reference), so without this override ClaudeCollector.Collect always
+	// fell through to its hardcoded "janus" default for every subagent-internal turn
+	// boundary, independent of whatever coauthor had already correctly set in git config.
+	// Still gated by the registered-agent allow-list so an unrecognized override value can't
+	// leak an unregistered identity into the AI-Agent trailer.
+	if telemetryAgentName != "" && isRegisteredAgent(telemetryAgentName) {
+		result.Agent = telemetryAgentName
+	}
+
 	return telemetry.Write(repoRoot, result)
 }
 
