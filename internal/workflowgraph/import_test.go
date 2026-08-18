@@ -97,13 +97,40 @@ func TestImportAgainstThisRepo(t *testing.T) {
 			t.Errorf("expected a project-scoped hook for event %q (from .claude/settings.json)", event)
 		}
 	}
-	// This repo's live .claude/agents/*.md files carry no `hooks:` frontmatter
-	// block at all (checked all ten directly — a real, pre-existing drift from
-	// the current template, which does have one; out of scope to fix here).
-	// The importer must reflect that accurately: zero agent-scoped hooks, not
-	// fabricate any from the template's shape.
-	if agentScopedCount != 0 {
-		t.Errorf("got %d agent-scoped hooks, want 0 — this repo's live agent files have no hooks: block today", agentScopedCount)
+	// This repo's live .claude/agents/*.md files each carry a hooks: Stop:
+	// block with 5 commands (coauthor, telemetry write, version-bump --patch,
+	// version-bump --minor --if-agent janus, commit --reason handoff) — the
+	// importer must parse one agent-scoped hook node per command, for every
+	// agent, not fabricate zero from a stale assumption that the block is
+	// absent.
+	wantAgentScopedCount := len(wantAgents) * 5
+	if agentScopedCount != wantAgentScopedCount {
+		t.Errorf("got %d agent-scoped hooks, want %d — this repo's live agent files each carry a 5-command hooks.Stop block", agentScopedCount, wantAgentScopedCount)
+	}
+
+	// The three self-identifying commands (coauthor, telemetry write, commit)
+	// must each carry --agent-name <owning agent>, confirming the importer
+	// parsed the real per-agent command text rather than a shared template
+	// string blind to which agent it's attached to.
+	for _, id := range wantAgents {
+		for _, prefix := range []string{"dreamland coauthor --hook", "dreamland telemetry write --tool claude-code", "dreamland commit --reason handoff"} {
+			var found bool
+			for _, h := range g.Hooks {
+				if h.Scope == ScopeAgent && strings.HasPrefix(h.Command, prefix) {
+					if !strings.Contains(h.Command, "--agent-name "+id) {
+						continue
+					}
+					for _, e := range g.Edges {
+						if e.Kind == EdgeHookBinding && e.From == h.ID && e.To == id {
+							found = true
+						}
+					}
+				}
+			}
+			if !found {
+				t.Errorf("agent %q: expected an agent-scoped hook %q bound to it carrying --agent-name %s", id, prefix, id)
+			}
+		}
 	}
 
 	// Every project-scoped hook must have a hookbinding edge to "project", and
