@@ -65,8 +65,8 @@ func runCommit(cmd *cobra.Command, args []string) error {
 			// If a test command is configured but no result file exists, that's a broken invariant
 			if testResult == nil {
 				msg := fmt.Sprintf(
-					"test command configured in .dreamland.json but no result recorded in .dreamland/last-test-result.json\n"+
-						"this suggests `dreamland test` did not run before this commit attempt\n"+
+					"test command configured in .dreamland.json but no result recorded in .dreamland/last-test-result.json\n" +
+						"this suggests `dreamland test` did not run before this commit attempt\n" +
 						"route this to iktomi to investigate the hook wiring or test command configuration",
 				)
 				return Blocking(errors.New(msg))
