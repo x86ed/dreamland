@@ -118,6 +118,35 @@ func TestRunCommit_GitCommitError(t *testing.T) {
 	}
 }
 
+// TestRunCommit_GitCommitNothingToCommit_IsBenignNoOp is the regression test for the
+// live "Error: git commit: exit status 1 ... nothing to commit, working tree clean"
+// Stop hook feedback: a concurrent agent session can land its own commit covering the
+// exact same staged changes between our git status check and our own git commit call.
+// That must be treated as a benign no-op (the work is committed, just not by us),
+// not a blocking failure.
+func TestRunCommit_GitCommitNothingToCommit_IsBenignNoOp(t *testing.T) {
+	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
+
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		switch {
+		case len(args) > 0 && args[0] == "status":
+			return " M some/file.go\n", nil
+		case len(args) > 0 && args[0] == "commit":
+			return "On branch main\nnothing to commit, working tree clean", errors.New("exit status 1")
+		default:
+			return "", nil
+		}
+	})
+
+	orig := commitReason
+	commitReason = "handoff"
+	t.Cleanup(func() { commitReason = orig })
+
+	if err := runCommit(nil, nil); err != nil {
+		t.Fatalf("expected nil (benign no-op) when a concurrent writer already committed, got: %v", err)
+	}
+}
+
 func TestRunCommit_NoOpOnCleanTree(t *testing.T) {
 	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
 
