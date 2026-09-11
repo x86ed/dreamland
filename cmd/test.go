@@ -50,18 +50,33 @@ func runTest(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	out, err := runCmd("git", "status", "--porcelain")
+	// --untracked-files=all is required here: without it, git status --porcelain
+	// collapses a brand-new untracked directory into a single opaque entry
+	// (e.g. "?? newpkg/") instead of listing the files inside it. That entry's
+	// path has no source-file extension, so hasMatchingFiles below would never
+	// see e.g. "newpkg/foo.go" and would wrongly conclude nothing changed,
+	// silently skipping tests for entirely-new, never-committed packages.
+	out, err := runCmd("git", "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return nil // git unavailable → skip
-	}
-
-	if !hasMatchingFiles(out, exts) {
-		return nil // no source changes, skip test and don't record result
 	}
 
 	repoRoot, err := config.FindRepoRoot(cwd)
 	if err != nil {
 		return fmt.Errorf("failed to find repo root: %w", err)
+	}
+
+	if !hasMatchingFiles(out, exts) {
+		// No tracked source changes since the last commit, so there is
+		// nothing to test. Record that explicitly as "skipped" (rather than
+		// leaving no result file at all) so `commit`/`test-and-commit` can
+		// tell "test correctly determined no run was needed" apart from
+		// "test never ran before this commit attempt" — the latter is the
+		// broken-invariant case they should still refuse to commit through.
+		if writeErr := writeLastTestResult(repoRoot, "skipped"); writeErr != nil {
+			return fmt.Errorf("no source changes but could not record skip result: %w", writeErr)
+		}
+		return nil
 	}
 
 	parts := strings.Fields(cfg.TestCommand)

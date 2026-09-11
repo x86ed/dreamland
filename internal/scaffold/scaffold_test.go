@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -233,6 +234,32 @@ func TestInstall_ClaudeCode_SubagentStopMatcherUnscoped(t *testing.T) {
 	}
 }
 
+func TestInstall_ClaudeCode_SubagentStopCommands(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	entries := hookEntries(t, root, "SubagentStop")
+	var commands []string
+	for _, entry := range entries {
+		raw, _ := entry["hooks"].([]any)
+		for _, hook := range raw {
+			if command, _ := hook.(map[string]any)["command"].(string); command != "" {
+				commands = append(commands, command)
+			}
+		}
+	}
+	want := []string{
+		"dreamland telemetry write --tool claude-code",
+		"dreamland version-bump --patch",
+		"dreamland version-bump --minor --if-agent janus",
+	}
+	if !reflect.DeepEqual(commands, want) {
+		t.Fatalf("SubagentStop commands = %v, want %v", commands, want)
+	}
+}
+
 func TestInstall_ClaudeCode_PreToolUseMatcherIsTaskAgent(t *testing.T) {
 	root := fakeGitRepo(t)
 	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
@@ -331,7 +358,7 @@ func TestInstall_ClaudeCode_AgentScopedHooks(t *testing.T) {
 	}
 }
 
-func TestInstall_ClaudeCode_AgentScopedHooksMatchWorkspaceSubagentStop(t *testing.T) {
+func TestInstall_ClaudeCode_AgentScopedHooksContainWorkspaceSharedCommands(t *testing.T) {
 	root := fakeGitRepo(t)
 	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
 		t.Fatalf("Install: %v", err)
@@ -352,8 +379,12 @@ func TestInstall_ClaudeCode_AgentScopedHooksMatchWorkspaceSubagentStop(t *testin
 			}
 		}
 	}
-	if len(workspaceCommands) != 5 {
-		t.Fatalf("expected 5 workspace-level SubagentStop commands, got %d: %v", len(workspaceCommands), workspaceCommands)
+	if !reflect.DeepEqual(workspaceCommands, []string{
+		"dreamland telemetry write --tool claude-code",
+		"dreamland version-bump --patch",
+		"dreamland version-bump --minor --if-agent janus",
+	}) {
+		t.Fatalf("unexpected workspace-level SubagentStop commands: %v", workspaceCommands)
 	}
 
 	agents := []string{"janus", "phantasos", "nyx", "morpheus", "phobetor", "baku", "iktomi", "zhougong", "hypnos", "mengpo"}
@@ -364,16 +395,15 @@ func TestInstall_ClaudeCode_AgentScopedHooksMatchWorkspaceSubagentStop(t *testin
 		}
 		content := string(data)
 
-		// Each workspace command, with --agent-name <name> appended for coauthor/commit
-		// (which the workspace array itself never carries, since it's shared across all
-		// agents), must appear in the frontmatter block.
-		for _, wc := range workspaceCommands {
-			want := wc
-			if strings.HasPrefix(wc, "dreamland coauthor") || strings.HasPrefix(wc, "dreamland commit") {
-				want = wc + " --agent-name " + name
-			}
+		for _, want := range []string{
+			"dreamland telemetry write --tool claude-code --agent-name " + name,
+			"dreamland version-bump --patch",
+			"dreamland version-bump --minor --if-agent janus",
+			"dreamland coauthor --hook --agent-name " + name,
+			"dreamland commit --reason handoff --agent-name " + name,
+		} {
 			if !strings.Contains(content, want) {
-				t.Errorf("%s.md missing frontmatter equivalent of workspace command %q (want %q)", name, wc, want)
+				t.Errorf("%s.md missing frontmatter command %q", name, want)
 			}
 		}
 	}

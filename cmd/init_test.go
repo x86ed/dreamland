@@ -660,6 +660,10 @@ func TestInitVersionBumpCommandSet(t *testing.T) {
 	}, nil)
 	t.Cleanup(func() { wizardRunner = orig })
 
+	origConfirm := confirmCodexOtel
+	confirmCodexOtel = func() bool { return false }
+	t.Cleanup(func() { confirmCodexOtel = origConfirm })
+
 	if _, err := runInitWithBuf(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

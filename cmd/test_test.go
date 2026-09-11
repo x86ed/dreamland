@@ -41,7 +41,7 @@ func TestRunTest_SourceChanged_RunsCommand(t *testing.T) {
 }
 
 func TestRunTest_NoSourceChanged_Silent(t *testing.T) {
-	makeTestRepo(t, config.Config{Language: "Go", TestCommand: "false"})
+	root := makeTestRepo(t, config.Config{Language: "Go", TestCommand: "false"})
 
 	origRunCmd := runCmd
 	runCmd = func(_ string, _ ...string) (string, error) {
@@ -52,6 +52,52 @@ func TestRunTest_NoSourceChanged_Silent(t *testing.T) {
 	// If hasMatchingFiles returns false, runTest returns nil without running "false".
 	if err := runTest(nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// It must still record an explicit "skipped" result — leaving no result
+	// file at all is indistinguishable from `test` never having run, which is
+	// exactly the broken invariant `commit`/`test-and-commit` refuses on.
+	result, err := readLastTestResult(root)
+	if err != nil {
+		t.Fatalf("readLastTestResult: %v", err)
+	}
+	if result == nil || result.Status != "skipped" {
+		t.Fatalf("expected a recorded skipped result, got: %+v", result)
+	}
+}
+
+// TestRunTest_UntrackedNewPackage_RunsCommand is the regression test for the
+// live "test skips a brand-new untracked package" bug: `git status --porcelain`
+// without --untracked-files=all collapses an entirely-new untracked directory
+// into a single opaque entry (e.g. "?? merge_csv/") with no source-file
+// extension, so hasMatchingFiles never sees the .go files inside it and
+// `test` wrongly records "skipped" instead of actually running the tests.
+func TestRunTest_UntrackedNewPackage_RunsCommand(t *testing.T) {
+	makeTestRepo(t, config.Config{Language: "Go", TestCommand: "echo ok"})
+
+	var sawUntrackedFilesAll bool
+	origRunCmd := runCmd
+	runCmd = func(name string, args ...string) (string, error) {
+		if name == "git" && len(args) > 0 && args[0] == "status" {
+			for _, a := range args {
+				if a == "--untracked-files=all" {
+					sawUntrackedFilesAll = true
+				}
+			}
+			// Simulate what real git prints for a brand-new untracked package
+			// once --untracked-files=all is passed: the .go files inside it,
+			// not just the collapsed directory entry.
+			return "?? newpkg/newpkg.go\n", nil
+		}
+		return "", nil
+	}
+	t.Cleanup(func() { runCmd = origRunCmd })
+
+	if err := runTest(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !sawUntrackedFilesAll {
+		t.Fatal("expected `dreamland test` to invoke git status with --untracked-files=all so new untracked packages are visible to the extension check")
 	}
 }
 

@@ -30,6 +30,61 @@ func TestCheckArtifactOwnership_NonOwnerBlocked(t *testing.T) {
 	}
 }
 
+func TestCheckArtifactOwnership_MorpheusMayFlipTasksCheckbox(t *testing.T) {
+	payload := hookToolInputPayload{AgentType: "morpheus"}
+	payload.ToolInput.FilePath = "/repo/openspec/changes/x/tasks.md"
+	payload.ToolInput.OldString = "- [ ] implement the task"
+	payload.ToolInput.NewString = "- [x] implement the task"
+
+	if got := checkArtifactOwnership(payload, "/repo"); got != "" {
+		t.Errorf("expected checkbox-only task edit to be allowed, got %q", got)
+	}
+}
+
+func TestCheckArtifactOwnership_MorpheusTaskProseEditBlocked(t *testing.T) {
+	payload := hookToolInputPayload{AgentType: "morpheus"}
+	payload.ToolInput.FilePath = "/repo/openspec/changes/x/tasks.md"
+	payload.ToolInput.OldString = "- [ ] implement the task"
+	payload.ToolInput.NewString = "- [ ] rewrite the task"
+
+	if got := checkArtifactOwnership(payload, "/repo"); got == "" {
+		t.Error("expected task prose edit to be blocked")
+	}
+}
+
+func TestCheckArtifactOwnership_MorpheusWriteTasksBlocked(t *testing.T) {
+	payload := hookToolInputPayload{AgentType: "morpheus"}
+	payload.ToolInput.FilePath = "/repo/openspec/changes/x/tasks.md"
+
+	if got := checkArtifactOwnership(payload, "/repo"); got == "" {
+		t.Error("expected full tasks.md write to be blocked")
+	}
+}
+
+func TestIsCheckboxOnlyEdit(t *testing.T) {
+	tests := []struct {
+		name string
+		old  string
+		new  string
+		want bool
+	}{
+		{name: "check", old: "  - [ ] task  ", new: "- [x] task", want: true},
+		{name: "uncheck", old: "- [x] task", new: "- [ ] task", want: true},
+		{name: "prose", old: "- [ ] task", new: "- [ ] changed", want: false},
+		{name: "multiline", old: "- [ ] task\n- [ ] next", new: "- [x] task\n- [ ] next", want: false},
+		{name: "write", old: "", new: "- [x] task", want: false},
+		{name: "wrong prefix", old: "* [ ] task", new: "* [x] task", want: false},
+		{name: "wrong marker", old: "- [y] task", new: "- [x] task", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isCheckboxOnlyEdit(tt.old, tt.new); got != tt.want {
+				t.Errorf("isCheckboxOnlyEdit(%q, %q) = %v, want %v", tt.old, tt.new, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCheckArtifactOwnership_HypnosOwnsAgentTemplates(t *testing.T) {
 	payload := hookToolInputPayload{AgentType: "hypnos"}
 	payload.ToolInput.FilePath = "/repo/internal/scaffold/templates/agents/claude-code/foo.md"
@@ -149,5 +204,22 @@ func TestRunGuardArtifact_NoPayloadAllowsSilently(t *testing.T) {
 	}
 	if exitCalled {
 		t.Error("expected no exit call when no payload arrives at all")
+	}
+}
+
+func TestRunGuardArtifact_MalformedPayloadAllowsSilently(t *testing.T) {
+	c := &cobra.Command{}
+	c.SetIn(strings.NewReader("not json"))
+
+	origExit := guardArtifactExit
+	exitCalled := false
+	guardArtifactExit = func(int) { exitCalled = true }
+	t.Cleanup(func() { guardArtifactExit = origExit })
+
+	if err := runGuardArtifact(c, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if exitCalled {
+		t.Error("expected malformed payload to be ignored")
 	}
 }
