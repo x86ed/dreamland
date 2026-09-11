@@ -73,6 +73,8 @@ func TestIsCheckboxOnlyEdit(t *testing.T) {
 		{name: "prose", old: "- [ ] task", new: "- [ ] changed", want: false},
 		{name: "multiline", old: "- [ ] task\n- [ ] next", new: "- [x] task\n- [ ] next", want: false},
 		{name: "write", old: "", new: "- [x] task", want: false},
+		{name: "wrong prefix", old: "* [ ] task", new: "* [x] task", want: false},
+		{name: "wrong marker", old: "- [y] task", new: "- [x] task", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -202,5 +204,22 @@ func TestRunGuardArtifact_NoPayloadAllowsSilently(t *testing.T) {
 	}
 	if exitCalled {
 		t.Error("expected no exit call when no payload arrives at all")
+	}
+}
+
+func TestRunGuardArtifact_MalformedPayloadAllowsSilently(t *testing.T) {
+	c := &cobra.Command{}
+	c.SetIn(strings.NewReader("not json"))
+
+	origExit := guardArtifactExit
+	exitCalled := false
+	guardArtifactExit = func(int) { exitCalled = true }
+	t.Cleanup(func() { guardArtifactExit = origExit })
+
+	if err := runGuardArtifact(c, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if exitCalled {
+		t.Error("expected malformed payload to be ignored")
 	}
 }

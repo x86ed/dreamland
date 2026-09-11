@@ -91,6 +91,32 @@ func TestRunCommit_GitAddError(t *testing.T) {
 	}
 }
 
+func TestRunCommit_HandoffGitAddErrorIsNonBlocking(t *testing.T) {
+	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
+
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "status" {
+			return " M some/file.go\n", nil
+		}
+		if len(args) > 0 && args[0] == "add" {
+			return "", errors.New("git add failed")
+		}
+		return "", nil
+	})
+
+	orig := commitReason
+	commitReason = "handoff"
+	t.Cleanup(func() { commitReason = orig })
+
+	err := runCommit(nil, nil)
+	if err == nil {
+		t.Fatal("expected error when git add fails")
+	}
+	if IsBlocking(err) {
+		t.Fatalf("handoff git add failure must be non-blocking, got: %v", err)
+	}
+}
+
 func TestRunCommit_GitCommitError(t *testing.T) {
 	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
 
