@@ -72,6 +72,9 @@ func runCommit(cmd *cobra.Command, args []string) error {
 				return Blocking(errors.New(msg))
 			}
 
+			// A "skipped" result (test correctly determined no tracked source
+			// files changed since the last commit, so no run was needed) is not
+			// a failure — fall through and allow the commit exactly like "pass".
 			// If the test result shows failure at the current HEAD, refuse to commit
 			if testResult.Status == "fail" {
 				currentHead, err := runCmd("git", "rev-parse", "HEAD")
@@ -101,6 +104,9 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	}
 
 	if _, err := gitExec("add", "-A"); err != nil {
+		if commitReason == "handoff" {
+			return fmt.Errorf("git add -A: %w", err)
+		}
 		return Blocking(fmt.Errorf("git add -A: %w", err))
 	}
 
@@ -123,6 +129,9 @@ func runCommit(cmd *cobra.Command, args []string) error {
 		// the work. Any other git commit failure still blocks exactly as before.
 		if isNothingToCommit(out) {
 			return nil
+		}
+		if commitReason == "handoff" {
+			return fmt.Errorf("git commit: %w\n%s", err, out)
 		}
 		return Blocking(fmt.Errorf("git commit: %w\n%s", err, out))
 	}
