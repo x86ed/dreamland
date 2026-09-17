@@ -35,11 +35,9 @@
       {
         "matcher": "",
         "hooks": [
-          {"type": "command", "command": "dreamland coauthor --hook"},
           {"type": "command", "command": "dreamland telemetry write --tool claude-code"},
           {"type": "command", "command": "dreamland version-bump --patch"},
-          {"type": "command", "command": "dreamland version-bump --minor --if-agent janus"},
-          {"type": "command", "command": "dreamland commit --reason handoff"}
+          {"type": "command", "command": "dreamland version-bump --minor --if-agent janus"}
         ]
       }
     ],

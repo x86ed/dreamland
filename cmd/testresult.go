@@ -11,7 +11,7 @@ import (
 
 // testResult records the outcome of a test run.
 type testResult struct {
-	Status    string `json:"status"`    // "pass" or "fail"
+	Status    string `json:"status"`    // "pass", "fail", or "skipped" (no tracked source changes since last commit, so no run was needed)
 	HeadSHA   string `json:"head_sha"`  // git rev-parse HEAD at time of test
 	WrittenAt string `json:"written_at"` // RFC3339 timestamp
 }

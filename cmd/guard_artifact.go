@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -37,7 +38,8 @@ type artifactOwner struct {
 // artifactOwners is the fixed path -> agent ownership table. Paths not matching any
 // entry here are unrestricted, regardless of which agent writes them.
 var artifactOwners = []artifactOwner{
-	{regexp.MustCompile(`^openspec/changes/[^/]+/(proposal|design|tasks)\.md$`), "phantasos"},
+	{regexp.MustCompile(`^openspec/changes/[^/]+/(proposal|design)\.md$`), "phantasos"},
+	{regexp.MustCompile(`^openspec/changes/[^/]+/tasks\.md$`), "phantasos"},
 	{regexp.MustCompile(`^openspec/changes/[^/]+/specs/.*\.md$`), "phantasos"},
 	{regexp.MustCompile(`^openspec/specs/.*/spec\.md$`), "phantasos"},
 	{regexp.MustCompile(`^internal/scaffold/templates/(agents|commands)/`), "hypnos"},
@@ -49,7 +51,9 @@ var artifactOwners = []artifactOwner{
 type hookToolInputPayload struct {
 	AgentType string `json:"agent_type"`
 	ToolInput struct {
-		FilePath string `json:"file_path"`
+		FilePath  string `json:"file_path"`
+		OldString string `json:"old_string"`
+		NewString string `json:"new_string"`
 	} `json:"tool_input"`
 }
 
@@ -96,9 +100,35 @@ func checkArtifactOwnership(payload hookToolInputPayload, repoRoot string) strin
 	relPath = filepath.ToSlash(relPath)
 
 	for _, o := range artifactOwners {
-		if o.pattern.MatchString(relPath) && payload.AgentType != o.owner {
+		if !o.pattern.MatchString(relPath) {
+			continue
+		}
+		if o.pattern.String() == `^openspec/changes/[^/]+/tasks\.md$` && isCheckboxOnlyEdit(payload.ToolInput.OldString, payload.ToolInput.NewString) {
+			continue
+		}
+		if payload.AgentType != o.owner {
 			return fmt.Sprintf("blocked: %s is owned by %s, not %s", relPath, o.owner, payload.AgentType)
 		}
 	}
 	return ""
+}
+
+func isCheckboxOnlyEdit(oldString, newString string) bool {
+	oldLine := strings.TrimSpace(oldString)
+	newLine := strings.TrimSpace(newString)
+	if oldLine == "" || newLine == "" || strings.ContainsAny(oldLine, "\r\n") || strings.ContainsAny(newLine, "\r\n") {
+		return false
+	}
+
+	const markerPrefix = "- ["
+	if !strings.HasPrefix(oldLine, markerPrefix) || !strings.HasPrefix(newLine, markerPrefix) || len(oldLine) < 6 || len(newLine) < 6 {
+		return false
+	}
+	if oldLine[4] != ']' || newLine[4] != ']' || oldLine[3] == newLine[3] {
+		return false
+	}
+	if (oldLine[3] != ' ' && oldLine[3] != 'x') || (newLine[3] != ' ' && newLine[3] != 'x') {
+		return false
+	}
+	return oldLine[:3]+oldLine[4:] == newLine[:3]+newLine[4:]
 }

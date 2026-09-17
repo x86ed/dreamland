@@ -60,6 +60,52 @@ func TestRunTestAndCommit_FailingTestBlocksCommitInOneProcess(t *testing.T) {
 	}
 }
 
+// TestRunTestAndCommit_NoSourceChangesAllowsCommit is the regression test for
+// the live "test command configured ... but no result recorded" failure: when
+// only untracked/non-source files changed this turn, `test` correctly decides
+// no run is needed. That must not be indistinguishable from `test` never
+// having run at all — it should record an explicit "skipped" result and let
+// the commit through, not block it.
+func TestRunTestAndCommit_NoSourceChangesAllowsCommit(t *testing.T) {
+	root := makeTestRepo(t, config.Config{Language: "Go", TestCommand: "false"})
+
+	var commitCalled bool
+	origRunCmd := runCmd
+	runCmd = func(_ string, args ...string) (string, error) {
+		switch {
+		case len(args) > 0 && args[0] == "status":
+			return "?? README.md\n", nil // only a non-Go, untracked file changed
+		case len(args) > 0 && args[0] == "rev-parse":
+			return "deadbeef\n", nil
+		case len(args) > 0 && args[0] == "commit":
+			commitCalled = true
+			return "", nil
+		default:
+			return "", nil
+		}
+	}
+	t.Cleanup(func() { runCmd = origRunCmd })
+
+	orig := tacReason
+	tacReason = "turn-complete"
+	t.Cleanup(func() { tacReason = orig })
+
+	if err := runTestAndCommit(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !commitCalled {
+		t.Error("expected git commit to be invoked when test is correctly skipped")
+	}
+
+	result, readErr := readLastTestResult(root)
+	if readErr != nil {
+		t.Fatalf("readLastTestResult: %v", readErr)
+	}
+	if result == nil || result.Status != "skipped" {
+		t.Fatalf("expected a recorded skipped result, got: %+v", result)
+	}
+}
+
 // TestRunTestAndCommit_PassingTestAllowsCommit confirms the happy path still
 // commits when the test step succeeds, using the same single-process call.
 func TestRunTestAndCommit_PassingTestAllowsCommit(t *testing.T) {

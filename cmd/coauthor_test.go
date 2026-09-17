@@ -1000,6 +1000,31 @@ func TestAppendTokensReport_AppendsWithTrailingNewline(t *testing.T) {
 
 // --- Generated-By trailer short-circuit (task 6.3/6.4, oneiroi-seed-script) ---
 
+func TestCommitMessageHasGeneratedByTrailer(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	if got, err := commitMessageHasGeneratedByTrailer(missing); err != nil || got {
+		t.Fatalf("missing message = (%v, %v), want (false, nil)", got, err)
+	}
+	directory := t.TempDir()
+	if got, err := commitMessageHasGeneratedByTrailer(directory); err == nil || got {
+		t.Fatalf("directory message = (%v, %v), want (false, error)", got, err)
+	}
+
+	message := filepath.Join(t.TempDir(), "COMMIT_EDITMSG")
+	if err := os.WriteFile(message, []byte("feat: ordinary change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := commitMessageHasGeneratedByTrailer(message); err != nil || got {
+		t.Fatalf("ordinary message = (%v, %v), want (false, nil)", got, err)
+	}
+	if err := os.WriteFile(message, []byte("Generated-By: dreamland-oneiroi-seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := commitMessageHasGeneratedByTrailer(message); err != nil || !got {
+		t.Fatalf("generated message = (%v, %v), want (true, nil)", got, err)
+	}
+}
+
 // TestRunCoauthor_TrailerMode_GeneratedByTrailer_LeavesFileByteForByteUnchanged covers
 // the "Commit message declares zero tokens and no coauthor" / self-authored-commit
 // posture: a commit message already carrying a `Generated-By: dreamland-oneiroi-seed`
