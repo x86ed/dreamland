@@ -1,9 +1,30 @@
 package seedwords
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestLoad_ReadFileError(t *testing.T) {
+	orig := readWordsFile
+	defer func() { readWordsFile = orig }()
+	readWordsFile = func(string) ([]byte, error) { return nil, errors.New("read failed") }
+
+	if _, err := Load(); err == nil {
+		t.Error("expected error when the embedded read fails")
+	}
+}
+
+func TestLoad_UnmarshalError(t *testing.T) {
+	orig := readWordsFile
+	defer func() { readWordsFile = orig }()
+	readWordsFile = func(string) ([]byte, error) { return []byte("not json"), nil }
+
+	if _, err := Load(); err == nil {
+		t.Error("expected error when words.json content is not valid JSON")
+	}
+}
 
 // TestLoad_ParsesWithoutError confirms the embedded words.json parses cleanly via
 // Load() (task 1.3) — the checked-in file produced by gen/main.go (task 1.1/1.2)

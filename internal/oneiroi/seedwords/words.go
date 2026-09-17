@@ -13,6 +13,10 @@ import (
 //go:embed words.json
 var wordsFS embed.FS
 
+// readWordsFile is a package-level indirection over wordsFS.ReadFile so tests can
+// simulate a read failure without needing a second embedded filesystem.
+var readWordsFile = wordsFS.ReadFile
+
 // wordList mirrors words.json's shape.
 type wordList struct {
 	Words []string `json:"words"`
@@ -20,7 +24,7 @@ type wordList struct {
 
 // Load returns the embedded word pool.
 func Load() ([]string, error) {
-	data, err := wordsFS.ReadFile("words.json")
+	data, err := readWordsFile("words.json")
 	if err != nil {
 		return nil, err
 	}

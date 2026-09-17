@@ -147,3 +147,81 @@ func TestMCPOneiroiSeed_ToolCallMatchesDirectCLIInvocation(t *testing.T) {
 		t.Errorf("missing slash command file for %s (via MCP): %v", mcpEntry.Name, err)
 	}
 }
+
+// TestMCPOneiroiRevise_ToolCall covers oneiroi_revise's happy path (revising a
+// just-seeded agent) and its error result when the named agent doesn't exist.
+func TestMCPOneiroiRevise_ToolCall(t *testing.T) {
+	root := mcpOneiroiTestRepo(t)
+	session := connectInMemoryOneiroiMCPClient(t, root)
+
+	seedResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "oneiroi_seed",
+		Arguments: map[string]any{"role": "example"},
+	})
+	if err != nil || seedResult.IsError {
+		t.Fatalf("CallTool oneiroi_seed: err=%v result=%+v", err, seedResult)
+	}
+	reg := readOneiroiRegistry(t, root)
+	agentName := reg.Agents[0].Name
+
+	reviseResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "oneiroi_revise",
+		Arguments: map[string]any{"agent": agentName, "reason": "test revision"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool oneiroi_revise: %v", err)
+	}
+	if reviseResult.IsError {
+		t.Fatalf("oneiroi_revise reported an error result: %+v", reviseResult.Content)
+	}
+
+	errResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "oneiroi_revise",
+		Arguments: map[string]any{"agent": "does-not-exist", "reason": "test revision"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool oneiroi_revise (missing agent): %v", err)
+	}
+	if !errResult.IsError {
+		t.Fatal("expected error result when revising a nonexistent agent")
+	}
+}
+
+// TestMCPOneiroiFork_ToolCall covers oneiroi_fork's happy path (forking a just-seeded
+// agent) and its error result when the named parent agent doesn't exist.
+func TestMCPOneiroiFork_ToolCall(t *testing.T) {
+	root := mcpOneiroiTestRepo(t)
+	session := connectInMemoryOneiroiMCPClient(t, root)
+
+	seedResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "oneiroi_seed",
+		Arguments: map[string]any{"role": "example"},
+	})
+	if err != nil || seedResult.IsError {
+		t.Fatalf("CallTool oneiroi_seed: err=%v result=%+v", err, seedResult)
+	}
+	reg := readOneiroiRegistry(t, root)
+	parentName := reg.Agents[0].Name
+
+	forkResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "oneiroi_fork",
+		Arguments: map[string]any{"agent": parentName, "role": "example child"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool oneiroi_fork: %v", err)
+	}
+	if forkResult.IsError {
+		t.Fatalf("oneiroi_fork reported an error result: %+v", forkResult.Content)
+	}
+
+	errResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "oneiroi_fork",
+		Arguments: map[string]any{"agent": "does-not-exist", "role": "example child"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool oneiroi_fork (missing parent): %v", err)
+	}
+	if !errResult.IsError {
+		t.Fatal("expected error result when forking from a nonexistent parent")
+	}
+}
