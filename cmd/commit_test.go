@@ -124,7 +124,7 @@ func TestRunCommit_GitCommitError(t *testing.T) {
 		switch {
 		case len(args) > 0 && args[0] == "status":
 			return " M some/file.go\n", nil
-		case len(args) > 0 && args[0] == "commit":
+		case isGitCommitCall(args):
 			return "commit output", errors.New("git commit failed")
 		default:
 			return "", nil
@@ -154,7 +154,7 @@ func TestRunCommit_TurnCompleteGitCommitErrorIsBlocking(t *testing.T) {
 		switch {
 		case len(args) > 0 && args[0] == "status":
 			return " M some/file.go\n", nil
-		case len(args) > 0 && args[0] == "commit":
+		case isGitCommitCall(args):
 			return "commit output", errors.New("git commit failed")
 		default:
 			return "", nil
@@ -187,7 +187,7 @@ func TestRunCommit_GitCommitNothingToCommit_IsBenignNoOp(t *testing.T) {
 		switch {
 		case len(args) > 0 && args[0] == "status":
 			return " M some/file.go\n", nil
-		case len(args) > 0 && args[0] == "commit":
+		case isGitCommitCall(args):
 			return "On branch main\nnothing to commit, working tree clean", errors.New("exit status 1")
 		default:
 			return "", nil
@@ -223,7 +223,7 @@ func TestRunCommit_NoOpOnCleanTree(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, c := range calls {
-		if strings.HasPrefix(c, "commit") {
+		if strings.Contains(c, " commit -m ") {
 			t.Errorf("expected no commit call on clean tree, got calls: %v", calls)
 		}
 	}
@@ -255,7 +255,7 @@ func TestRunCommit_CommitsOnDirtyTree(t *testing.T) {
 		if strings.HasPrefix(c, "add -A") {
 			addCalled = true
 		}
-		if strings.HasPrefix(c, "commit -m") {
+		if strings.Contains(c, " commit -m ") {
 			commitCalled = true
 			commitMsg = c
 		}
@@ -286,7 +286,7 @@ func TestRunCommit_AgentNameFlagOverridesGitIdentity(t *testing.T) {
 		if len(args) >= 4 && args[0] == "config" && args[3] == "user.name" {
 			return "morpheus\n", nil // configured git identity — must be overridden below
 		}
-		if len(args) > 0 && args[0] == "commit" {
+		if isGitCommitCall(args) {
 			commitMsg = strings.Join(args, " ")
 		}
 		return "", nil
@@ -433,5 +433,120 @@ func TestCurrentGitIdentityName_UsesConfiguredGitIdentity(t *testing.T) {
 	got := currentGitIdentityName(cfg, "")
 	if got != "morpheus" {
 		t.Errorf("got %q, want morpheus (from git config)", got)
+	}
+}
+
+func isGitCommitCall(args []string) bool {
+	for _, a := range args {
+		if a == "commit" {
+			return true
+		}
+	}
+	return false
+}
+
+func stubCommitAuthorFlags(args []string) (name, email string) {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] != "-c" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(args[i+1], "user.name="):
+			name = strings.TrimPrefix(args[i+1], "user.name=")
+		case strings.HasPrefix(args[i+1], "user.email="):
+			email = strings.TrimPrefix(args[i+1], "user.email=")
+		}
+	}
+	return name, email
+}
+
+// TestRunCommit_AuthorPinnedToResolvedIdentity is the regression test for the
+// reported misattribution: the commit subject named the dispatched agent while the
+// author (from the shared, drifted `git config user.name`) stayed janus. The author
+// must be pinned to exactly the name used in the subject, independent of git config.
+func TestRunCommit_AuthorPinnedToResolvedIdentity(t *testing.T) {
+	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
+
+	var commitArgs []string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		switch {
+		case len(args) > 0 && args[0] == "status":
+			return " M some/file.go\n", nil
+		case len(args) >= 4 && args[0] == "config" && args[3] == "user.name":
+			return "janus\n", nil // drifted config identity
+		case isGitCommitCall(args):
+			commitArgs = args
+		}
+		return "", nil
+	})
+
+	origReason, origAgentName := commitReason, commitAgentName
+	commitReason, commitAgentName = "handoff", "morpheus"
+	t.Cleanup(func() { commitReason, commitAgentName = origReason, origAgentName })
+
+	if err := runCommit(nil, nil); err != nil {
+		t.Fatalf("runCommit: %v", err)
+	}
+	name, email := stubCommitAuthorFlags(commitArgs)
+	if name != "morpheus" || email != "morpheus@github.com" {
+		t.Errorf("author = %q <%s>, want morpheus <morpheus@github.com> (args: %v)", name, email, commitArgs)
+	}
+}
+
+func withStdin(t *testing.T, content string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	orig := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = orig; r.Close() })
+}
+
+func runHookCommitWithPayload(t *testing.T, payload string) (name string) {
+	t.Helper()
+	makeVersionBumpRepo(t, config.Config{CodingTool: "Claude Code"})
+	withStdin(t, payload)
+
+	var commitArgs []string
+	stubRunCmd(t, func(_ string, args ...string) (string, error) {
+		switch {
+		case len(args) > 0 && args[0] == "status":
+			return " M some/file.go\n", nil
+		case len(args) >= 4 && args[0] == "config" && args[3] == "user.name":
+			return "janus\n", nil
+		case isGitCommitCall(args):
+			commitArgs = args
+		}
+		return "", nil
+	})
+
+	origReason, origAgentName, origHook := commitReason, commitAgentName, commitHook
+	commitReason, commitAgentName, commitHook = "handoff", "", true
+	t.Cleanup(func() { commitReason, commitAgentName, commitHook = origReason, origAgentName, origHook })
+
+	if err := runCommit(nil, nil); err != nil {
+		t.Fatalf("runCommit: %v", err)
+	}
+	name, _ = stubCommitAuthorFlags(commitArgs)
+	return name
+}
+
+func TestRunCommit_HookPayloadAgentTypeResolvesIdentity(t *testing.T) {
+	got := runHookCommitWithPayload(t, `{"hook_event_name":"SubagentStop","agent_type":"nyx"}`)
+	if got != "nyx" {
+		t.Errorf("author = %q, want nyx from SubagentStop agent_type", got)
+	}
+}
+
+func TestRunCommit_HookPayloadUnregisteredAgentFallsBackToGitIdentity(t *testing.T) {
+	got := runHookCommitWithPayload(t, `{"hook_event_name":"SubagentStop","agent_type":"Explore"}`)
+	if got != "janus" {
+		t.Errorf("author = %q, want janus fallback for unregistered built-in agent", got)
 	}
 }

@@ -77,7 +77,7 @@ func TestRunTestAndCommit_NoSourceChangesAllowsCommit(t *testing.T) {
 			return "?? README.md\n", nil // only a non-Go, untracked file changed
 		case len(args) > 0 && args[0] == "rev-parse":
 			return "deadbeef\n", nil
-		case len(args) > 0 && args[0] == "commit":
+		case isGitCommitCall(args):
 			commitCalled = true
 			return "", nil
 		default:
@@ -123,7 +123,7 @@ func TestRunTestAndCommit_PassingTestAllowsCommit(t *testing.T) {
 			return "M  main.go\n", nil
 		case len(args) > 0 && args[0] == "rev-parse":
 			return "deadbeef\n", nil
-		case len(args) > 0 && args[0] == "commit":
+		case isGitCommitCall(args):
 			commitCalled = true
 			return "", nil
 		default:

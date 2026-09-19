@@ -165,6 +165,10 @@
           {
             "type": "command",
             "command": "dreamland version-bump --minor --if-agent janus"
+          },
+          {
+            "type": "command",
+            "command": "dreamland commit --reason handoff --hook"
           }
         ]
       }

@@ -254,6 +254,7 @@ func TestInstall_ClaudeCode_SubagentStopCommands(t *testing.T) {
 		"dreamland telemetry write --tool claude-code",
 		"dreamland version-bump --patch",
 		"dreamland version-bump --minor --if-agent janus",
+		"dreamland commit --reason handoff --hook",
 	}
 	if !reflect.DeepEqual(commands, want) {
 		t.Fatalf("SubagentStop commands = %v, want %v", commands, want)
@@ -383,6 +384,7 @@ func TestInstall_ClaudeCode_AgentScopedHooksContainWorkspaceSharedCommands(t *te
 		"dreamland telemetry write --tool claude-code",
 		"dreamland version-bump --patch",
 		"dreamland version-bump --minor --if-agent janus",
+		"dreamland commit --reason handoff --hook",
 	}) {
 		t.Fatalf("unexpected workspace-level SubagentStop commands: %v", workspaceCommands)
 	}

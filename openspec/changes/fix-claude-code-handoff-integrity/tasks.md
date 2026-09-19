@@ -29,3 +29,10 @@
 - [x] 5.1 Regenerate this repo's own `.claude/settings.json` (or hand-edit to match) removing the duplicated `SubagentStop` `coauthor`/`commit --reason handoff` entries, consistent with task 2.1's template change.
 - [x] 5.2 Manually verify, by inspecting `.claude/agents/morpheus.md`'s frontmatter and this repo's `.claude/settings.json` side by side, that identity/commit commands now appear in exactly one place (the per-agent file) and telemetry/version-bump appear in both (workspace-level, unscoped, as intended for built-in-agent coverage).
 - [x] 5.3 Run `go build ./...` and `go test ./...` for the whole repo and confirm everything passes after all edits.
+
+## 6. Follow-up: commit author pinned to resolved identity (git log still showed janus)
+
+- [x] 6.1 In `cmd/commit.go`, add `--hook` (reads `agent_type`/`subagent_type` from the stdin payload, registered agents only) and pin the commit's author/committer via `git -c user.name=... -c user.email=... commit` to the same name used in the subject, instead of relying on the shared `git config --local user.name`.
+- [x] 6.2 Add `dreamland commit --reason handoff --hook` to the workspace-level `SubagentStop` array (Claude Code settings template and this repo's `.claude/settings.json`); update the two scaffold tests that assert that command list.
+- [x] 6.3 Unit tests for author pinning against a drifted git config, and for `--hook` payload identity (registered and unregistered `agent_type`).
+- [x] 6.4 Update this change's spec delta to match.
