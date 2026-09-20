@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"os"
-	"strings"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
