@@ -196,6 +196,36 @@ func TestTelemetryWriteClaudeCode_AgentFromSubagentType(t *testing.T) {
 	}
 }
 
+// TestTelemetryWriteCopilot_ReadsOtelMailboxWithoutPersistedRepoRoot is the regression test
+// for the Copilot OTLP fallback never firing when .dreamland.json carries no repo_root: the
+// collector used cfg.RepoRoot, which config.Load only fills from the file, so the receiver's
+// per-session mailbox was never read and every Tokens: report was all-zero (omitted).
+func TestTelemetryWriteCopilot_ReadsOtelMailboxWithoutPersistedRepoRoot(t *testing.T) {
+	root := telemetryGitRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".dreamland.json"), []byte(`{"coding_tool":"GitHub Copilot","model_id":"gpt-4o"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mailbox := filepath.Join(root, ".dreamland", "otel-sessions")
+	if err := os.MkdirAll(mailbox, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mailbox, "sess-1.json"), []byte(`{"model":"gpt-4o-x","input_tokens":400,"output_tokens":70,"cached_tokens":90}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rootCmd.SetIn(strings.NewReader(`{"session_id":"sess-1"}`))
+	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	if _, _, err := execCLI(t, "telemetry", "write", "--tool", "github-copilot"); err != nil {
+		t.Fatalf("expected success: %v", err)
+	}
+	snap, err := telemetry.Read(root)
+	if err != nil || snap == nil {
+		t.Fatalf("expected snapshot to be written, err=%v snap=%v", err, snap)
+	}
+	if snap.InputTokens != 400 || snap.OutputTokens != 70 || snap.CachedTokens != 90 || snap.Model != "gpt-4o-x" {
+		t.Errorf("snapshot = %+v, want tokens 400/70/90 model gpt-4o-x from the OTLP mailbox", snap)
+	}
+}
+
 func TestTelemetryWriteClaudeCode_AgentDefaultsToJanus(t *testing.T) {
 	root := telemetryGitRepo(t)
 	rootCmd.SetIn(strings.NewReader(`{}`))

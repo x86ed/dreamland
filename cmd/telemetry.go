@@ -92,6 +92,13 @@ func runTelemetryWrite(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("not in a git repository: %w", err)
 	}
 	cfg, _ := config.Load(cwd)
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	// .dreamland.json's repo_root is only present if `dreamland init` persisted it; the
+	// collectors (Copilot's OTLP mailbox lookup, the agent registry) need it, and the
+	// discovered root is authoritative anyway (a persisted path goes stale if the repo moves).
+	cfg.RepoRoot = repoRoot
 
 	var collector telemetry.Collector
 	if toolName == "kiro" {
