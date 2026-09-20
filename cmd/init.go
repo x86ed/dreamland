@@ -304,6 +304,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if err := scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/otel-receiver.log"); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
 	}
+	if err := scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/otel-cursors/"); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
+	}
 	if err := scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/workflow-positions.json"); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
 	}

@@ -38,3 +38,4 @@ dreamland
 .dreamland-session.json
 .dreamland/otel-sessions/
 .dreamland/otel-receiver.log
+.dreamland/otel-cursors/
