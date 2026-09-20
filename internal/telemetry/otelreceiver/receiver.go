@@ -9,6 +9,7 @@
 package otelreceiver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,12 +28,30 @@ import (
 // SessionUsage is the token-usage mailbox written per gen_ai.conversation.id, consumed by
 // the GitHub Copilot telemetry collector at SubagentStop.
 type SessionUsage struct {
+	Version      int    `json:"version"`
+	SpanCount    int    `json:"span_count"`
 	Model        string `json:"model"`
 	InputTokens  int64  `json:"input_tokens"`
 	OutputTokens int64  `json:"output_tokens"`
 	CachedTokens int64  `json:"cached_tokens"`
 	CapturedAt   string `json:"captured_at"`
 }
+
+// STUB (nyx, TDD red phase): ReceiverRevision, Build, GC, StartGC and osRename exist only
+// so the tests compile; morpheus implements them (tasks 2.1, 2.5, 2.6, 2.7, 2.4).
+const ReceiverRevision = 0
+
+// Build is injected by cmd from buildCommit.
+var Build string
+
+// osRename is the rename seam used by the mailbox writer.
+var osRename = os.Rename
+
+// GC deletes stale mailboxes and temp files under stateDir.
+func GC(stateDir string, now time.Time) {}
+
+// StartGC runs GC once immediately and hourly until ctx is done.
+func StartGC(ctx context.Context, stateDir string) {}
 
 // Handler returns an http.Handler implementing the OTLP/HTTP trace-export endpoint
 // (POST /v1/traces) needed to receive GitHub Copilot's exported spans. Every request,
