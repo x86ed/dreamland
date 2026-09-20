@@ -151,7 +151,7 @@ func TestInitGitignoresTelemetryRuntimeFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected .gitignore to exist: %v", err)
 	}
-	for _, entry := range []string{".dreamland-session.json", ".dreamland/otel-sessions/", ".dreamland/otel-receiver.log"} {
+	for _, entry := range []string{".dreamland-session.json", ".dreamland/otel-sessions/", ".dreamland/otel-receiver.log", ".dreamland/otel-cursors/"} {
 		if !strings.Contains(string(data), entry) {
 			t.Errorf("expected .gitignore to contain %s, got:\n%s", entry, data)
 		}

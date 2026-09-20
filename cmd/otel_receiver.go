@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -27,10 +28,37 @@ var otelReceiverForeground bool
 // the detached child would recursively re-run the whole test suite.
 var osExecutable = os.Executable
 
+// STUB (nyx, TDD red phase): the flags, seams and helpers below exist so the acceptance
+// tests compile. morpheus implements the behavior (tasks 3.1-3.5). Seam contract used by
+// the tests: each *Fn var is the injectable indirection over the platform function of the
+// same name (otel_receiver_unix.go / otel_receiver_windows.go).
+var (
+	otelReceiverAddrFlag string
+	otelReceiverReplace  bool
+
+	// otelReceiverStderr receives the one-line user-facing messages of the start algorithm.
+	otelReceiverStderr io.Writer = os.Stderr
+
+	// startDetachedFn starts (and releases) the detached foreground child.
+	startDetachedFn = func(c *exec.Cmd) error { return c.Start() }
+
+	processAliveFn       = processAlive
+	terminateProcessFn   = terminateProcess
+	lookupListenerPIDFn  = lookupListenerPID
+	processCommandLineFn = processCommandLine
+)
+
+// isDreamlandReceiver reports whether exe/args describe a `dreamland otel-receiver` process.
+func isDreamlandReceiver(exe string, args []string) bool { return false }
+
 func init() {
 	rootCmd.AddCommand(otelReceiverCmd)
 	otelReceiverCmd.Flags().BoolVar(&otelReceiverForeground, "foreground", false,
 		"run the receiver loop in this process instead of spawning a detached background process (internal use)")
+	otelReceiverCmd.Flags().StringVar(&otelReceiverAddrFlag, "addr", "",
+		"listen address host:port (required with --foreground)")
+	otelReceiverCmd.Flags().BoolVar(&otelReceiverReplace, "replace", false,
+		"replace the dreamland receiver holding the port regardless of its revision")
 }
 
 func runOtelReceiver(_ *cobra.Command, _ []string) error {

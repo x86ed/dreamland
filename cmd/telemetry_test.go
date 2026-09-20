@@ -205,7 +205,10 @@ func TestTelemetryWriteCopilot_ReadsOtelMailboxWithoutPersistedRepoRoot(t *testi
 	if err := os.WriteFile(filepath.Join(root, ".dreamland.json"), []byte(`{"coding_tool":"GitHub Copilot","model_id":"gpt-4o"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mailbox := filepath.Join(root, ".dreamland", "otel-sessions")
+	// The mailbox lives in the per-user receiver state dir, not in the repository.
+	stateDir := t.TempDir()
+	t.Setenv("DREAMLAND_STATE_DIR", stateDir)
+	mailbox := filepath.Join(stateDir, "sessions")
 	if err := os.MkdirAll(mailbox, 0o755); err != nil {
 		t.Fatal(err)
 	}
