@@ -33,11 +33,11 @@ Run against a real Claude Code session in a scratch repo with a build of `dreaml
 
 ## 4. Roster coherence
 
-- [ ] 4.1 Write tests in `internal/oneiroi/routing_test.go`: `seed`/`fork` add the new name to the installed `janus.md` `Agent(...)` list in registry order, are idempotent, never add `janus`, and no-op when the file is absent; the archive/delete path removes the name. [flow: nyx]
+- [ ] 4.1 Write tests in `internal/oneiroi/routing_test.go`: `seed`/`fork` add the new name to the installed `janus.md` `Agent(...)` list in registry order, are idempotent, never add `janus`, and no-op when the file is absent; a helper `RemoveDispatchTarget` removes a name and is idempotent. [flow: nyx]
 - [ ] 4.2 In `internal/oneiroi/routing.go` add `AddDispatchTarget(repoRoot, agentName string) (touched bool, err error)` and `RemoveDispatchTarget(repoRoot, agentName string) (touched bool, err error)` operating on the `Agent(...)` group in the installed Claude Code Janus file's `tools:` line; call `AddDispatchTarget` from the same place `AddStubEdges` is called in `cmd/oneiroi.go` (seed/fork), and include the file in that command's commit path list. [flow: morpheus]
 - [ ] 4.3 Add the registry-versus-`Agent(...)` drift test from the `agent-lifecycle-management` spec (fails when a registered name, excluding `janus`, is missing from the list or the list contains an unregistered name). [flow: nyx]
 - [ ] 4.4 Check whether the existing routing-table stub edge survives a forced re-init; record the answer in design.md's Decision 6. If it does not, open a follow-up rather than widening this change. [flow: morpheus]
-- [ ] 4.5 Update `mengpo`'s retirement instructions (six platform templates under `internal/scaffold/templates/agents/*/mengpo.*`; Claude Code and Copilot are the two that act on the `Agent(...)` list) to include removing the agent from the installed Janus `Agent(...)` list via `RemoveDispatchTarget`'s command, and add the corresponding CLI entry point used by `mengpo` (`dreamland oneiroi retire --agent <name>` or the existing retirement command, whichever exists; extend it rather than adding a second). [flow: mengpo]
+- [ ] 4.5 Update `internal/scaffold/templates/agents/claude-code/mengpo.md`'s archive and hard-delete steps to also remove the agent's name from the `Agent(...)` list in the installed `.claude/agents/janus.md` (`mengpo` has `Write`; there is no `oneiroi` retire subcommand today and this task does not add one). The registry-versus-`Agent(...)` drift test (4.3) is the backstop if the step is missed. `RemoveDispatchTarget` (4.2) is provided for tests and any future command. [flow: hypnos]
 
 ## 5. Templates and command files (`hypnos`)
 

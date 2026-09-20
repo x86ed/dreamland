@@ -2,7 +2,7 @@
 
 ### Requirement: Registering or retiring an agent keeps Janus's Claude Code dispatch allowlist and the route roster coherent
 
-Janus's Claude Code definition grants `Agent(<dispatch targets>)` (see the `janus-router-agent` capability), so the roster has one more registration point than before. The complete set of touchpoints for a roster change is:
+Janus's Claude Code definition grants `Agent(<dispatch targets>)` (see the `janus-router-agent` capability), so the roster has one more registration point than before. Every roster change SHALL keep all of the following touchpoints consistent:
 
 | Touchpoint | Written by | Read by |
 | --- | --- | --- |

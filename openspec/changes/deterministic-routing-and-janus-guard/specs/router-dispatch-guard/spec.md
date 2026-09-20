@@ -155,7 +155,7 @@ The other nine agents' `hooks.Stop` blocks are unchanged by this requirement.
 
 ### Requirement: Guard scope is Claude Code only in this change
 
-The guard, the `Agent(...)` grant, and the removal of the routing-subagent hop apply to Claude Code only. GitHub Copilot, Codex CLI, Cursor, Kiro, and Antigravity keep their existing Janus templates in this respect (tool restrictions per the `janus-router-agent` capability, prose-level "refuse to act" only); no `guard-router` binding is installed on them, because each has a different hook payload shape and event vocabulary that this change does not verify. Copilot is the natural next platform (its hook payload also carries a top-level `agent_type`).
+The guard, the `Agent(...)` grant, and the removal of the routing-subagent hop SHALL apply to Claude Code only. GitHub Copilot, Codex CLI, Cursor, Kiro, and Antigravity keep their existing Janus templates in this respect (tool restrictions per the `janus-router-agent` capability, prose-level "refuse to act" only); no `guard-router` binding is installed on them, because each has a different hook payload shape and event vocabulary that this change does not verify. Copilot is the natural next platform (its hook payload also carries a top-level `agent_type`).
 
 #### Scenario: No guard binding on non-Claude platforms
 
