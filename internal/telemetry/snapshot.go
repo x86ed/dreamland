@@ -4,12 +4,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 )
 
 const sessionFile = ".dreamland-session.json"
+
+// ErrCorruptSnapshot is wrapped by Read when the session file exists but cannot be
+// parsed (for example, unresolved merge/stash conflict markers).
+var ErrCorruptSnapshot = errors.New("corrupt session file")
+
+// Stderr receives non-fatal warnings; a variable so tests can capture it.
+var Stderr io.Writer = os.Stderr
 
 // SnapshotResult is the normalized session telemetry snapshot written after each AI turn.
 type SnapshotResult struct {
@@ -51,7 +59,7 @@ func Read(repoRoot string) (*SnapshotResult, error) {
 	}
 	var s SnapshotResult
 	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, fmt.Errorf("parse session file: %w", err)
+		return nil, fmt.Errorf("parse session file: %w: %w", ErrCorruptSnapshot, err)
 	}
 	return &s, nil
 }
@@ -60,7 +68,10 @@ func Read(repoRoot string) (*SnapshotResult, error) {
 // then writes the merged result atomically via temp-file rename.
 func Write(repoRoot string, s *SnapshotResult) error {
 	existing, err := Read(repoRoot)
-	if err != nil {
+	if errors.Is(err, ErrCorruptSnapshot) {
+		fmt.Fprintf(Stderr, "dreamland telemetry: discarding unparseable %s and starting fresh: %v\n", sessionFile, err)
+		existing = nil
+	} else if err != nil {
 		return err
 	}
 	if existing != nil {

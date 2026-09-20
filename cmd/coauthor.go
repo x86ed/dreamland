@@ -282,11 +282,15 @@ func appendTrailerLine(msgFile, name, email string) error {
 }
 
 // appendTokensReport appends a Tokens: report line to the commit message file,
-// sourced from the current turn's telemetry snapshot. Silently omitted (not a
-// failure) when no telemetry data is available.
+// sourced from the current turn's telemetry snapshot. Omitted (not a failure) when no
+// telemetry data is available; an unreadable snapshot is omitted with a stderr warning.
 func appendTokensReport(msgFile, repoRoot string) error {
 	snap, err := telemetry.Read(repoRoot)
-	if err != nil || snap == nil {
+	if err != nil {
+		fmt.Fprintf(telemetry.Stderr, "dreamland coauthor: omitting Tokens: line, telemetry snapshot unreadable (run `dreamland telemetry reset` to repair): %v\n", err)
+		return nil
+	}
+	if snap == nil {
 		return nil
 	}
 	// All-zero is indistinguishable from "no data" for platforms whose collector has no
