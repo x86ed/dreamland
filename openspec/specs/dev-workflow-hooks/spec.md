@@ -111,7 +111,7 @@ AgentName resolution tries, in order:
 
 1. A hook stdin payload for the current invocation, checked for an agent identifier in whichever shape the platform actually emits:
    - GitHub Copilot: top-level `agent_type` (e.g. `"morpheus"`) on `SubagentStart`/`SubagentStop` payloads.
-   - Claude Code: `tool_input.subagent_type` (e.g. `"morpheus"`) on the `PreToolUse`/`PostToolUse` payload for the `Task`/`Agent` tool call — Claude Code does not emit a top-level `agent_type` field, and `SessionStart`/`Stop`/`SubagentStop` payloads on Claude Code do not carry a sub-agent identifier at all (only `session_id`/`transcript_path`/`hook_event_name`), so this path only resolves anything on the `PreToolUse`/`PostToolUse` hook for that tool.
+   - Claude Code: top-level `agent_type` (e.g. `"morpheus"`) on the `SubagentStop` payload (which also carries `agent_id`, `agent_transcript_path`, and `last_assistant_message`), and `tool_input.subagent_type` (e.g. `"morpheus"`) on the `PreToolUse`/`PostToolUse` payload for the `Task`/`Agent` tool call. `SessionStart`/`Stop` payloads on Claude Code do not carry a sub-agent identifier (only `session_id`/`transcript_path`/`hook_event_name`), so those events resolve nothing from the payload. See the "Claude Code sub-agent identity resolution reads the SubagentStop payload's agent_type field" requirement below.
 2. The platform's current-agent env var, if the platform sets one at runtime (no currently-supported platform does; this path exists for forward compatibility and is not exercised by Claude Code or GitHub Copilot).
 3. The coding tool name in `.dreamland.json`.
 4. If a hook payload resolved a candidate value (step 1) that is not one of the ten registered dreamland agent names (`janus`, `phantasos`, `nyx`, `morpheus`, `phobetor`, `baku`, `iktomi`, `zhougong`, `hypnos`, `mengpo`), that candidate is discarded — treated the same as if step 1 had resolved nothing — rather than used verbatim.
@@ -180,6 +180,11 @@ The hook file is written with mode 0755. If `.git/hooks/prepare-commit-msg` alre
 #### Scenario: Claude Code identity resolved from tool_input.subagent_type
 
 - **WHEN** `dreamland coauthor` runs via Claude Code's `PreToolUse` hook for a `Task` tool call whose payload is `{"tool_input": {"subagent_type": "phobetor", ...}}`
+- **THEN** `git config --local user.name` is set to `"phobetor"`, not the generic coding-tool fallback
+
+#### Scenario: Claude Code identity resolved from SubagentStop agent_type
+
+- **WHEN** `dreamland coauthor` runs via Claude Code's `SubagentStop` hook with payload `{"agent_type": "phobetor", ...}`
 - **THEN** `git config --local user.name` is set to `"phobetor"`, not the generic coding-tool fallback
 
 #### Scenario: Unrecognized resolved identity falls back to janus, not the raw value
