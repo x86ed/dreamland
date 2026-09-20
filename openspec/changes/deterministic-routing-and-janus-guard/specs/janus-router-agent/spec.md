@@ -17,7 +17,7 @@ On Claude Code, Janus's `tools` frontmatter SHALL be `Read, Bash, Agent(<dispatc
 - **THEN** its `tools` frontmatter field is `Read, Bash, Agent(phantasos, nyx, morpheus, phobetor, baku, iktomi, zhougong, hypnos, mengpo)`
 - **AND** the list does not contain `janus`, `general-purpose`, or any other name outside the registered roster
 
-#### Scenario: Codex Janus cannot apply patches
+#### Scenario: Janus cannot apply patches on Codex
 
 - **WHEN** `.codex/agents/janus.toml` is installed
 - **THEN** it does not grant `apply_patch` capability
