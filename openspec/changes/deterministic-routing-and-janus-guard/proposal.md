@@ -1,0 +1,44 @@
+## Why
+
+Two problems, one root cause: Janus is a Haiku-model agent that is asked to be the router but is built and launched in a way that makes it either wasteful or wrong.
+
+1. **Getting stuck on Janus.** `.claude/agents/janus.md` has `tools: Read, Bash` and no `Agent` tool. When a session runs as Janus (`claude --agent janus`, which is what a launcher or a user in a second window does), nothing sits above it to dispatch, and it cannot dispatch itself. Its prompt says "never edit files", but nothing enforces that: `Bash` can write files. So Janus does the specialist work itself, and every commit and telemetry record is correctly but unhelpfully attributed to `janus`.
+2. **Janus burns tokens as a router.** In the flow that works today (plain `claude` plus `/dreamland`), the main session spawns Janus as a subagent only to get back a target name, then dispatches on its behalf. That costs one full model turn per routing decision, plus Janus's own `Stop`/`SubagentStop` hooks (telemetry write, version bump, `commit --reason handoff`) on each such turn. The decision Janus makes is, for most requests, computable from `openspec list`/`openspec status` and the command that was typed.
+
+Facts checked against the repository while drafting (they correct or refine the request that started this change):
+
+- Only `/opsx:propose`, `/opsx:explore`, and `/opsx:archive` route directly today. The per-agent commands (`/drmlnd:morpheus` and the bare `/morpheus`) still say "Delegate this request to the `janus` agent with an explicit instruction: route directly to `morpheus`", so they also pay the Janus hop although their destination is already fixed. `/opsx:apply`, `/dreamland`, `/drmlnd:route`, `/janus`, and `openspec-apply-change` go through Janus.
+- `claude-code-parity` (still open, 36/47 tasks) explicitly decided *not* to make Janus the main-thread agent and *not* to grant it `Agent`, and its `fixed-pipeline-enforcement` spec asserts Janus's `tools` are exactly `Read, Bash` with no `"agent"` key. That decision assumed sessions always start plain; it does not hold for `--agent janus` launches, which is the observed failure. This change reverses it, on stated grounds (see design.md, Decision 4).
+- The main-session `Stop` hook (`test-and-commit --reason turn-complete`) resolves identity from the shared `git config --local user.name`, which parallel windows overwrite. That is a separate mislabeling bug; this change decides not to fix it here (design.md, Decision 7).
+
+## What Changes
+
+- **New `dreamland route` command** (`cmd/route.go`, `internal/routing/`): resolves a target from the command spelling, the request text, the agent registry, `openspec list --json`, `openspec status --json`, and the first unchecked task in `tasks.md`, with no LLM call and no side effects. Returns `decision: target` for the deterministic cases and `decision: ambiguous` with candidates, `ask_user`, and the roster otherwise. Free text with no OpenSpec context deterministically goes to `iktomi` (the existing catch-all, which can redirect to a specialist mid-task), so "ambiguous" is reserved for cases where a choice genuinely remains.
+- **Janus stops being spawned as a routing subagent on Claude Code.** `/dreamland`, `/drmlnd:route`, `/janus`, `/opsx:apply`, and `openspec-apply-change` run `dreamland route` in the invoking session and dispatch the result themselves. The per-agent commands (`/drmlnd:<agent>`) dispatch their fixed target directly with no routing call at all. `janus.md` remains installed (identity, `claude --agent janus`, single roster/routing table) but is rewritten as the orchestrator protocol: run `dreamland route`, dispatch the target, decide among candidates only when `ambiguous`.
+- **Janus gets a restricted `Agent(...)` grant on Claude Code**: `tools: Read, Bash, Agent(<registered roster>)`, rendered by `dreamland init` from the registry, so a main-thread Janus can dispatch instead of doing the work.
+- **New `dreamland guard-router` PreToolUse guard** (`cmd/guard_router.go`): under acting identity `janus`, blocks `Write`/`Edit`/`MultiEdit`/`NotebookEdit` and any `Bash`/`PowerShell` call outside a read-only allowlist (fail-closed), with a message naming the agent to dispatch. Acting identity = `--agent-name` flag, else payload `agent_type`, else unattributed; never shared git config. Unattributed main sessions are allowed by default; `.dreamland.json` `main_thread_guard: "block"` opts in to blocking them.
+- **Janus's `hooks.Stop` block is removed** on Claude Code and replaced by an agent-scoped `PreToolUse` guard entry. All five Stop commands are redundant or dead for a pure router.
+- **Roster coherence**: `dreamland oneiroi seed`/`fork` and `mengpo` maintain Janus's `Agent(...)` list alongside the existing routing-table edits; a drift test ties the registry, the `Agent(...)` list, the `janus.*` routing tables, and the binary's rule table together.
+- **Phantasos writes a `[flow: nyx|morpheus|hypnos|mengpo]` tag on every task line** so the `/opsx:apply` flow decision is deterministic for new changes. Untagged legacy tasks stay `ambiguous` and are decided in-session, as Janus did before.
+- **Other five platforms**: `dreamland route` is platform-independent; their Janus templates gain one instruction line to call it first. No guard, no hop removal, no `Agent(...)` grant there (see design.md, Decision 8). This last item is separable and can be cut without affecting the Claude Code fix.
+
+## Capabilities
+
+### New Capabilities
+
+- `deterministic-routing`: the `dreamland route` command, its rule table, output contract, roster resolution, drift test, flow-tag convention, and Windows safety.
+- `router-dispatch-guard`: `dreamland guard-router`, acting-identity resolution, the Janus Bash allowlist, the unattributed-session policy, the agent-scoped and workspace-scoped wiring, and the removal of Janus's Stop hooks.
+
+### Modified Capabilities
+
+- `janus-router-agent`: MODIFIED tool-bindings requirement (Claude Code `Agent(...)` grant) and refuse-to-act requirement (now guard-enforced); ADDED requirement that Janus is the in-session orchestrator and never a spawned routing subagent on Claude Code.
+- `router-slash-commands`: MODIFIED generic route command, per-agent commands, `/opsx:apply`, and legacy `openspec-apply-change` requirements, for Claude Code only.
+- `agent-lifecycle-management`: ADDED requirement covering the roster touchpoints, including Janus's `Agent(...)` list, and the drift test.
+
+## Impact
+
+- **New Go code**: `cmd/route.go`, `internal/routing/*`, `cmd/guard_router.go`, `internal/config/config.go` (`main_thread_guard`), `internal/oneiroi/routing.go` (`Agent(...)` list patch), `internal/scaffold` (render the `Agent(...)` placeholder from the registry; merge `permissions.allow`).
+- **Templates** (owned by `hypnos` under the fixed artifact-ownership table): `internal/scaffold/templates/agents/claude-code/janus.md`, `internal/scaffold/templates/commands/claude-code/{route,baku,hypnos,iktomi,mengpo,morpheus,nyx,phantasos,phobetor,zhougong}.md`, `internal/scaffold/templates/hooks/bindings/claude-code/settings-patch.json`, plus one instruction line in the six `phantasos.*` templates and (optional, separable) the five other platforms' `janus.*`.
+- **Live files** (`.claude/agents/janus.md`, `.claude/commands/**`, `.claude/settings.json`) are re-synced by running `dreamland init`, not hand-edited; this repo's `.claude/settings.json` also lacks the existing `guard-artifact` binding, which the same re-sync fixes.
+- **Overlap with active changes** (details in design.md): `claude-code-parity` (direct contradiction of two of its assertions, archive-order dependency), `iktomi-always-handoff-phobetor` (none of the same requirements; both edit `janus-router-agent` spec and Iktomi is Janus's default free-form target), `harden-commit-hook-enforcement` (reuses its `Blocking`/exit-2 mechanism; defers the same Stop-identity area), `parallel-session-otel-receiver` (no overlap; its per-user state directory is the natural home for the deferred per-session identity).
+- **No breaking change** to the nine other agents, to `guard-artifact`, or to any non-Claude platform's behavior beyond the optional instruction line.
