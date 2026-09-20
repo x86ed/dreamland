@@ -1,3 +1,15 @@
+## Status and recorded decisions
+
+Design approved by the user. Decisions recorded from the review:
+
+1. Approved: one shared repo-agnostic receiver, per-user state directory, cursor-based incremental Copilot usage, version-aware replacement. Per-repo ports (option B below) stay rejected. Implementation proceeds after task 0.1.
+2. Old-receiver eviction is **automatic**, not manual. A new binary evicts a running pre-handshake receiver on its own (Decision 2, step 6), under strict safety rules. `--replace` remains as an explicit manual override.
+3. State directory is `os.UserCacheDir()/dreamland/otel`, override `DREAMLAND_STATE_DIR`.
+4. Defaults adopted for items the user left unanswered (stated plainly so they can be overturned):
+   - **No legacy mailbox read.** The new collector never reads repo-local `<repo>/.dreamland/otel-sessions/<id>.json`. Sessions in flight at upgrade lose only their OTel-fallback tokens.
+   - **Equal revision means no replacement.** Two receivers with the same `ReceiverRevision` but different `build` values are not replaced; dreamland developers bump `ReceiverRevision` or use `--replace`.
+5. Evidence status: the multi-repo problem was **derived from reading the code**, not from a live incident; nobody has observed a failure, and it is not known whether one would hit the OTel path or the chat-session-log path. Task 0.1 stays as the empirical gate before implementation.
+
 ## Context (verified in code)
 
 - `cmd/otel_receiver.go` `runOtelReceiver`: loads config, resolves `repoRoot` via `config.FindRepoRoot(cwd)`, computes `addr := otelReceiverAddr(cfg.OtelEndpoint)`. `--foreground` runs `http.Server{Handler: otelreceiver.Handler(repoRoot)}`. Without it, `net.DialTimeout` probes `addr`; if anything answers it returns nil; otherwise it spawns `dreamland otel-receiver --foreground` with `child.Dir = repoRoot`, detached (`Setsid` on unix, `DETACHED_PROCESS` on Windows).
@@ -6,6 +18,7 @@
 - `internal/telemetry/snapshot.go` `Write`: adds the returned token counts to whatever `.dreamland-session.json` already holds. Collectors must therefore return *deltas*.
 - `config.FindRepoRoot` walks up looking for `.git` (file or directory), so each git worktree is its own repo root with its own `.dreamland-session.json`, `.dreamland.json`, `.vscode/settings.json`.
 - Copilot's endpoint (`github.copilot.chat.otel.otlpEndpoint`) is written by `dreamland init` into workspace `.vscode/settings.json`.
+- Nothing in this section was observed live; it is all read from code (see "Status and recorded decisions", item 5).
 
 ## Decision 1: one shared receiver, no routing, user-level mailboxes (recommended)
 
@@ -52,9 +65,14 @@ Problem: the port is the only identity today, so a stale receiver of any age blo
   3. Connection refused: remove any stale `receiver-<port>.json` (pid dead), spawn.
   4. Health OK and `revision >= ours`: no-op. (Never replace newer with older: two worktrees on different binaries would otherwise flap. Equal revision with a different `build` is also a no-op; developers of dreamland itself use `--replace`.)
   5. Health OK and `revision < ours`: `terminateProcess(pid)`, poll dial for the port to free (up to 3 s), spawn. If the port does not free, log to stderr and exit 0.
-  6. Something answers but health is 404/non-JSON/wrong `service`: treat as a foreign or pre-handshake listener. No-op, plus one stderr line: `dreamland: port <p> is held by a receiver that cannot be identified; run 'dreamland otel-receiver --replace' if it is a stale dreamland receiver.`
+  6. Something answers but health is 404, non-JSON, or has the wrong `service`: an unidentified listener (this includes every pre-handshake dreamland receiver, whose catch-all `/` handler answers 200 without a health document). Run the **eviction check**, which requires all of the following, in order:
+     1. `lookupListenerPID(port)` (`lsof -nP -iTCP:<port> -sTCP:LISTEN -t` on unix; `netstat -ano` parsing on Windows) returns exactly one distinct pid (the same pid listed for IPv4 and IPv6 is deduplicated; two or more distinct pids, or none, is a failure to identify).
+     2. `processCommandLine(pid)` (`ps -o comm=` plus `ps -o args=` on unix; PowerShell `Get-CimInstance Win32_Process` on Windows) returns the executable path and arguments, and `isDreamlandReceiver(exe, args)` is true: the executable's basename (case-insensitive, `.exe` stripped) is exactly `dreamland` and `otel-receiver` is one of the arguments as a whole argument. `dreamland-foo`, `vim otel-receiver.md`, `node ... dreamland otel-receiver` (executable is `node`) and `go run` wrappers do not match.
+     If both hold: `terminateProcess(pid)`, poll dial for the port to free (up to 3 s), spawn the current binary (same as step 5), and write one stderr line noting the eviction (`dreamland: evicted pre-handshake dreamland receiver (pid <n>) on port <p>`). If the port does not free, one stderr line and exit 0.
+     If either fails: **leave the listener alone**, write exactly one stderr line (`dreamland: port <p> is held by a process that is not a dreamland receiver or could not be identified; leaving it alone (use 'dreamland otel-receiver --replace' to override for a dreamland receiver)`), and exit 0. A missing `lsof`, a permission failure (a listener owned by another user is invisible to `lsof`), a timeout, unparseable output, or an unreadable command line are all this branch, never an error and never a kill.
+  Safety invariant for steps 5 and 6 and `--replace`: a pid is signalled only when `isDreamlandReceiver` has just accepted that pid's command line. The same check applies to a pid reported by a health response (step 5), so a stale or spoofed health `pid` cannot cause an unrelated process to be killed.
   7. Release the lock.
-- `--replace`: skips step 4/6 gating; resolves the holder's pid from the health response if present, else (pre-handshake receiver) from an OS lookup (`lsof -nP -iTCP:<port> -sTCP:LISTEN -t` on unix, `netstat -ano` parsing on Windows) and refuses to signal a pid whose command line does not contain `dreamland` and `otel-receiver` (`ps -o command= -p` / `wmic`-free PowerShell `Get-CimInstance Win32_Process`). This is the one-time migration path for the receiver that is running today; it is never invoked automatically.
+- `--replace`: explicit manual override. Skips the revision comparison of step 4 (replaces an equal or newer receiver too) and, for an unidentified listener, runs the same eviction check as step 6 (the safety invariant is not bypassed: `--replace` never signals a process that fails `isDreamlandReceiver`). Since step 6 now evicts pre-handshake receivers automatically, `--replace` is needed only to replace an equal-or-newer receiver, for example while developing dreamland itself. When lookup tooling is missing it prints manual instructions and exits 0.
 - Liveness: `processAlive(pid)` is `syscall.Kill(pid, 0)` on unix and `OpenProcess`+`GetExitCodeProcess == STILL_ACTIVE` on Windows. A pid file whose pid is dead or whose port is closed is deleted by the next start. The pid file is never trusted over the health response.
 - Foreground receiver: binds with `net.Listen` (a bind failure with `EADDRINUSE` exits 0 silently, which resolves a race between two starters that both passed the probe), writes the pid file only after a successful bind, removes it on graceful exit, handles SIGTERM/Interrupt (`srv.Shutdown` with a 2 s timeout). On Windows only `os.Interrupt` exists; `terminateProcess` there is `Process.Kill`, so the pid file may be left behind, which is why staleness is checked by liveness.
 
@@ -86,12 +104,14 @@ The cursor package (`internal/telemetry/cursor`) is generic (`Load(repo, id) (Co
 - `os.UserCacheDir()` yields `%LocalAppData%`; use `filepath` everywhere; conversation-id validation removes `:`/`\` characters, which matters on Windows.
 - `detachProcess` already uses `DETACHED_PROCESS`; add `CREATE_NEW_PROCESS_GROUP` (0x200) so a Ctrl+C in the parent console does not reach the receiver. Verify with `GOOS=windows go vet ./...` in CI and one manual run.
 - `processAlive`, `terminateProcess` implemented in `otel_receiver_windows.go` (`golang.org/x/sys/windows` if already a dependency, else `syscall.OpenProcess`); no `lsof`, no signals.
-- `--replace` pre-handshake lookup uses `netstat -ano` and PowerShell `Get-CimInstance`. If PowerShell is unavailable it prints manual instructions and exits 0.
+- The eviction check (Decision 2 step 6) and `--replace` use `netstat -ano` and PowerShell `Get-CimInstance`. If either is unavailable it is an identification failure: one stderr line, nothing killed, exit 0.
 - Rename-over-existing and open-file sharing: retry loop (Decision 3).
 
 ## Risks
 
 - **Span semantics unverified**: whether `invoke_agent` spans are per-turn deltas, cumulative, or include child agent spans is not established by the code or tests; a cumulative-to-date span would over-count when summed. Task 0.1 must settle it before implementation; if spans are cumulative the receiver should keep `max` instead of `sum`, an isolated change in `processSpan`.
-- Pre-handshake receivers are not auto-evicted (Decision 2 step 6). Until `--replace` is run once, upgraded machines keep the old one-repo behavior. Accepted to avoid killing unidentified processes.
-- Equal-revision different-build no-op means a dreamland developer must bump `ReceiverRevision` (or `--replace`) to test receiver changes.
+- Auto-eviction kills a process. Mitigations: pid must come from an OS listener lookup that yields exactly one pid, and its executable basename must be `dreamland` with `otel-receiver` as an argument; anything else is left alone (Decision 2 step 6). Residual risk: a human-started `dreamland otel-receiver --foreground` on the same port for another purpose would be evicted (and replaced by an equivalent current receiver, so functionally harmless). A dreamland receiver owned by another OS user is invisible to `lsof`, so it is left alone with the stderr line.
+- Cost: every SessionStart that finds an unidentified listener runs `lsof`/`netstat` and `ps` (tens of ms); only in that branch, never on the healthy path.
+- Equal-revision different-build no-op (recorded default) means a dreamland developer must bump `ReceiverRevision` (or `--replace`) to test receiver changes.
+- No legacy mailbox read (recorded default): sessions in flight at upgrade lose OTel-fallback tokens for that session only.
 - Same-repo multi-session `.dreamland-session.json` contention (two writers doing read-modify-write in `telemetry.Write`) is pre-existing and untouched.
