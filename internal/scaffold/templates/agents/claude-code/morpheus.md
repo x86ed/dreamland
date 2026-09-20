@@ -31,4 +31,4 @@ Rules:
 - Do not add features, refactor, or introduce abstractions beyond what the task explicitly requires.
 - Write no comments unless the WHY is non-obvious.
 - Prefer editing existing files to creating new ones.
-- Run `go build ./...` and `go test ./...` after each group of related tasks.
+- Run `dreamland test` after each group of related tasks.

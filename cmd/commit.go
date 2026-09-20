@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -18,8 +19,10 @@ var commitCmd = &cobra.Command{
 
 var commitReason string
 var commitAgentName string
+var commitHook bool
 
 func init() {
+	commitCmd.Flags().BoolVar(&commitHook, "hook", false, "read the acting agent's identity from the hook payload on stdin (SubagentStop agent_type)")
 	rootCmd.AddCommand(commitCmd)
 	commitCmd.Flags().StringVar(&commitReason, "reason", "", "turn-complete or handoff")
 	commitCmd.Flags().StringVar(&commitAgentName, "agent-name", "", "explicit agent name, takes precedence over env var / hook payload lookup")
@@ -72,6 +75,9 @@ func runCommit(cmd *cobra.Command, args []string) error {
 				return Blocking(errors.New(msg))
 			}
 
+			// A "skipped" result (test correctly determined no tracked source
+			// files changed since the last commit, so no run was needed) is not
+			// a failure — fall through and allow the commit exactly like "pass".
 			// If the test result shows failure at the current HEAD, refuse to commit
 			if testResult.Status == "fail" {
 				currentHead, err := runCmd("git", "rev-parse", "HEAD")
@@ -101,19 +107,41 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	}
 
 	if _, err := gitExec("add", "-A"); err != nil {
+		if commitReason == "handoff" {
+			return fmt.Errorf("git add -A: %w", err)
+		}
 		return Blocking(fmt.Errorf("git add -A: %w", err))
 	}
 
 	// --agent-name is an explicit override (from the agent-scoped Stop hook, which
-	// knows its own agent identity statically) and takes precedence; otherwise fall
-	// back to the git identity coauthor already set, which is what actually appears
-	// as the commit author — see currentGitIdentityName.
+	// knows its own agent identity statically) and takes precedence, then the hook
+	// payload's agent_type/subagent_type (--hook, for the workspace-level SubagentStop
+	// binding); otherwise fall back to the git identity coauthor already set — see
+	// currentGitIdentityName.
 	agentName := commitAgentName
+	if agentName == "" && commitHook {
+		if hookAgent := agentNameFromHookPayloadFrom(os.Stdin); hookAgent != "" && isRegisteredAgent(hookAgent, repoRoot) {
+			agentName = hookAgent
+		}
+	}
 	if agentName == "" {
 		agentName = currentGitIdentityName(cfg, repoRoot)
 	}
+	suffix := cfg.EmailSuffix
+	if suffix == "" {
+		suffix = "@github.com"
+	}
 	message := fmt.Sprintf("chore: %s checkpoint (%s)", commitReason, agentName)
-	if out, err := gitExec("commit", "-m", message); err != nil {
+	// Author/committer are pinned to the same name as the subject via -c rather than
+	// read from the shared, mutable `git config --local user.name`: that value is
+	// last-writer-wins across parallel hooks, concurrent dispatches, and SessionStart
+	// resets, so relying on it let a commit's subject say one agent while its author
+	// (what `git log` and blame show) said another, typically janus.
+	if out, err := gitExec(
+		"-c", "user.name="+agentName,
+		"-c", "user.email="+config.EmailClean(agentName)+suffix,
+		"commit", "-m", message,
+	); err != nil {
 		// A concurrent writer (another agent session committing to this same working
 		// tree) can land its own commit between our status check above and this commit
 		// call, covering the exact same staged changes — our index then diffs identical
@@ -123,6 +151,9 @@ func runCommit(cmd *cobra.Command, args []string) error {
 		// the work. Any other git commit failure still blocks exactly as before.
 		if isNothingToCommit(out) {
 			return nil
+		}
+		if commitReason == "handoff" {
+			return fmt.Errorf("git commit: %w\n%s", err, out)
 		}
 		return Blocking(fmt.Errorf("git commit: %w\n%s", err, out))
 	}
