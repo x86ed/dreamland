@@ -15,7 +15,7 @@ For acting identity `janus` (explicit or defaulted):
 
 For any other acting identity, `guard-router` SHALL exit 0 (ownership of protected paths remains `guard-artifact`'s concern). A missing, empty, or unparseable payload SHALL exit 0 with a note on stderr: the guard fails open on malformed input, matching `guard-artifact`, because a hook that blocks on a payload it cannot read would brick the session. If no git repository can be found from the working directory, `guard-router` SHALL exit 0 with a note (the hook is installed per repository, so this is a misconfiguration, not a session to police).
 
-The blocking message SHALL name what to do next. For a file-modifying tool whose `tool_input.file_path` matches an owned path in `guard-artifact`'s ownership table, it names that owner (e.g. "this path is owned by phantasos; dispatch phantasos"). Otherwise it states that this session is acting as the janus orchestrator and must dispatch a specialist with the `Agent` tool, directs the caller to run `dreamland route` and dispatch the returned agent, and names `iktomi` as the free-form default and `morpheus` as the target for build, install, and git-mutation work. For an unattributed session the message additionally states that the guard can be turned off for plain sessions only by the user, via `.dreamland.json`.
+The blocking message SHALL name what to do next. For a file-modifying tool whose `tool_input.file_path` matches an owned path in `guard-artifact`'s ownership table, it names that owner (e.g. "this path is owned by phantasos; dispatch phantasos"). Otherwise it states that this session is acting as the janus orchestrator and must dispatch a specialist with the `Agent` tool, directs the caller to run `dreamland route` and dispatch the returned agent, and names `iktomi` as the free-form default, `dreamland build` for building and installing the project's binary (or, when `.dreamland.json` has no `build_command`, says that the user can run `dreamland init` to record one), and `morpheus` as the target for any other build, install, and git-mutation work. For an unattributed session the message additionally states that the guard can be turned off for plain sessions only by the user, via `.dreamland.json`.
 
 #### Scenario: Janus's Edit is blocked and names the owner
 
@@ -62,17 +62,17 @@ The blocking message SHALL name what to do next. For a file-modifying tool whose
 - **WHEN** `guard-router` receives an empty stdin or non-JSON text
 - **THEN** it exits 0
 
-### Requirement: The orchestrator's shell access is an allowlist, fail-closed, that permits read-only inspection and repository verification only
+### Requirement: The orchestrator's shell access is an allowlist, fail-closed, that permits read-only inspection, repository verification, and the one fixed-effect `dreamland build`
 
 Under acting identity `janus` (explicit, or the default for an unattributed main session), a `Bash` or `PowerShell` call SHALL be allowed only when all of the following hold; otherwise it is blocked. This is an allowlist, not a parse of shell text for mutations: unlike a denylist it fails closed on any command it does not recognize.
 
 1. The command, trimmed, contains none of the characters `;` `&` `|` `<` `>` `` ` `` `$` `(` `)` `{` `}` `\` `'` `"` or a newline or carriage return, with one exception (item 5). Quote characters are excluded so that a quoted argument cannot hide a blocked flag from the token checks below. A `PowerShell` call is always blocked: the orchestrator is expected to use `Bash`, so a `PowerShell` call under this identity is treated as anomalous and the message says to dispatch a specialist.
-2. The first two whitespace-separated tokens match one of: `openspec status`, `openspec list`, `openspec show`, `openspec validate`, `openspec instructions`, `dreamland route`, `dreamland version`, `git status`, `git log`, `git diff`, `git show`, `git rev-parse`, `go vet`, `go test`; or the first token is `ls` or `pwd`.
-3. For every command other than `go vet` and `go test`, no argument begins with `--output`, `-o`, `--ext-diff`, `--exec`, or `--no-index`.
+2. The first two whitespace-separated tokens match one of: `openspec status`, `openspec list`, `openspec show`, `openspec validate`, `openspec instructions`, `dreamland route`, `dreamland version`, `dreamland build`, `git status`, `git log`, `git diff`, `git show`, `git rev-parse`, `go vet`, `go test`; or the first token is `ls` or `pwd`.
+3. For every command other than `go vet`, `go test`, and `dreamland build`, no argument begins with `--output`, `-o`, `--ext-diff`, `--exec`, or `--no-index`. `dreamland build` SHALL be allowed only as exactly the two tokens `dreamland build` with nothing after them: it takes no arguments and no flags, so a caller cannot influence what it runs (see the `project-build` capability). `dreamland build` is not read-only and is not classed as if it were: it is the single allowed *fixed-effect mutation*, permitted because everything it does (the build command, the output path, the install directory) is read from `.dreamland.json`, which this identity cannot write, was recorded by the user's own `dreamland init`, and is validated again at run time, and because none of it is chosen by the caller. It executes repository-controlled build tooling, and that is accepted on the same footing as `go test` (item 4): dreamland already runs the project's configured test command at every `Stop`.
 4. For `go vet` and `go test`, every token after the second is either (a) a boolean flag from `-v`, `-race`, `-short`, `-cover`, `-failfast`, `-json` (`go test` only); (b) a value flag written in the single-token form `-name=value` where `name` is one of `run`, `skip`, `count`, `timeout`, `parallel`, `p`, `tags`, `covermode`, `shuffle`, `list` (`go test`) or `tags` (`go vet`) and `value` matches `^[A-Za-z0-9_.,:/^+-]+$`; or (c) a package pattern that begins with `./`, contains only `[A-Za-z0-9_./-]`, and has no `..` path segment (the wildcard `...` is allowed). Any other token, including `-o`, `-c`, `-exec`, `-toolexec`, `-vettool`, `-overlay`, `-modfile`, `-coverprofile`, `-cpuprofile`, `-memprofile`, `-blockprofile`, `-mutexprofile`, `-trace`, `-outputdir`, `-fuzz`, `-args`, `-C`, an absolute path, or a value given as a separate token, blocks the call. These two commands are permitted because they are how a session verifies the repository, they produce no artifact in the working tree, and dreamland already runs the project's tests at every `Stop` under the same trust; they do execute the repository's own code, and that is accepted, not overlooked.
 5. Exception, so the orchestrator can pass a user's free text (which routinely contains `(`, `$`, quotes) to `dreamland route` verbatim: a single quoted-heredoc form is allowed when the first line is `dreamland route ... --stdin <<'DREAMLAND_ROUTE_EOF'` (satisfying items 2 and 3, with the `<<'DREAMLAND_ROUTE_EOF'` suffix the only permitted use of `<` and of `'`), the final line of the command is exactly `DREAMLAND_ROUTE_EOF`, that terminator appears exactly once, and nothing follows it. The body between is unrestricted: a quoted heredoc delimiter makes the shell treat the body as literal text, and `dreamland route` only reads it.
 
-Consequently the following are blocked for this identity and must be delegated through the `Agent` tool: `go build`, `go install`, `go run`, `go generate`, `go mod`, `gofmt`; `mv`, `cp`, `rm`, `mkdir`, `chmod`, `touch`, `tee`, `sed`, `awk`; every `git` subcommand other than the five listed (`add`, `commit`, `checkout`, `switch`, `restore`, `stash`, `merge`, `rebase`, `reset`, `branch`, `tag`, `push`, `worktree`, ...); `openspec new`, `openspec archive`; `dreamland coauthor`, `commit`, `test`, `test-and-commit`, `version-bump`, `init`, `oneiroi`, `telemetry`; and every other command. Building and installing the `dreamland` binary (`go build -o`, then `mv`/`cp` to `~/.local/bin`) is therefore delegated to `morpheus`: its only effect is writing an artifact to disk, which is exactly the class of action this guard exists to route through an attributed specialist. This narrows the precedent set by `fixed-pipeline-enforcement` (which left Bash-mediated mutation out of scope because parsing shell text is unreliable) to the one identity where an allowlist is practical.
+Consequently the following are blocked for this identity and must be delegated through the `Agent` tool: `go build`, `go install`, `go run`, `go generate`, `go mod`, `gofmt`; `mv`, `cp`, `rm`, `mkdir`, `chmod`, `touch`, `tee`, `sed`, `awk`; every `git` subcommand other than the five listed (`add`, `commit`, `checkout`, `switch`, `restore`, `stash`, `merge`, `rebase`, `reset`, `branch`, `tag`, `push`, `worktree`, ...); `openspec new`, `openspec archive`; `dreamland coauthor`, `commit`, `test`, `test-and-commit`, `version-bump`, `init`, `oneiroi`, `telemetry`; and every other command. Building and installing the project's binary with caller-chosen arguments or destinations (`go build -o`, then `mv`/`cp` to `~/.local/bin`) stays blocked, because a token grammar for arbitrary destinations is neither safe nor cross-platform. The sanctioned path is `dreamland build`, whose configuration comes from `dreamland init`; work that `dreamland build` cannot express (a different target, a one-off install elsewhere) is delegated to `morpheus`. This narrows the precedent set by `fixed-pipeline-enforcement` (which left Bash-mediated mutation out of scope because parsing shell text is unreliable) to the one identity where an allowlist is practical.
 
 #### Scenario: Read-only routing inputs are allowed
 
@@ -94,10 +94,25 @@ Consequently the following are blocked for this identity and must be delegated t
 - **WHEN** `guard-router` receives `go test -run TestFoo ./...`
 - **THEN** it exits 2, and stderr shows the accepted `-run=TestFoo` form
 
-#### Scenario: Building and installing the binary is delegated
+#### Scenario: Ad hoc build and install commands are blocked and point at `dreamland build`
 
-- **WHEN** `guard-router` receives, from an unattributed session, each of `go build -o dreamland .`, `go build ./...`, and `mv dreamland /Users/x/.local/bin/dreamland`
-- **THEN** each exits 2 and stderr names `morpheus` for build and install work
+- **WHEN** `guard-router` receives, from an unattributed session, each of `go build -o dreamland .`, `go build ./...`, and `mv dreamland /Users/x/.local/bin/dreamland`, and `.dreamland.json` has a non-empty `build_command`
+- **THEN** each exits 2 and stderr says to run `dreamland build` for the configured build and install, and names `morpheus` for anything it cannot express
+
+#### Scenario: The block message tells an unconfigured repository how to get a build command
+
+- **WHEN** the same calls are received and `.dreamland.json` has no `build_command`
+- **THEN** each exits 2 and stderr says the repository has no configured build command, that the user can run `dreamland init` to record one, and names `morpheus` for the work in the meantime
+
+#### Scenario: dreamland build is allowed with no arguments
+
+- **WHEN** `guard-router` receives, from `janus` and from an unattributed session, the `Bash` command `dreamland build`
+- **THEN** each exits 0
+
+#### Scenario: dreamland build with any argument is blocked
+
+- **WHEN** `guard-router` receives `dreamland build ./cmd`, `dreamland build --output=/tmp/x`, `dreamland build -o x`, or `dreamland build && rm -rf x`
+- **THEN** each exits 2
 
 #### Scenario: dreamland route with a quoted heredoc is allowed
 
@@ -215,7 +230,7 @@ The default is `block` because the workflow's invariant is that no work happens 
 
 ### Requirement: The guard is wired at agent scope and workspace scope on Claude Code
 
-`.claude/agents/janus.md` SHALL declare an agent-scoped `hooks.PreToolUse` entry with matcher `Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|Agent|Task` running `dreamland guard-router --agent-name janus`. `.claude/settings.json` (via `internal/scaffold/templates/hooks/bindings/claude-code/settings-patch.json`) SHALL register the same matcher running `dreamland guard-router` (no flag) under `PreToolUse`, so identity comes from the payload's `agent_type`, which covers a session launched as `janus` even if agent-scoped hooks do not fire, and is the only binding that reaches a plain main session and its unattributed-session policy. Both firing for one call is harmless: the command is read-only and idempotent. `.claude/settings.json` `permissions.allow` SHALL include `Bash(dreamland route *)` so routing runs without a permission prompt.
+`.claude/agents/janus.md` SHALL declare an agent-scoped `hooks.PreToolUse` entry with matcher `Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|Agent|Task` running `dreamland guard-router --agent-name janus`. `.claude/settings.json` (via `internal/scaffold/templates/hooks/bindings/claude-code/settings-patch.json`) SHALL register the same matcher running `dreamland guard-router` (no flag) under `PreToolUse`, so identity comes from the payload's `agent_type`, which covers a session launched as `janus` even if agent-scoped hooks do not fire, and is the only binding that reaches a plain main session and its unattributed-session policy. Both firing for one call is harmless: the command is read-only and idempotent. `.claude/settings.json` `permissions.allow` SHALL include `Bash(dreamland route *)` so routing runs without a permission prompt, and `Bash(dreamland build)` (exact, no wildcard, so the permission rule itself also refuses arguments) so the fixed build-and-install runs without one.
 
 `janus.md` SHALL carry no `hooks.Stop` block. Every entry of the previous block is redundant or dead for a pure router: `coauthor --hook --agent-name janus` (identity already defaults to `janus` at `SessionStart`), `telemetry write --tool claude-code` and `version-bump --patch` (already run by the workspace `Stop` and `SubagentStop` chains, so they would run twice per turn under `claude --agent janus`), `version-bump --minor --if-agent janus` (Janus is no longer spawned as a subagent, and per-branch minor bumps already happen at `SessionStart`), and `commit --reason handoff --agent-name janus` (under `claude --agent janus` it double-commits alongside the workspace `Stop` chain's `test-and-commit`, and it is the mechanism that stamped specialist work with Janus's name). Janus's turns remain covered by the workspace-level `Stop` chain (`telemetry write`, `test-and-commit --reason turn-complete --hook`) and its dispatches by the workspace-level `PreToolUse` `coauthor` and `SubagentStop` chain.
 
@@ -231,7 +246,7 @@ The other nine agents' `hooks.Stop` blocks are unchanged by this requirement.
 
 - **WHEN** `dreamland init` completes with "Claude Code" selected
 - **THEN** `.claude/settings.json` `hooks.PreToolUse` contains an entry with the same matcher running `dreamland guard-router`
-- **AND** `permissions.allow` contains `Bash(dreamland route *)`
+- **AND** `permissions.allow` contains `Bash(dreamland route *)` and `Bash(dreamland build)`
 
 #### Scenario: Other agents' Stop hooks are untouched
 
