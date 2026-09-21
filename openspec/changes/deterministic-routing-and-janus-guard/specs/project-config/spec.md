@@ -2,7 +2,7 @@
 
 ### Requirement: Build settings are optional, validated by one shared function set, and never guessed
 
-`.dreamland.json` MAY contain three optional keys, all omitted when unset (`omitempty`): `build_command` (string), `build_output` (string), and `build_install` (string). They are read by `dreamland build` and written only by `dreamland init` (or by hand). The `internal/config` package SHALL expose the validators `ValidateBuildCommand(command string, hasOutput bool) ([]string, error)`, `ValidateBuildOutput(output string) (string, error)`, and `ResolveBuildInstall(spec, repoRoot string) (dir string, err error)`, used by both the init wizard's field validators and `dreamland build`, so init-time and run-time rules cannot drift. Validation is a reject list of shell-shaped input plus a positive charset, not an attempt to parse or escape shell text.
+`.dreamland.json` MAY contain three optional keys, all omitted when unset (`omitempty`): `build_command` (string), `build_output` (string), and `build_install` (string). They are read by `dreamland build` and by `dreamland init`'s first build (both through `performBuild`; see the `project-build` capability), and written only by `dreamland init` (or by hand). The `internal/config` package SHALL expose the validators `ValidateBuildCommand(command string, hasOutput bool) ([]string, error)`, `ValidateBuildOutput(output string) (string, error)`, and `ResolveBuildInstall(spec, repoRoot string) (dir string, err error)`, used by both the init wizard's field validators and `dreamland build`, so init-time and run-time rules cannot drift. Validation is a reject list of shell-shaped input plus a positive charset, not an attempt to parse or escape shell text.
 
 `build_command`:
 
@@ -48,3 +48,8 @@
 
 - **WHEN** `.dreamland.json` written before this change is loaded
 - **THEN** it loads with all three build fields empty and no error, and `config.Save` of that value does not add the keys
+
+#### Scenario: A failed first build does not touch the recorded settings
+
+- **WHEN** `dreamland init` saves valid build settings and its first build then fails
+- **THEN** `.dreamland.json` still contains the three keys exactly as entered (the save happened before the build and is never rolled back)
