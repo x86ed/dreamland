@@ -10,13 +10,13 @@ AgentName resolution tries, in order:
 
 1. A hook stdin payload for the current invocation, read only when `dreamland coauthor` is invoked with `--hook` — a flag set exclusively by dreamland's own scaffold-installed hook-binding templates (every platform: Claude Code, GitHub Copilot, Cursor, Codex, Kiro), never by a human running the command manually. Without `--hook`, stdin is never opened or read at all, so a manual invocation in any terminal returns immediately with no possibility of blocking, regardless of what kind of stdin is attached. With `--hook`, the payload is read synchronously to completion (no timeout) — correct because every hook-binding caller writes its payload and closes its end of the pipe promptly, so the read completes as soon as the real data arrives, however long that legitimately takes, checked for an agent identifier in whichever shape the platform actually emits:
    - GitHub Copilot: top-level `agent_type` (e.g. `"morpheus"`) on `SubagentStart`/`SubagentStop` payloads.
-   - Claude Code: `tool_input.subagent_type` (e.g. `"morpheus"`) on the `PreToolUse`/`PostToolUse` payload for the `Task`/`Agent` tool call — Claude Code does not emit a top-level `agent_type` field, and `SessionStart`/`Stop`/`SubagentStop` payloads on Claude Code do not carry a sub-agent identifier at all (only `session_id`/`transcript_path`/`hook_event_name`), so this path only resolves anything on the `PreToolUse`/`PostToolUse` hook for that tool.
+   - Claude Code: top-level `agent_type` (e.g. `"morpheus"`) on the `SubagentStop` payload (which also carries `agent_id`, `agent_transcript_path`, and `last_assistant_message`), and `tool_input.subagent_type` (e.g. `"morpheus"`) on the `PreToolUse`/`PostToolUse` payload for the `Task`/`Agent` tool call. `SessionStart`/`Stop` payloads on Claude Code do not carry a sub-agent identifier (only `session_id`/`transcript_path`/`hook_event_name`), so those events resolve nothing from the payload. See the "Claude Code sub-agent identity resolution reads the SubagentStop payload's agent_type field" requirement below.
 2. The platform's current-agent env var, if the platform sets one at runtime (no currently-supported platform does; this path exists for forward compatibility and is not exercised by Claude Code or GitHub Copilot).
 3. The coding tool name in `.dreamland.json`.
 4. If a hook payload resolved a candidate value (step 1) that is not one of the ten registered dreamland agent names (`janus`, `phantasos`, `nyx`, `morpheus`, `phobetor`, `baku`, `iktomi`, `zhougong`, `hypnos`, `mengpo`), that candidate is discarded — treated the same as if step 1 had resolved nothing — rather than used verbatim.
 5. On Claude Code specifically, if steps 1-2 resolve nothing, AgentName is `janus`, not the coding-tool name — see the `session-agent-identity` capability for the full "no default, no unknown agent" requirement this satisfies. On every other platform, step 3 (coding-tool name) remains the fallback when steps 1-2 resolve nothing, unchanged from prior behavior.
 
-This full resolution sequence (steps 1-5) is exposed as a single internal function so no other command re-implements it independently; the `dreamland commit` requirement below reads the *result already persisted by this logic* (the git config value this requirement sets, per part **a** below) rather than re-running steps 1-5 itself, since `commit` may run at a different hook event with a different payload shape than the `coauthor` invocation that last set identity — see that requirement for why independent re-resolution at a different lifecycle event would be incorrect.
+This full resolution sequence (steps 1-5) is exposed as a single internal function so no other command re-implements it independently; the `dreamland commit` requirement below, after an explicit `--agent-name` and (with `--hook`) the hook payload's own agent identity, reads the *result already persisted by this logic* (the git config value this requirement sets, per part **a** below) rather than re-running steps 1-5 itself, falling back to this function only when that value is unset, since `commit` may run at a different hook event with a different payload shape than the `coauthor` invocation that last set identity — see that requirement for why independent re-resolution at a different lifecycle event would be incorrect.
 
 AgentEmail is derived by cleaning AgentName and appending `email_suffix` from `.dreamland.json` (default `@github.com`).
 
@@ -81,6 +81,11 @@ This hook script intentionally has no `command -v dreamland` guard: if `dreamlan
 
 - **WHEN** `dreamland coauthor` runs and `.git/hooks/prepare-commit-msg` does not exist
 - **THEN** the file is created with mode 0755 containing `#!/bin/sh` and `dreamland coauthor --trailer "$1" "$2" "$3"`
+
+#### Scenario: Claude Code identity resolved from SubagentStop agent_type
+
+- **WHEN** `dreamland coauthor --hook` runs via Claude Code's `SubagentStop` hook with payload `{"agent_type": "phobetor", ...}`
+- **THEN** `git config --local user.name` is set to `"phobetor"`, not the generic coding-tool fallback
 
 #### Scenario: Claude Code identity resolved from tool_input.subagent_type
 
