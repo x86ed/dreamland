@@ -22,7 +22,7 @@ The scaffold installer SHALL bind, on Claude Code, `dreamland test-and-commit --
 #### Scenario: Commit created when a turn completes with pending changes
 
 - **WHEN** `dreamland commit --reason turn-complete` runs via the `Stop` hook, `git status --porcelain` shows pending changes, and either no `.dreamland/last-test-result.json` record exists or it records a `"pass"` for the current `HEAD`
-- **THEN** the changes are staged and committed with subject `chore: turn-complete checkpoint (<agent-name>)`, where `<agent-name>` matches the current `git config --local user.name`
+- **THEN** the changes are staged and committed with subject `chore: turn-complete checkpoint (<agent-name>)`, where `<agent-name>` is the identity resolved by behavior item 4
 
 #### Scenario: No-op when a turn completes with a clean working tree
 
