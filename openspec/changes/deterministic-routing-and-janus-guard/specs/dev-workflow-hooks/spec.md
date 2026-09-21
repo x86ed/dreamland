@@ -75,6 +75,21 @@ The scaffold installer SHALL bind, on Claude Code, `dreamland test-and-commit --
 - **THEN** the commit subject reads `chore: turn-complete checkpoint (phobetor)`
 
 
+#### Scenario: Commit author is pinned regardless of a concurrent git config change
+
+- **WHEN** `dreamland commit` resolves agent identity `X` and `git config --local user.name` currently holds a different value
+- **THEN** the commit's author and committer name/email are set explicitly to `X` (`git -c user.name=X -c user.email=...`), matching the `(X)` in the subject
+
+#### Scenario: Handoff identity comes from the SubagentStop payload
+
+- **WHEN** `dreamland commit --reason handoff --hook` runs with payload `{"agent_type": "morpheus"}`, the session record for its `session_id` holds `nyx`, and `git config --local user.name` reads `janus`
+- **THEN** the commit's subject is `chore: handoff checkpoint (morpheus)` and its author and committer are `morpheus`
+
+#### Scenario: A concurrent commit that already covered the changes is a benign no-op
+
+- **WHEN** `git commit` reports "nothing to commit" because another session committed the same changes between the status check and the commit
+- **THEN** the command exits 0 for both `turn-complete` and `handoff`
+
 #### Scenario: Handoff commit created when Janus hands off to another agent
 
 - **WHEN** a sub-agent's turn ends via `SubagentStop` and `git status --porcelain` shows pending changes
