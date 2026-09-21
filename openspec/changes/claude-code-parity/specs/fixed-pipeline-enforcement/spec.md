@@ -1,3 +1,4 @@
+<!-- Superseded in part by deterministic-routing-and-janus-guard (that change wins): the Janus `tools` scenario below and the main-thread-direct gap note. All other requirements and scenarios here are unchanged. -->
 ## ADDED Requirements
 
 ### Requirement: A PreToolUse write-guard enforces fixed artifact ownership during a dispatched agent's own turn
@@ -14,7 +15,7 @@ When the payload's `tool_input.file_path` matches a protected pattern and `agent
 
 This requirement exists because GitHub Copilot's structural `agents:` dispatch-allowlist (see the `agent-scaffolding` capability) has no working equivalent on Claude Code: a hand-off relayed by the main thread after a subagent's turn ends reports the *session's* `agent_type`, not the completing subagent's, so a dispatch-time check can never distinguish "Janus's own first dispatch" from "Janus relaying Nyx's recommended hand-off" — both look identical, and Janus can legitimately reach every agent. The enforcement point this requirement uses instead — a hook firing during a subagent's own tool call — is the one place `agent_type` is reliably scoped to the agent that's actually about to act, because subagent identity takes precedence over session identity for any hook firing inside that subagent's own turn.
 
-**Fail-open on unknown identity is deliberate, not a gap being ignored elsewhere.** A payload with no `agent_type` at all (a main-thread-direct tool call with no subagent dispatched) is allowed through unconditionally — there is no identity to check, and no mechanism in this capability closes that gap. This is a known, accepted limitation: enforcement covers "a dispatched agent writing outside its role, mid-turn" and does not cover "no one was dispatched at all." No change to any agent's `tools:` frontmatter or to Claude Code's main-thread configuration is made to close it.
+**Fail-open on unknown identity is deliberate, not a gap being ignored elsewhere.** A payload with no `agent_type` at all (a main-thread-direct tool call with no subagent dispatched) is allowed through unconditionally — there is no identity to check, and no mechanism in this capability closes that gap. This is a known, accepted limitation: enforcement covers "a dispatched agent writing outside its role, mid-turn" and does not cover "no one was dispatched at all." No change to any agent's `tools:` frontmatter or to Claude Code's main-thread configuration is made *by this capability* to close it, and `guard-artifact` remains fail-open on absent identity. *(Superseded in effect by `deterministic-routing-and-janus-guard`: `dreamland guard-router`, a separate `PreToolUse` command, now treats an unattributed main session as `janus` and blocks its file edits by default, closing the main-thread-direct gap; `guard-artifact` itself is unchanged.)*
 
 **Bash-mediated file mutation is out of scope.** `mengpo` retires agents via `Bash rm`/`git rm`, not `Edit`/`Write` — a `Write|Edit`-scoped hook never observes these calls. Parsing shell command text to detect and gate file-path targets was considered and rejected as too fragile to trust for a blocking check.
 
@@ -38,7 +39,7 @@ This requirement exists because GitHub Copilot's structural `agents:` dispatch-a
 - **WHEN** `dreamland guard-artifact` receives a hook payload with no `agent_type` field, for a `Write`/`Edit` call targeting a protected path
 - **THEN** it exits 0 — this is the accepted coverage gap, not an error condition
 
-#### Scenario: Janus's own permissions are unchanged by this requirement
+#### Scenario: This requirement does not itself change Janus's `tools`, and installs no default agent
 
 - **WHEN** `dreamland init` completes with "Claude Code" selected
-- **THEN** `.claude/agents/janus.md`'s `tools:` frontmatter is exactly `Read, Bash`, unchanged from before this capability existed, and `.claude/settings.json` contains no `"agent"` top-level key
+- **THEN** `.claude/agents/janus.md`'s `tools:` frontmatter is `Read, Bash, Agent(<registered roster>)` as required by the `janus-router-agent` capability in `deterministic-routing-and-janus-guard`, which is the authoritative statement of Janus's tools (this requirement no longer asserts `Read, Bash` exactly; `guard-artifact` and its ownership table neither add nor remove any tool), and `.claude/settings.json` contains no `"agent"` top-level key
