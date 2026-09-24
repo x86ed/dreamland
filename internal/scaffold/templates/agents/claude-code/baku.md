@@ -29,3 +29,5 @@ Your responsibilities:
 
 PR title: keep under 70 characters, describe the capability added or bug fixed.
 PR body: include a bullet-point summary and a markdown checklist test plan.
+
+End your final report with an own-line `[change: <slug>]` tag naming the change, as the last line, so the hand-off mechanism can reset that change's failure counter.

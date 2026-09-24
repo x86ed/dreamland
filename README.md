@@ -116,6 +116,18 @@ Deletion: janus → zhougong → phantasos → mengpo
 | **Hypnos** | Authors a new agent's template files across all six platforms and registers it in every `janus.*` routing table. | `phobetor`, directly, to validate the new agent. |
 | **Meng Po** | Archives (default) or hard-deletes (on explicit instruction) an agent's template files across all six platforms. | Reports to Janus by default, or hands off directly if archival reveals a specific follow-up. |
 
+## Proposing a new agent
+
+`dreamland init` writes a GitHub issue form at `.github/ISSUE_TEMPLATE/new-agent.yml` (refresh it any time with `dreamland agent-issue --template`). `dreamland agent-issue --create --name <n> --role <r> --rationale <text> --tier <router|read-dispatch-only|full-edit|write-only-no-edit> --routing <text> --criteria <text>` shows the rendered issue and, on `y`, files it through `gh` with the `new-agent` label; `--yes` skips the prompt for human-driven scripts. `zhougong` files the same issue through its `zhougong_new_agent_issue` tool, which only creates after a preview has been shown and approved. Give `phantasos` the issue number and it drafts the OpenSpec change from it.
+
+No `Stop` hook is installed for this, since it would file an issue on every turn. To call it from your own lifecycle hook, add a command hook to your tool's hook config, for example in `.claude/settings.json`:
+
+```json
+{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "dreamland agent-issue --create --yes --name \"$NAME\" --role \"$ROLE\" --rationale \"$WHY\" --tier full-edit --routing \"$ROUTING\" --criteria \"$CRITERIA\""}]}]}}
+```
+
+Exit codes are deterministic: 0 on success, 1 on a missing flag, missing or unauthenticated `gh`, a duplicate title, or a declined prompt, and no `gh` call is made before validation passes.
+
 ## Improving your results with analysis
 
 dreamland captures per-turn telemetry as a matter of course — it's not an opt-in feature you have to wire up separately:

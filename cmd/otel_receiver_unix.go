@@ -77,3 +77,11 @@ func processCommandLine(pid int) (string, []string, error) {
 	}
 	return parsePSCommandLine(string(comm), string(argsLine))
 }
+
+// killProcess force-kills pid (SIGKILL).
+func killProcess(pid int) error {
+	if pid <= 0 {
+		return errors.New("invalid pid")
+	}
+	return syscall.Kill(pid, syscall.SIGKILL)
+}

@@ -319,6 +319,30 @@ check_version_bump() {
 }
 
 # ---------------------------------------------------------------------------
+# Archive the branch's agent run metrics (zhougong-metrics-dashboard).
+# Squash merges erase per-agent attribution, so the durable record must be written
+# (and committed) before merging. Skipped where there is no branch or no dreamland.
+# ---------------------------------------------------------------------------
+archive_zhougong_run() {
+  echo "==> Archiving zhougong run record..."
+
+  local branch
+  branch=$(git branch --show-current 2>/dev/null || true)
+  if [[ -z "$branch" || "$branch" == "main" ]]; then
+    warn "No feature branch checked out; skipping run archive."
+    return
+  fi
+  if ! command -v dreamland >/dev/null 2>&1; then
+    warn "dreamland not on PATH; skipping run archive."
+    return
+  fi
+
+  dreamland zhougong-archive --branch "$branch" \
+    || fail "zhougong-archive failed for branch '$branch'."
+  pass "Run record written to .dreamland/runs/ — commit it before merging."
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 branch_guard
@@ -340,6 +364,7 @@ run_tests
 check_coverage
 check_godoc
 check_version_bump
+archive_zhougong_run
 
 echo ""
 echo -e "${GREEN}All checks passed. Ready to merge.${NC}"

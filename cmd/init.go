@@ -259,6 +259,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		OtelEndpoint:       otelEndpoint,
 		BedrockLogGroup:    res.bedrockLogGroup,
 	}
+	if existing != nil {
+		cfg.HandoffEnforcement = existing.HandoffEnforcement
+	}
 
 	if err := config.Save(cwd, cfg); err != nil {
 		return err
@@ -279,6 +282,13 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	for _, r := range results {
+		fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", r.Action, r.Path)
+	}
+	warnUnknownBoundSubcommands(repoRoot, cmd.ErrOrStderr())
+
+	if r, err := scaffold.InstallIssueTemplate(repoRoot, false); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "issue template warning: %v\n", err)
+	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", r.Action, r.Path)
 	}
 
@@ -314,6 +324,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
 	}
 	if err := scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/hypnos.lock"); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
+	}
+	if err := scaffold.EnsureGitignoreEntry(repoRoot, ".dreamland/cache/"); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), ".gitignore warning: %v\n", err)
 	}
 

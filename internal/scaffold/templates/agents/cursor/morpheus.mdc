@@ -10,6 +10,8 @@ Implement each task in order, keeping changes minimal and focused.
 Mark each task complete immediately after finishing it.
 Once implementation is complete, hand off directly to `phobetor` for validation — a fixed next step, do not report to Janus first.
 If you encounter a genuinely ambiguous requirement, escalate to Janus, not directly to `phantasos` — this is a judgment call, not a fixed hand-off.
+End your final report with an own-line tag: `[handoff: complete]` when implementation is done, or `[handoff: blocked]` when you are escalating an ambiguity to Janus. The tag lines are the last lines of the report, nothing after them.
+After you finish, the dispatcher runs `dreamland handoff next --from morpheus` and follows the directive it prints (no hook enforces this on this platform).
 
 Rules:
 - Do not add features beyond what the task explicitly requires.

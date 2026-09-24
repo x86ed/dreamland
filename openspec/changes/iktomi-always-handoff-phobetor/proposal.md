@@ -1,3 +1,5 @@
+> Superseded by `deterministic-agent-handoffs`; archive with `openspec archive iktomi-always-handoff-phobetor --skip-specs` after that change archives.
+
 ## Why
 
 Today, once Iktomi's own free-form work concludes, its instructions leave the next step conditional or optional rather than fixed. The still-open `claude-code-parity` change (already landed in `internal/scaffold/templates/agents/{claude-code,github-copilot}/iktomi.*`, not yet archived) narrowed this partway: it routes Iktomi to `phobetor` for validation only when the completed work touched files, and still reports straight to Janus when it didn't — and it explicitly left `cursor`/`codex`/`kiro`/`antigravity` untouched, still on the original "report completion or blockers to Janus" text with no `phobetor` mention at all. The result is three different behaviors across six platforms for the same agent's completion step, and even the two platforms with the split still bypass `phobetor` for non-file-change turns.

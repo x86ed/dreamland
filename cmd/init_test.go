@@ -856,3 +856,47 @@ func TestWriteCodexOtelConfig_Declined(t *testing.T) {
 		t.Errorf("expected skip message, got: %q", buf.String())
 	}
 }
+
+// TestInitGitignoresZhougongCache: the zhougong report cache is regenerated local state.
+func TestInitGitignoresZhougongCache(t *testing.T) {
+	root := makeGitRepo(t)
+
+	orig := wizardRunner
+	wizardRunner = stubWizard(&wizardResult{
+		tool:           "Claude Code",
+		language:       "Go",
+		testCommand:    "go test ./...",
+		docCommand:     "godoc",
+		versionCommand: "go version",
+	}, nil)
+	t.Cleanup(func() { wizardRunner = orig })
+
+	if _, err := runInitWithBuf(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), ".dreamland/cache/") {
+		t.Errorf("expected .gitignore to contain .dreamland/cache/, got:\n%s", data)
+	}
+}
+
+func TestInitWritesIssueTemplate(t *testing.T) {
+	root := makeGitRepo(t)
+	orig := wizardRunner
+	wizardRunner = stubWizard(&wizardResult{tool: "Claude Code", language: "Go", testCommand: "go test ./...", versionCommand: "go version"}, nil)
+	t.Cleanup(func() { wizardRunner = orig })
+
+	if _, err := runInitWithBuf(t); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".github", "ISSUE_TEMPLATE", "new-agent.yml"))
+	if err != nil {
+		t.Fatalf("template not written: %v", err)
+	}
+	if !strings.Contains(string(b), "new-agent") {
+		t.Error("template missing label")
+	}
+}
