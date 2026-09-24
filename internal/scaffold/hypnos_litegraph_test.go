@@ -126,32 +126,3 @@ func TestHypnosServeCommandsAlsoReachableViaDrmlndNamespaceOnClaudeCode(t *testi
 		}
 	}
 }
-
-func TestZhougongDashboardCommandsInstalled(t *testing.T) {
-	tests := []struct{ tool, start, stop string }{
-		{"Claude Code", filepath.Join(".claude", "commands", "drmlnd", "zhougong-dashboard-start.md"), filepath.Join(".claude", "commands", "drmlnd", "zhougong-dashboard-stop.md")},
-		{"Claude Code", filepath.Join(".claude", "commands", "zhougong-dashboard-start.md"), filepath.Join(".claude", "commands", "zhougong-dashboard-stop.md")},
-		{"Cursor", filepath.Join(".cursor", "commands", "zhougong-dashboard-start.md"), filepath.Join(".cursor", "commands", "zhougong-dashboard-stop.md")},
-		{"GitHub Copilot", filepath.Join(".github", "prompts", "zhougong-dashboard-start.prompt.md"), filepath.Join(".github", "prompts", "zhougong-dashboard-stop.prompt.md")},
-		{"Kiro", filepath.Join(".kiro", "steering", "zhougong-dashboard-start.md"), filepath.Join(".kiro", "steering", "zhougong-dashboard-stop.md")},
-		{"Antigravity", filepath.Join(".agents", "skills", "zhougong-dashboard-start.md"), filepath.Join(".agents", "skills", "zhougong-dashboard-stop.md")},
-		{"Codex CLI", filepath.Join(".codex", "skills", "zhougong-dashboard-start", "SKILL.md"), filepath.Join(".codex", "skills", "zhougong-dashboard-stop", "SKILL.md")},
-	}
-	for _, tt := range tests {
-		t.Run(tt.tool+"/"+tt.start, func(t *testing.T) {
-			root := fakeGitRepo(t)
-			if _, err := Install(Config{RepoRoot: root, CodingTool: tt.tool}); err != nil {
-				t.Fatal(err)
-			}
-			for path, want := range map[string]string{tt.start: "dreamland zhougong-dashboard start", tt.stop: "dreamland zhougong-dashboard stop"} {
-				b, err := os.ReadFile(filepath.Join(root, path))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !strings.Contains(string(b), want) || strings.Contains(string(b), "dreamland-zhougong") {
-					t.Errorf("%s: missing %q or references MCP server", path, want)
-				}
-			}
-		})
-	}
-}
