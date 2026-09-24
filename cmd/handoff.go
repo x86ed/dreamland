@@ -192,11 +192,22 @@ func (e *handoffEnv) apply(agent string, tags handoff.Tags, session string) (han
 	}
 	key := handoff.ResolveChange(tags.Change, session, e.active)
 	var d handoff.Directive
-	err := e.store.UpdateCounter(key, func(c handoff.Counter) (handoff.Counter, bool) {
+	var found bool
+	err := e.store.UpdateCounterFor(key, session, func(c handoff.Counter) (handoff.Counter, bool) {
 		var nc handoff.Counter
+		found = c != handoff.Counter{}
 		d, nc = handoff.Next(agent, tags, c)
 		return nc, d.ClearCounter
 	})
+	if err == nil && !found && d.ClearCounter && !handoff.ValidChange(tags.Change) && agent != "phobetor" {
+		// Untagged phantasos/baku completion: the resolved key may not be the one
+		// phobetor failed under, so reset the counter this session wrote last.
+		if k, cerr := e.store.ClearMostRecentForSession(session); cerr != nil {
+			err = cerr
+		} else if k != "" {
+			key = k
+		}
+	}
 	return d, key, err
 }
 
@@ -361,6 +372,7 @@ func (e *handoffEnv) enforce(p hookPayload) error {
 	msg := fmt.Sprintf("dreamland handoff: a hand-off is pending. Call Agent with subagent_type=%s before dispatching %q or ending your turn.", strings.Join(targets, " or "), want)
 	if e.mode == "warn" {
 		fmt.Fprintln(e.errOut, "warning: "+msg)
+		appendTransitionLine(e.repoRoot, p.SessionID, "warn: "+msg)
 		return nil
 	}
 	return e.applyBlock(p.SessionID, msg)
@@ -428,6 +440,7 @@ func (e *handoffEnv) stopCheck(p hookPayload) error {
 	msg := fmt.Sprintf("dreamland handoff: you cannot end your turn yet. Call Agent with subagent_type=%s now.", strings.Join(targets, " and then "))
 	if e.mode == "warn" {
 		fmt.Fprintln(e.errOut, "warning: "+msg)
+		appendTransitionLine(e.repoRoot, p.SessionID, "warn: "+msg)
 		return nil
 	}
 	return e.applyBlock(p.SessionID, msg)

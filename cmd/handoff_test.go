@@ -316,6 +316,20 @@ func TestWarnMode(t *testing.T) {
 	if es := entries(t, e); es[0].Blocks != 0 {
 		t.Errorf("warn mode counted blocks: %+v", es)
 	}
+	log, err := os.ReadFile(filepath.Join(e.repoRoot, ".dreamland", "transition.log"))
+	if err != nil || strings.Count(string(log), "warn:") != 2 {
+		t.Errorf("warn violations not in transition log: %q err=%v", log, err)
+	}
+}
+
+func TestUntaggedCompletionResetsSessionCounter(t *testing.T) {
+	e, _, _ := newHandoffEnv(t, "block")
+	e.active = func() ([]string, error) { return []string{"a", "b"}, nil }
+	mustRecord(t, e, "phobetor", "[verdict: fail]\n[change: c1]")
+	mustRecord(t, e, "phantasos", "spec fixed")
+	if _, err := os.Stat(filepath.Join(e.store.Dir, "c1.json")); !os.IsNotExist(err) {
+		t.Error("untagged phantasos did not reset the session's counter")
+	}
 }
 
 func TestHookCommandModes(t *testing.T) {

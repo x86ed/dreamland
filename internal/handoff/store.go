@@ -36,8 +36,8 @@ func ValidChange(s string) bool { return changeRe.MatchString(s) }
 func ValidSessionID(s string) bool { return sessionRe.MatchString(s) && s != "." && s != ".." }
 
 func validKey(s string) bool {
-	if strings.HasPrefix(s, "_session-") {
-		return ValidSessionID(strings.TrimPrefix(s, "_session-"))
+	if id, ok := strings.CutPrefix(s, "_session-"); ok {
+		return ValidSessionID(id)
 	}
 	return ValidChange(s)
 }
@@ -165,6 +165,48 @@ type counterFile struct {
 	PhobetorFailures int    `json:"phobetor_failures"`
 	VerdictRetries   int    `json:"verdict_retries"`
 	UpdatedAt        string `json:"updated_at"`
+	Session          string `json:"session,omitempty"`
+}
+
+func (s *Store) readCounterFile(key string) (counterFile, error) {
+	var cf counterFile
+	data, err := os.ReadFile(s.counterPath(key))
+	if err != nil {
+		return cf, err
+	}
+	return cf, json.Unmarshal(data, &cf)
+}
+
+// ClearMostRecentForSession deletes the counter most recently written by
+// session and returns its key ("" when the session wrote none).
+func (s *Store) ClearMostRecentForSession(session string) (string, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return "", nil
+	}
+	var best string
+	var bestTime time.Time
+	for _, e := range entries {
+		key, ok := strings.CutSuffix(e.Name(), ".json")
+		if e.IsDir() || !ok || !validKey(key) {
+			continue
+		}
+		cf, err := s.readCounterFile(key)
+		if err != nil || cf.Session != session {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if best == "" || info.ModTime().After(bestTime) {
+			best, bestTime = key, info.ModTime()
+		}
+	}
+	if best == "" {
+		return "", nil
+	}
+	return best, s.UpdateCounter(best, func(Counter) (Counter, bool) { return Counter{}, true })
 }
 
 // ReadCounter returns the counter for key (zero when absent).
@@ -189,6 +231,13 @@ func (s *Store) ReadCounter(key string) (Counter, error) {
 // UpdateCounter runs a locked read-modify-write on key. fn returns the new
 // counter and whether the file should be deleted instead of written.
 func (s *Store) UpdateCounter(key string, fn func(Counter) (Counter, bool)) error {
+	return s.UpdateCounterFor(key, "", fn)
+}
+
+// UpdateCounterFor is UpdateCounter that also records which session last wrote
+// the counter (kept when session is empty). No file is written when the counter
+// is unchanged, so a no-op outcome never creates state.
+func (s *Store) UpdateCounterFor(key, session string, fn func(Counter) (Counter, bool)) error {
 	if !validKey(key) {
 		return fmt.Errorf("handoff: invalid change key %q", key)
 	}
@@ -205,11 +254,21 @@ func (s *Store) UpdateCounter(key string, fn func(Counter) (Counter, bool)) erro
 			}
 			return nil
 		}
-		if err := writeAtomic(path, counterFile{
+		if next == cur {
+			return nil
+		}
+		cf := counterFile{
 			PhobetorFailures: next.PhobetorFailures,
 			VerdictRetries:   next.VerdictRetries,
 			UpdatedAt:        time.Now().UTC().Format(time.RFC3339),
-		}); err != nil {
+			Session:          session,
+		}
+		if session == "" {
+			if old, err := s.readCounterFile(key); err == nil {
+				cf.Session = old.Session
+			}
+		}
+		if err := writeAtomic(path, cf); err != nil {
 			return err
 		}
 		s.prune()

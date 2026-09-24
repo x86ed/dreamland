@@ -223,3 +223,13 @@ func TestRenameReplacesExistingFile(t *testing.T) {
 		t.Errorf("temp files left behind: %v", leftovers)
 	}
 }
+
+func TestUpdateCounterNoopWritesNothing(t *testing.T) {
+	st := NewStoreAt(t.TempDir(), t.TempDir())
+	if err := st.UpdateCounter("c1", func(c Counter) (Counter, bool) { return c, false }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(st.Dir, "c1.json")); !os.IsNotExist(err) {
+		t.Errorf("no-op update created a counter file: %v", err)
+	}
+}
