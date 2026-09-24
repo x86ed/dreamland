@@ -60,6 +60,11 @@
 - **WHEN** the tool is called with valid fields, confirmed via preview, and a stubbed `gh`
 - **THEN** the stub receives the same title, body and label the command would send
 
+#### Scenario: Tool is listed and granted to zhougong
+
+- **WHEN** an in-process MCP client lists tools on the `dreamland-zhougong` server and `.claude/agents/zhougong.md` is scaffolded
+- **THEN** `zhougong_new_agent_issue` is listed and `mcp__dreamland-zhougong__zhougong_new_agent_issue` is in zhougong's `tools`
+
 ### Requirement: Phantasos drafts changes from new-agent issues
 
 `phantasos`'s instructions SHALL state that, given a new-agent issue number, it reads the issue with `gh issue view <n> --json title,body,labels` and drafts `proposal.md`/`design.md`/`tasks.md` from its fields, scoping implementation to `hypnos`.

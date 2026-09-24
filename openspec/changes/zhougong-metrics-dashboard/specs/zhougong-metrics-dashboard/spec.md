@@ -2,7 +2,7 @@
 
 ### Requirement: Zhougong-only MCP server exposes collect and dashboard tools
 
-`dreamland mcp-zhougong` SHALL start a stdio MCP server named `dreamland-zhougong` exposing exactly `zhougong_collect`, `zhougong_dashboard_start` and `zhougong_dashboard_stop`. The server SHALL be declared only in `zhougong`'s agent frontmatter and SHALL NOT appear in the project `.mcp.json`.
+`dreamland mcp-zhougong` SHALL start a stdio MCP server named `dreamland-zhougong` exposing `zhougong_collect`, `zhougong_dashboard_start` and `zhougong_dashboard_stop`, plus any tool added to this server by another capability (`zhougong_snapshot` in `zhougong-report-cache`, `zhougong_new_agent_issue` in `new-agent-issue-template`); the server's complete tool set is the union across capabilities and is pinned by its Go tests. The server SHALL be declared only in `zhougong`'s agent frontmatter and SHALL NOT appear in the project `.mcp.json`.
 
 #### Scenario: Only zhougong can call the tools
 
@@ -12,7 +12,7 @@
 #### Scenario: Server lists its tools
 
 - **WHEN** an in-process MCP client lists tools on `newZhougongMCPServer(repoRoot)`
-- **THEN** exactly the three tool names above are returned
+- **THEN** the returned names include `zhougong_collect`, `zhougong_dashboard_start` and `zhougong_dashboard_stop`, and every tool defined for this server by other capabilities, and no others
 
 ### Requirement: Collect tool derives per-run datasets from git
 
