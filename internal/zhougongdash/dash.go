@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -110,6 +111,20 @@ func (s *Store) Resolve(sel string) zhougongdata.Dataset {
 	return zhougongdata.NoData(sel)
 }
 
+// CurrentBranch returns the branch checked out at the store's repo root, or "" when
+// unavailable or detached.
+func (s *Store) CurrentBranch() string {
+	out, err := exec.Command("git", "-C", s.repoRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	b := strings.TrimSpace(string(out))
+	if b == "HEAD" {
+		return ""
+	}
+	return b
+}
+
 // Dashboard is a start/stop-able localhost HTTP server.
 type Dashboard struct {
 	store *Store
@@ -198,13 +213,21 @@ func (d *Dashboard) summary(w http.ResponseWriter, _ *http.Request) {
 			Runs: ds.Runs, Transitions: zhougongdata.Transitions(ds.Runs),
 		})
 	}
+	current, currentDataset := d.store.CurrentBranch(), ""
+	if current != "" {
+		if r := d.store.Resolve(current); r.Source != "nodata" {
+			currentDataset = r.Name
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"datasets":    entries,
-		"typicalFlow": zhougongdata.TypicalFlow(all),
-		"exclusions":  zhougongdata.ExcludedCodeGlobs,
-		"attribution": AttributionNote,
-		"maxCompare":  zhougongdata.MaxBranches,
-		"minCompare":  2,
+		"currentBranch":  current,
+		"currentDataset": currentDataset,
+		"datasets":       entries,
+		"typicalFlow":    zhougongdata.TypicalFlow(all),
+		"exclusions":     zhougongdata.ExcludedCodeGlobs,
+		"attribution":    AttributionNote,
+		"maxCompare":     zhougongdata.MaxBranches,
+		"minCompare":     2,
 	})
 }
 

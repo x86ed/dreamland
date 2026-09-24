@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -98,7 +99,7 @@ func TestStore_ResolveAndArchivedMix(t *testing.T) {
 		t.Errorf("summary: %d %s", code, body)
 	}
 	code, body = get(t, New(s).Handler(), "/")
-	if code != 200 || !strings.Contains(body, "zhougong metrics") {
+	if code != 200 || !strings.Contains(body, "ZHOUGONG//METRICS") {
 		t.Errorf("index: %d", code)
 	}
 }
@@ -153,5 +154,36 @@ func TestDashboard_StartFailsWhenPortBusy(t *testing.T) {
 	defer ln.Close()
 	if _, err := New(NewStore(t.TempDir())).Start(ln.Addr().(*net.TCPAddr).Port); err == nil {
 		t.Errorf("expected bind error")
+	}
+}
+
+func TestSummary_CurrentBranch(t *testing.T) {
+	root := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"}, {"checkout", "-q", "-b", "feat-x"},
+		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Skipf("git unavailable: %v %s", err, out)
+		}
+	}
+	s := NewStore(root)
+	s.Put(ds("feat-x", 2))
+	s.Put(ds("other", 1))
+	_, body := get(t, New(s).Handler(), "/api/summary")
+	var res struct {
+		CurrentBranch  string `json:"currentBranch"`
+		CurrentDataset string `json:"currentDataset"`
+	}
+	if err := json.Unmarshal([]byte(body), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.CurrentBranch != "feat-x" || res.CurrentDataset != "feat-x" {
+		t.Errorf("got %+v", res)
+	}
+
+	_, body = get(t, New(NewStore(t.TempDir())).Handler(), "/api/summary")
+	if !strings.Contains(body, `"currentBranch":""`) {
+		t.Errorf("non-repo should give empty currentBranch: %s", body)
 	}
 }

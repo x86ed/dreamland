@@ -111,3 +111,22 @@ The dashboard SHALL provide an all-branches overview of every collected branch, 
 - **WHEN** the user selects change slug `foo` and a branch containing that slug exists
 - **THEN** the compare view uses that branch's dataset; if none exists it shows an explicit "no data" column
 
+
+### Requirement: Dashboard defaults to the current branch
+
+`/api/summary` SHALL include `currentBranch` (the git branch checked out at the repo root the store is bound to; empty when unavailable or detached) and `currentDataset` (the name of the dataset resolved for it using the same exact-then-substring matching as compare; empty when none). The landing view SHALL pre-check the current branch in the branch picker and show the detail sections (agent calls and tokens, token-to-code ratio, flow path) only for the selected branches, defaulting to the current branch's dataset when nothing is selected and falling back to all datasets when the current branch has none. The overview SHALL still list all branches, marking the current one.
+
+#### Scenario: Default to current branch
+
+- **WHEN** the repo is on branch `feat-x` and datasets `feat-x` and `other` exist
+- **THEN** `/api/summary` reports `currentBranch` `feat-x`, and the landing view pre-checks `feat-x` and shows the detail sections for it only
+
+#### Scenario: Selection changes detail sections
+
+- **WHEN** the user changes the checked branches in the picker
+- **THEN** the detail sections re-render for the checked branches; with none checked they show the current branch again
+
+#### Scenario: Current branch has no dataset
+
+- **WHEN** no dataset matches the current branch
+- **THEN** the detail sections show all datasets
