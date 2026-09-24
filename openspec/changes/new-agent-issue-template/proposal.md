@@ -9,6 +9,8 @@ zhougong recommends new agents in reports, but the recommendation lives in a loc
 - **MCP tool `zhougong_new_agent_issue`** on `dreamland-zhougong`, delegating to the same core function as the command.
 - **Lifecycle hook**: `dreamland init` writes the template file; a `Stop` hook is NOT added. The command is callable from a hook by users who want it (documented), and via MCP.
 - **Phantasos intake**: phantasos's instructions state that given an issue number it reads it with `gh issue view <n> --json title,body` and drafts the change from the fields.
+- **Confirm step (confirmed)**: no issue is created without explicit human confirmation. `dreamland agent-issue --create` prints the rendered title/body and prompts `Create this issue? [y/N]` (skipped only with `--yes`, which zhougong/agents must not pass). The MCP tool is two-phase: `zhougong_new_agent_issue` with `confirm=false` returns a preview and a `previewId`; only a second call with `confirm=true` and that `previewId` creates the issue. Zhougong is instructed to show the preview to the user and wait for approval.
+- **Setup (confirmed)**: writing the template is a standard part of `dreamland init`, not opt-in.
 - Scoped independent of the dashboard changes; the MCP tool depends on `zhougong-metrics-dashboard`'s server.
 
 ## Capabilities

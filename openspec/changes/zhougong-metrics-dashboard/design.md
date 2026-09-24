@@ -16,3 +16,14 @@
 
 - Squash merges lose per-agent attribution on main; runs are computed on feature branches.
 - Trailer format drift breaks parsing; the parser skips unparseable commits and reports the count.
+
+## Confirmed scope decisions
+
+- Merged features are comparable: squash merges erase attribution, so durable archived run records are written at pre-merge time (`.dreamland/runs/`, committed). Cache entries stay local and disposable.
+- A run is branch-scoped.
+- Eight is the upper limit on any analysis.
+- Known limitations (attribution gap, cumulative trailers, access enforcement) are scoped explicitly in proposal.md; the harness-level identity gap is not fixed here.
+
+## Verification
+
+(To be filled by tasks 3b.5 and 4.4.)

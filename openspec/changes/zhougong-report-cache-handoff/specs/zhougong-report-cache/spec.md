@@ -47,9 +47,23 @@ A cache entry SHALL be stale when the branch's current HEAD sha differs from `he
 - **WHEN** a requested branch has never been collected
 - **THEN** it appears with `missing: true` and no numbers
 
+### Requirement: Snapshot covers archived records and enforces the cap
+
+`zhougong_snapshot` SHALL resolve each requested name to a live-branch cache entry or an archived record in `.dreamland/runs/` (marking `source`), and SHALL reject more than 8 names naming the limit.
+
+#### Scenario: Archived record in snapshot
+
+- **WHEN** a requested name matches `.dreamland/runs/foo.json` and no live branch
+- **THEN** it is returned with `source: archived` and never `stale`
+
+#### Scenario: Cap
+
+- **WHEN** 9 names are requested
+- **THEN** an error naming the limit of 8 is returned
+
 ### Requirement: Zhougong interprets only from the snapshot
 
-`zhougong`'s instructions SHALL require calling `zhougong_snapshot` before answering the first question about a report or a branch/feature diff, answering from the returned numbers only, and disclosing `collectedAt` and any stale or missing branches.
+`zhougong`'s instructions SHALL require calling `zhougong_snapshot` before answering the first question about a report or a branch/feature diff, answering from the returned numbers only, and disclosing `collectedAt`, any stale or missing branches, and (when non-zero) the `unattributed`/`untracked` counts with the note that attribution is commit-author based.
 
 #### Scenario: Instruction present
 

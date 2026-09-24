@@ -10,6 +10,8 @@
 - [ ] 2.2 Add `zhougong_snapshot` to `cmd/mcp_zhougong.go` taking `branches` (empty means all cached) and `baseline`, returning per-branch `headSha`, `collectedAt`, `stale`, `missing`, summary and runs, and a `comparison` computed by `zhougongdata.Compare` (from the dashboard change, task 1.3); add it to zhougong's `tools` list.
 - [ ] 2.3 Point the dashboard `/api/*` routes at the cache reader; tests in `cmd/mcp_zhougong_test.go`.
 
+- [ ] 2.4 Resolve archived records in `zhougong_snapshot` and apply the shared cap helper from the dashboard change (task 3b.6); tests.
+
 ## 3. Instructions
 
 - [ ] 3.1 Add the snapshot-first requirement to `.claude/agents/zhougong.md` and its scaffold template; scaffold test asserts the text.

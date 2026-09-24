@@ -33,6 +33,38 @@
 - **WHEN** a requested branch does not exist
 - **THEN** the tool returns `IsError: true` naming the branch and writes nothing to the cache
 
+### Requirement: Merged features are preserved as archived run records
+
+`dreamland zhougong-archive --branch <b>` SHALL write `.dreamland/runs/<change-slug>.json` (committed, not gitignored) containing the branch's runs, `sourceBranch`, `mergedAt` and `schemaVersion`. The dashboard overview and compare view SHALL include archived records as selectable entries marked `source: archived`. `scripts/pre-merge-check.sh` SHALL invoke the command.
+
+#### Scenario: Archived feature compared with a live branch
+
+- **WHEN** an archived record `foo` and a live branch `bar` are selected
+- **THEN** the compare view shows both columns with `foo` labelled archived
+
+#### Scenario: Squash-merged branch remains analysable
+
+- **WHEN** a branch was archived and then squash-merged and deleted
+- **THEN** its metrics are still available from `.dreamland/runs/`
+
+### Requirement: Runs are branch-scoped and unattributed commits are surfaced
+
+A run SHALL never span branches. Commits whose author is not a known agent SHALL be reported in a per-branch `unattributed` bucket and the dashboard SHALL display a note that attribution is commit-author based.
+
+#### Scenario: Unknown author
+
+- **WHEN** a commit is authored by a non-agent user
+- **THEN** it counts toward `unattributed`, not any agent
+
+### Requirement: Analysis is capped at eight branches
+
+Every multi-branch analysis surface SHALL reject more than 8 branches/records with an error naming the limit.
+
+#### Scenario: Cap enforced
+
+- **WHEN** 9 branches are requested
+- **THEN** the request fails naming the limit of 8
+
 ### Requirement: Dashboard serves the metric views on localhost only
 
 `zhougong_dashboard_start` SHALL serve an embedded static site on `127.0.0.1` and return its URL. The site SHALL show: calls per agent, tokens per agent, token-to-code ratio per run, number of runs per branch, and the typical flow path (most frequent ordered agent sequence and an agent-to-agent transition count table). Calling start while running SHALL return the existing URL.

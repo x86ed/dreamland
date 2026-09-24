@@ -14,6 +14,19 @@
 - **Report**: the markdown report under `.dreamland/reports/` gains a cross-branch comparison table (one row per metric, one column per branch, deltas vs baseline) whenever more than one branch is collected.
 - Modifies the `agent-lifecycle-management` requirement that says zhougong introduces no new data sources or commands: MCP tools over the same git/trailer data are now allowed.
 
+- **Merged features stay comparable (confirmed)**: squash merges erase per-agent commits, so the pre-merge step writes a durable, committed run record `.dreamland/runs/<change-slug>.json` (the same dataset shape as a cache entry, plus `mergedAt`, `sourceBranch`). The dashboard and compare view list archived runs alongside live branches (`source: archived`). Records are written by `dreamland zhougong-archive --branch <b>`, invoked from `scripts/pre-merge-check.sh`.
+- **Run definition (confirmed)**: a run is branch-scoped. It is never a cross-branch pipeline.
+- **Analysis cap (confirmed)**: at most 8 branches/features per analysis, everywhere (compare view, `/api/compare`, snapshot comparison, report table).
+
+## Explicit scope and known limitations
+
+| Concern | In scope | Out of scope |
+|---|---|---|
+| Attribution accuracy (internal turns misattributed during long dispatches) | A per-branch `unattributed` bucket for commits whose author is not a known agent; a dashboard banner "attribution is commit-author based and may miss internal turns"; a task to spot-check trailers on one real branch and record the finding in design.md | Fixing the harness-level identity gap (tracked separately under subagent identity attribution) |
+| Squash merges lose history | Archived run records (above) | Backfilling already-merged features from before this change |
+| Cumulative trailers | Delta computation with reset detection, tested with fixtures for monotonic, reset and missing trailers | Reconstructing tokens for commits with no trailer (counted as zero and listed as `untracked` commits) |
+| Zhougong-only access | A test asserting no other agent template or `.mcp.json` mentions the server; a manual verification task in a real dispatch | Enforcing identity server-side |
+
 ## Capabilities
 
 ### New Capabilities

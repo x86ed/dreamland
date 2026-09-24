@@ -9,6 +9,7 @@ Datasets pulled from git are expensive to recompute, and when the user starts as
 - **New MCP tool `zhougong_snapshot(branches []string)`** on `dreamland-zhougong` returning the cached numbers (per-branch summaries and per-run rows, plus `headSha`/`collectedAt`/`stale` flags) as structured JSON.
 - **Handoff**: zhougong's instructions require calling `zhougong_snapshot` before answering the first question about a report or diff and answering only from the returned JSON, quoting `collectedAt`, and stating when data is stale. A `UserPromptSubmit` hook is not used; this is instruction-level plus the tool, and the cached JSON is the single source.
 - **Cross-branch**: `zhougong_snapshot` accepts many branches (or `[]` meaning every cached branch) and also returns a precomputed `comparison` (metrics per branch, deltas vs `baseline`) so zhougong interprets multi-branch diffs from the same numbers the dashboard shows. Report generation also writes the cross-branch table from this snapshot.
+- **Scope note**: the snapshot includes archived run records from `.dreamland/runs/` as well as live-branch cache entries, and enforces the shared 8-branch cap. Interpretation limits: zhougong must state the attribution caveat and any `unattributed`/`untracked` counts when they are non-zero. The snapshot-first rule is instruction-level; a hook is explicitly out of scope because it cannot distinguish report questions from other prompts.
 - Depends on `zhougong-metrics-dashboard` (same MCP server and dataset types).
 
 ## Capabilities
