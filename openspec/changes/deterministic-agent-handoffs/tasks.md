@@ -4,11 +4,11 @@ Dispatch notes. Go code (`cmd/`, `internal/handoff/`, `internal/config/`, `inter
 
 Run in a scratch repo with a build of `dreamland` from this branch; share the session with `deterministic-routing-and-janus-guard` tasks 0.1 and 0.7 where possible. If an assumption fails, stop and return to `phantasos`.
 
-- [ ] 0.1 Dump the `SubagentStop` payload (temporary hook): confirm `session_id` (same as the dispatcher's), `agent_type`, and which field holds the final report (`last_assistant_message` or `agent_transcript_path`). Record the field name in design.md Decision 5. [flow: morpheus]
-- [ ] 0.2 Confirm a `PostToolUse` hook with matcher `Task|Agent` fires when a subagent returns, that `tool_response` contains the report, and that `hookSpecificOutput.additionalContext` reaches the dispatcher's context before its next action. [flow: morpheus]
-- [ ] 0.3 Confirm ordering: does `SubagentStop` complete before the dispatcher's `PostToolUse`? If not, adopt the idempotent-`inject` fallback in design.md Decision 2. [flow: morpheus]
-- [ ] 0.4 Confirm `Stop` exit 2 makes the model continue with stderr as the reason (as `harden-commit-hook-enforcement` relied on), and that `PreToolUse` exit 2 on `Agent` blocks the call with the message shown to the model. [flow: morpheus]
-- [ ] 0.5 Confirm a `UserPromptSubmit` hook payload carries `session_id` and does not fire between a subagent's return and the dispatcher's next call. [flow: morpheus]
+- [x] 0.1 Dump the `SubagentStop` payload (temporary hook): confirm `session_id` (same as the dispatcher's), `agent_type`, and which field holds the final report (`last_assistant_message` or `agent_transcript_path`). Record the field name in design.md Decision 5. [flow: morpheus]
+- [x] 0.2 Confirm a `PostToolUse` hook with matcher `Task|Agent` fires when a subagent returns, that `tool_response` contains the report, and that `hookSpecificOutput.additionalContext` reaches the dispatcher's context before its next action. [flow: morpheus]
+- [x] 0.3 Confirm ordering: does `SubagentStop` complete before the dispatcher's `PostToolUse`? If not, adopt the idempotent-`inject` fallback in design.md Decision 2. [flow: morpheus]
+- [x] 0.4 Confirm `Stop` exit 2 makes the model continue with stderr as the reason (as `harden-commit-hook-enforcement` relied on), and that `PreToolUse` exit 2 on `Agent` blocks the call with the message shown to the model. [flow: morpheus]
+- [x] 0.5 Confirm a `UserPromptSubmit` hook payload carries `session_id` and does not fire between a subagent's return and the dispatcher's next call. [flow: morpheus]
 - [ ] 0.6 GitHub Copilot: dump its `SubagentStop` payload; decide whether `record` can be bound there (design.md Decision 7). Record the outcome; no Copilot enforcement unless injection is also confirmed. [flow: morpheus]
 
 ## 1. Edge table, tags, counter (`internal/handoff`)
