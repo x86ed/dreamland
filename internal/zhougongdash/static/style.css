@@ -42,3 +42,7 @@ em{color:var(--gd)}
 footer{color:var(--gd);margin:2rem 0;font-size:.8rem}
 footer::before{content:"$ "}
 @media (prefers-reduced-motion:reduce){.cursor{animation:none}*{transition:none!important;animation:none!important}}
+.pair{display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-start;margin:.5rem 0}
+svg.chart{max-width:100%;height:auto;background:rgba(2,4,6,.6);border:1px solid var(--line);font-family:inherit}
+.swatch{display:inline-block;width:.7rem;height:.7rem;margin-right:.4rem;box-shadow:0 0 6px currentColor}
+td.heat{color:#fff;text-align:center}td.empty{color:var(--line);text-align:center}

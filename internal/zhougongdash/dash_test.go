@@ -269,3 +269,20 @@ func TestSummary_CollectError(t *testing.T) {
 		t.Errorf("expected collectError, got %+v", res)
 	}
 }
+
+func TestSummary_AgentMatrix(t *testing.T) {
+	s := NewStore(t.TempDir())
+	s.Put(ds("a", 2))
+	s.Put(ds("b", 1))
+	_, body := get(t, New(s).Handler(), "/api/summary")
+	var res struct {
+		AgentMatrix zhougongdata.AgentMatrix `json:"agentMatrix"`
+	}
+	if err := json.Unmarshal([]byte(body), &res); err != nil {
+		t.Fatal(err)
+	}
+	m := res.AgentMatrix
+	if len(m.Agents) != 1 || m.Agents[0] != "morpheus" || len(m.Branches) != 2 || m.Cells[0][0].Commits != 2 || m.Cells[0][1].Commits != 1 {
+		t.Errorf("matrix = %+v", m)
+	}
+}
