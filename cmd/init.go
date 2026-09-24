@@ -282,6 +282,12 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", r.Action, r.Path)
 	}
 
+	if r, err := scaffold.InstallIssueTemplate(repoRoot, false); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "issue template warning: %v\n", err)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", r.Action, r.Path)
+	}
+
 	// Post-save: OTEL env, telemetry hook binding, commit-msg hook, .gitignore.
 	if err := scaffold.InstallOtelEnv(repoRoot, cfg); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "OTEL env setup warning: %v\n", err)

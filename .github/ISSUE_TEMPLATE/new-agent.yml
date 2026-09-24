@@ -1,0 +1,50 @@
+name: New agent
+description: Propose a new dreamland agent
+title: "New agent: "
+labels: ["new-agent"]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Name
+      description: Agent name (oneiroi-style, lowercase)
+    validations:
+      required: true
+  - type: input
+    id: role
+    attributes:
+      label: Role
+      description: One-line role
+    validations:
+      required: true
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Rationale
+      description: Why this agent is needed; link the zhougong report and metrics
+    validations:
+      required: true
+  - type: dropdown
+    id: tool_tier
+    attributes:
+      label: Tool tier
+      options:
+        - router
+        - read-dispatch-only
+        - full-edit
+        - write-only-no-edit
+    validations:
+      required: true
+  - type: textarea
+    id: routing
+    attributes:
+      label: Routing
+      description: Receives from / hands off to
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
