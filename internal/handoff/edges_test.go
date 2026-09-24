@@ -1,0 +1,92 @@
+package handoff
+
+import "testing"
+
+func TestNext_Table(t *testing.T) {
+	cases := []struct {
+		name    string
+		from    string
+		tags    Tags
+		in      Counter
+		kind    string
+		target  string
+		out     Counter
+		clear   bool
+		missing bool
+	}{
+		{"morpheus complete", "morpheus", Tags{Handoff: "complete"}, Counter{}, KindDispatch, "phobetor", Counter{}, false, false},
+		{"iktomi complete", "iktomi", Tags{Handoff: "complete"}, Counter{}, KindDispatch, "phobetor", Counter{}, false, false},
+		{"nyx complete", "nyx", Tags{Handoff: "complete"}, Counter{}, KindDispatch, "morpheus", Counter{}, false, false},
+		{"missing handoff tag means complete", "morpheus", Tags{}, Counter{}, KindDispatch, "phobetor", Counter{}, false, true},
+		{"iktomi blocked", "iktomi", Tags{Handoff: "blocked"}, Counter{}, KindReport, "", Counter{}, false, false},
+		{"morpheus blocked leaves counter", "morpheus", Tags{Handoff: "blocked"}, Counter{PhobetorFailures: 1}, KindReport, "", Counter{PhobetorFailures: 1}, false, false},
+		{"pass", "phobetor", Tags{Verdict: "pass"}, Counter{PhobetorFailures: 1}, KindDispatch, "baku", Counter{}, true, false},
+		{"first fail", "phobetor", Tags{Verdict: "fail"}, Counter{}, KindDispatch, "morpheus", Counter{PhobetorFailures: 1}, false, false},
+		{"fail after retry", "phobetor", Tags{Verdict: "fail"}, Counter{PhobetorFailures: 1}, KindDispatch, "phantasos", Counter{PhobetorFailures: 2}, false, false},
+		{"spec-defect", "phobetor", Tags{Verdict: "spec-defect"}, Counter{PhobetorFailures: 1}, KindDispatch, "phantasos", Counter{PhobetorFailures: 1}, false, false},
+		{"unverified", "phobetor", Tags{Verdict: "unverified"}, Counter{PhobetorFailures: 1}, KindReport, "", Counter{PhobetorFailures: 1}, false, false},
+		{"missing verdict first", "phobetor", Tags{}, Counter{}, KindDispatch, "phobetor", Counter{VerdictRetries: 1}, false, true},
+		{"missing verdict second", "phobetor", Tags{}, Counter{VerdictRetries: 1}, KindReport, "", Counter{VerdictRetries: 1}, false, true},
+		{"valid verdict resets retries", "phobetor", Tags{Verdict: "fail"}, Counter{VerdictRetries: 1}, KindDispatch, "morpheus", Counter{PhobetorFailures: 1}, false, false},
+		{"phantasos resets", "phantasos", Tags{}, Counter{PhobetorFailures: 2}, "", "", Counter{}, true, false},
+		{"baku clears", "baku", Tags{}, Counter{PhobetorFailures: 1}, "", "", Counter{}, true, false},
+		{"unlisted agent", "hypnos", Tags{Handoff: "complete"}, Counter{PhobetorFailures: 1}, "", "", Counter{PhobetorFailures: 1}, false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d, out := Next(c.from, c.tags, c.in)
+			if d.Kind != c.kind || d.Target != c.target {
+				t.Errorf("got kind=%q target=%q, want %q %q", d.Kind, d.Target, c.kind, c.target)
+			}
+			if out != c.out {
+				t.Errorf("counter = %+v, want %+v", out, c.out)
+			}
+			if d.ClearCounter != c.clear {
+				t.Errorf("ClearCounter = %v, want %v", d.ClearCounter, c.clear)
+			}
+			if d.TagMissing != c.missing {
+				t.Errorf("TagMissing = %v, want %v", d.TagMissing, c.missing)
+			}
+		})
+	}
+}
+
+func TestNext_BlockedReportNamesJanus(t *testing.T) {
+	d, _ := Next("iktomi", Tags{Handoff: "blocked"}, Counter{})
+	if d.Reason == "" || !contains(d.Reason, "Janus") {
+		t.Errorf("reason %q does not name Janus", d.Reason)
+	}
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
+func TestParseTags(t *testing.T) {
+	cases := []struct {
+		name, in string
+		want     Tags
+	}{
+		{"own line", "done\n[handoff: complete]\n", Tags{Handoff: "complete"}},
+		{"crlf", "done\r\n[verdict: pass]\r\n[change: c1]\r\n", Tags{Verdict: "pass", Change: "c1"}},
+		{"quoted inline ignored, last wins", "I saw [verdict: fail] earlier\n[verdict: pass]", Tags{Verdict: "pass"}},
+		{"last wins", "[verdict: fail]\n[verdict: pass]", Tags{Verdict: "pass"}},
+		{"out of set is absent", "[verdict: maybe]", Tags{}},
+		{"later invalid replaces earlier valid", "[verdict: pass]\n[verdict: maybe]", Tags{}},
+		{"bad change slug", "[change: Bad_Slug]", Tags{}},
+		{"indented", "   [handoff: blocked]  ", Tags{Handoff: "blocked"}},
+		{"none", "nothing here", Tags{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := ParseTags(c.in); got != c.want {
+				t.Errorf("got %+v want %+v", got, c.want)
+			}
+		})
+	}
+}

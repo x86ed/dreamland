@@ -98,7 +98,7 @@ func NewStoreAt(root, repoRoot string) *Store {
 }
 
 func (s *Store) counterPath(key string) string { return filepath.Join(s.Dir, key+".json") }
-func (s *Store) pendingDir() string             { return filepath.Join(s.Dir, "pending") }
+func (s *Store) pendingDir() string            { return filepath.Join(s.Dir, "pending") }
 func (s *Store) pendingPath(session string) string {
 	return filepath.Join(s.pendingDir(), session+".json")
 }
@@ -237,11 +237,11 @@ func (s *Store) prune() {
 
 // Entry states.
 const (
-	StatePending    = "pending"
-	StateAbandoned  = "abandoned"
-	StateReleased   = "released-by-user"
-	StateSatisfied  = "satisfied"
-	MaxBlocks       = 3
+	StatePending   = "pending"
+	StateAbandoned = "abandoned"
+	StateReleased  = "released-by-user"
+	StateSatisfied = "satisfied"
+	MaxBlocks      = 3
 )
 
 // Entry is one pending directive for a dispatcher session.
