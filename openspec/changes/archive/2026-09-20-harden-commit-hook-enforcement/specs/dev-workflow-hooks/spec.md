@@ -10,13 +10,13 @@ AgentName resolution tries, in order:
 
 1. A hook stdin payload for the current invocation, read only when `dreamland coauthor` is invoked with `--hook` — a flag set exclusively by dreamland's own scaffold-installed hook-binding templates (every platform: Claude Code, GitHub Copilot, Cursor, Codex, Kiro), never by a human running the command manually. Without `--hook`, stdin is never opened or read at all, so a manual invocation in any terminal returns immediately with no possibility of blocking, regardless of what kind of stdin is attached. With `--hook`, the payload is read synchronously to completion (no timeout) — correct because every hook-binding caller writes its payload and closes its end of the pipe promptly, so the read completes as soon as the real data arrives, however long that legitimately takes, checked for an agent identifier in whichever shape the platform actually emits:
    - GitHub Copilot: top-level `agent_type` (e.g. `"morpheus"`) on `SubagentStart`/`SubagentStop` payloads.
-   - Claude Code: `tool_input.subagent_type` (e.g. `"morpheus"`) on the `PreToolUse`/`PostToolUse` payload for the `Task`/`Agent` tool call — Claude Code does not emit a top-level `agent_type` field, and `SessionStart`/`Stop`/`SubagentStop` payloads on Claude Code do not carry a sub-agent identifier at all (only `session_id`/`transcript_path`/`hook_event_name`), so this path only resolves anything on the `PreToolUse`/`PostToolUse` hook for that tool.
+   - Claude Code: top-level `agent_type` (e.g. `"morpheus"`) on the `SubagentStop` payload (which also carries `agent_id`, `agent_transcript_path`, and `last_assistant_message`), and `tool_input.subagent_type` (e.g. `"morpheus"`) on the `PreToolUse`/`PostToolUse` payload for the `Task`/`Agent` tool call. `SessionStart`/`Stop` payloads on Claude Code do not carry a sub-agent identifier (only `session_id`/`transcript_path`/`hook_event_name`), so those events resolve nothing from the payload. See the "Claude Code sub-agent identity resolution reads the SubagentStop payload's agent_type field" requirement below.
 2. The platform's current-agent env var, if the platform sets one at runtime (no currently-supported platform does; this path exists for forward compatibility and is not exercised by Claude Code or GitHub Copilot).
 3. The coding tool name in `.dreamland.json`.
 4. If a hook payload resolved a candidate value (step 1) that is not one of the ten registered dreamland agent names (`janus`, `phantasos`, `nyx`, `morpheus`, `phobetor`, `baku`, `iktomi`, `zhougong`, `hypnos`, `mengpo`), that candidate is discarded — treated the same as if step 1 had resolved nothing — rather than used verbatim.
 5. On Claude Code specifically, if steps 1-2 resolve nothing, AgentName is `janus`, not the coding-tool name — see the `session-agent-identity` capability for the full "no default, no unknown agent" requirement this satisfies. On every other platform, step 3 (coding-tool name) remains the fallback when steps 1-2 resolve nothing, unchanged from prior behavior.
 
-This full resolution sequence (steps 1-5) is exposed as a single internal function so no other command re-implements it independently; the `dreamland commit` requirement below reads the *result already persisted by this logic* (the git config value this requirement sets, per part **a** below) rather than re-running steps 1-5 itself, since `commit` may run at a different hook event with a different payload shape than the `coauthor` invocation that last set identity — see that requirement for why independent re-resolution at a different lifecycle event would be incorrect.
+This full resolution sequence (steps 1-5) is exposed as a single internal function so no other command re-implements it independently; the `dreamland commit` requirement below, after an explicit `--agent-name` and (with `--hook`) the hook payload's own agent identity, reads the *result already persisted by this logic* (the git config value this requirement sets, per part **a** below) rather than re-running steps 1-5 itself, falling back to this function only when that value is unset, since `commit` may run at a different hook event with a different payload shape than the `coauthor` invocation that last set identity — see that requirement for why independent re-resolution at a different lifecycle event would be incorrect.
 
 AgentEmail is derived by cleaning AgentName and appending `email_suffix` from `.dreamland.json` (default `@github.com`).
 
@@ -81,6 +81,11 @@ This hook script intentionally has no `command -v dreamland` guard: if `dreamlan
 
 - **WHEN** `dreamland coauthor` runs and `.git/hooks/prepare-commit-msg` does not exist
 - **THEN** the file is created with mode 0755 containing `#!/bin/sh` and `dreamland coauthor --trailer "$1" "$2" "$3"`
+
+#### Scenario: Claude Code identity resolved from SubagentStop agent_type
+
+- **WHEN** `dreamland coauthor --hook` runs via Claude Code's `SubagentStop` hook with payload `{"agent_type": "phobetor", ...}`
+- **THEN** `git config --local user.name` is set to `"phobetor"`, not the generic coding-tool fallback
 
 #### Scenario: Claude Code identity resolved from tool_input.subagent_type
 
@@ -174,16 +179,16 @@ Behavior:
    - If the record does not exist at all, and `cfg.TestCommand` is non-empty (a test command is configured for this project), `dreamland commit` SHALL treat this as a broken invariant, not a skip: it SHALL refuse to create the commit and SHALL exit with the blocking code (2), with a message stating that a test command is configured but no result was recorded for this turn and instructing that this should route to `iktomi` to investigate why `dreamland test` did not run or record a result before this commit attempt.
    - If the record does not exist and `cfg.TestCommand` is empty (no test command configured for this project), this gating step does not apply — there was never an expectation of a result — and `commit` proceeds normally.
    - If the record exists but its `head_sha` does not match the current `HEAD` (a stale record, not a missing one), this gating step does not apply and `commit` proceeds normally — staleness is treated differently from absence because a stale record at least proves tests ran successfully at some point, while absence (with a test command configured) proves they may not have run this turn at all.
-4. Otherwise, stage all changes (`git add -A`) and run `git commit -m "chore: <reason> checkpoint (<agent-name>)"`, where `<agent-name>` is read from the currently configured `git config --local user.name` (the value `dreamland coauthor`'s identity-resolution logic, per the modified `coauthor` requirement above, most recently set) — not independently re-resolved from the current invocation's own hook payload or env vars, since `commit` may run at a different lifecycle event (e.g. `Stop`) than the `coauthor` invocation that last set identity (e.g. `PreToolUse`/`SubagentStop`), which would see a different payload shape and could resolve a different value. If `git config --local user.name` is unset (e.g. `coauthor` has genuinely never run in this repository), `<agent-name>` falls back to the same resolution logic `coauthor` uses.
+4. Otherwise, stage all changes (`git add -A`) and run `git commit -m "chore: <reason> checkpoint (<agent-name>)"`, where `<agent-name>` is the resolved agent identity, resolved in this order (first match wins): (a) an explicit `--agent-name`; (b) when `--hook` is set, the hook payload's `agent_type`/`subagent_type` when it is a registered agent (a `SubagentStop` payload's `agent_type` is the subagent that just finished); (c) the configured `git config --local user.name`, i.e. the value `dreamland coauthor` most recently persisted, so that `commit` at a lifecycle event whose payload carries no sub-agent identity (`Stop`) does not re-derive a different value than `coauthor` set; (d) if `git config --local user.name` is unset, the same resolution `coauthor` uses (`resolveEnforcedAgentName`), ending in the `janus` default. The commit's author and committer are pinned to the resolved identity explicitly (`git -c user.name=<agent-name> -c user.email=<cleaned-name><suffix> commit ...`), independent of the shared `git config` value, so the subject and the author agree by construction even when a concurrent writer changes `git config --local user.name` between resolution and commit.
 5. Because this shells out to `git commit`, the already-installed `prepare-commit-msg` hook fires normally and appends the Co-authored-by trailer and token-usage report (see the modified `coauthor` requirement) to the commit message — `dreamland commit` does not duplicate that logic.
-6. A failure in `git add -A` or `git commit` itself (distinct from the test-gating refusal in step 3) is a genuine, blocking failure — exit code 2 — since the entire purpose of this command is to guarantee a commit exists for every turn/handoff.
+6. A failure in `git add -A` or `git commit` itself (distinct from the test-gating refusal in step 3) is a genuine, blocking failure — exit code 2 — for `--reason turn-complete`, since the entire purpose of this command at end of turn is to guarantee a commit exists. For `--reason handoff` specifically, such a failure SHALL be reported to the user but SHALL NOT block the sub-agent's `SubagentStop` event: the command returns a non-blocking error (exit 1), so a transient git failure during hand-off cannot trap the fixed pipeline (`nyx`→`morpheus`→`phobetor`→`baku`) mid-transition. A `git commit` that reports "nothing to commit" because a concurrent session already committed the same staged changes is a benign no-op for both reasons (exit 0).
 
-On any platform whose `Stop`-equivalent hook binding chains `dreamland test` immediately before `dreamland commit --reason turn-complete`, the scaffold installer SHALL bind `dreamland test-and-commit --reason turn-complete` (see the added `dreamland test-and-commit` requirement below) in place of that pair, instead of the two commands separately — this closes a race where the hook runner does not guarantee `test` finishes writing `.dreamland/last-test-result.json` before a separately-dispatched `commit` reads it. `dreamland commit --reason handoff` is bound to Claude Code's `SubagentStop` event unchanged (alongside `dreamland coauthor` and `dreamland telemetry write --tool claude-code`, per the requirement above) — no platform binds `test` under its `SubagentStop`-equivalent event, and the test-gating step in behavior item 3 above only applies to `commitReason == "turn-complete"`, so the race does not apply to handoff commits. On platforms without a `SubagentStop`-equivalent event, only the `Stop`-bound `test-and-commit --reason turn-complete` invocation applies; handoff commits on those platforms rely on the same agent-driven convention described in the requirement above for `coauthor`/`telemetry write`.
+The scaffold installer SHALL bind, on Claude Code, `dreamland test-and-commit --reason turn-complete` to the `Stop` event (see the added `dreamland test-and-commit` requirement below) and `dreamland commit --reason handoff --hook` to the `SubagentStop` event, alongside `dreamland telemetry write --tool claude-code` and the version-bump commands; `dreamland coauthor` is not registered under `SubagentStop`. On any other platform whose `Stop`-equivalent binding chains `dreamland test` immediately before `dreamland commit --reason turn-complete`, the installer SHALL likewise bind `dreamland test-and-commit --reason turn-complete` in place of that pair, closing the race where the hook runner does not guarantee `test` finishes writing `.dreamland/last-test-result.json` before a separately-dispatched `commit` reads it. The test-gating step in behavior item 3 applies only to `--reason turn-complete`, so that race does not apply to handoff commits. On platforms without a `SubagentStop`-equivalent event, only the `Stop`-bound invocation applies; handoff commits there rely on the agent-driven convention described for `coauthor`/`telemetry write`.
 
 #### Scenario: Commit created when a turn completes with pending changes
 
 - **WHEN** `dreamland commit --reason turn-complete` runs via the `Stop` hook, `git status --porcelain` shows pending changes, and either no `.dreamland/last-test-result.json` record exists or it records a `"pass"` for the current `HEAD`
-- **THEN** the changes are staged and committed with subject `chore: turn-complete checkpoint (<agent-name>)`, where `<agent-name>` matches the current `git config --local user.name`
+- **THEN** the changes are staged and committed with subject `chore: turn-complete checkpoint (<agent-name>)`, where `<agent-name>` is the identity resolved by behavior item 4
 
 #### Scenario: No-op when a turn completes with a clean working tree
 
@@ -212,29 +217,49 @@ On any platform whose `Stop`-equivalent hook binding chains `dreamland test` imm
 
 #### Scenario: Commit subject and git author never diverge
 
-- **WHEN** `dreamland coauthor` most recently set `git config --local user.name` to `"phobetor"` (e.g. from a `PreToolUse` hook payload) and `dreamland commit --reason turn-complete` subsequently runs via the `Stop` hook, whose payload carries no sub-agent identity of its own
-- **THEN** the resulting commit's subject reads `chore: turn-complete checkpoint (phobetor)`, matching the commit's actual git author — not a value independently re-resolved from the `Stop` hook's own payload
+- **WHEN** `dreamland coauthor` most recently set `git config --local user.name` to `"phobetor"` and `dreamland commit --reason turn-complete` subsequently runs via the `Stop` hook, whose payload carries no sub-agent identity of its own
+- **THEN** the resulting commit's subject reads `chore: turn-complete checkpoint (phobetor)` and its author and committer name are `phobetor`, not a value independently re-resolved from the `Stop` hook's own payload
+
+#### Scenario: Commit author is pinned regardless of a concurrent git config change
+
+- **WHEN** `dreamland commit` resolves agent identity `X` and `git config --local user.name` currently holds a different value
+- **THEN** the commit's author and committer name/email are set explicitly to `X` (`git -c user.name=X -c user.email=...`), matching the `(X)` in the subject
+
+#### Scenario: Handoff identity comes from the SubagentStop payload
+
+- **WHEN** `dreamland commit --reason handoff --hook` runs with payload `{"agent_type": "morpheus"}` and `git config --local user.name` currently reads `janus`
+- **THEN** the commit's subject is `chore: handoff checkpoint (morpheus)` and its author and committer are `morpheus`
 
 #### Scenario: Handoff commit created when Janus hands off to another agent
 
 - **WHEN** a sub-agent's turn ends via `SubagentStop` and `git status --porcelain` shows pending changes
 - **THEN** `dreamland commit --reason handoff` stages and commits those changes with subject `chore: handoff checkpoint (<outgoing-agent-name>)` before Janus regains control
 
-#### Scenario: Claude Code settings.json binds test-and-commit to Stop and commit to SubagentStop
+#### Scenario: Claude Code settings.json binds test-and-commit to Stop and commit --hook to SubagentStop
 
 - **WHEN** `dreamland init` completes with "Claude Code" selected
 - **THEN** `.claude/settings.json` contains `dreamland test-and-commit --reason turn-complete` under the `Stop` event key, and does not contain a separate `dreamland test` entry followed by `dreamland commit --reason turn-complete`
-- **AND** contains `dreamland commit --reason handoff` under the `SubagentStop` event key, unchanged
+- **AND** contains `dreamland commit --reason handoff --hook` under the `SubagentStop` event key
 
 #### Scenario: commit skips silently outside a git repository
 
 - **WHEN** `dreamland commit` runs in a directory with no git repository at or above it
 - **THEN** the command exits 0 without error and does not attempt `git status`, `git add`, or `git commit`
 
-#### Scenario: A genuine git failure during commit blocks the lifecycle event
+#### Scenario: A genuine git failure during a turn-complete commit blocks the lifecycle event
 
-- **WHEN** `dreamland commit` has pending changes to commit (and is not refused by the test-gating step) but `git add -A` or `git commit` itself fails
+- **WHEN** `dreamland commit --reason turn-complete` has pending changes to commit (and is not refused by the test-gating step) but `git add -A` or `git commit` itself fails
 - **THEN** the command exits with the blocking code (2), not the advisory code
+
+#### Scenario: A transient git failure during handoff does not block the sub-agent from stopping
+
+- **WHEN** `dreamland commit --reason handoff` is invoked and the underlying `git commit` call fails for a reason other than "nothing to commit"
+- **THEN** the command exits with a non-blocking status (exit code 1, not 2) and the sub-agent's `SubagentStop` event completes, with the failure surfaced to the user
+
+#### Scenario: A concurrent commit that already covered the changes is a benign no-op
+
+- **WHEN** `git commit` reports "nothing to commit" because another session committed the same changes between the status check and the commit
+- **THEN** the command exits 0 for both `turn-complete` and `handoff`
 
 ## ADDED Requirements
 

@@ -908,6 +908,32 @@ func TestAppendCoauthorTrailer_NoTrailingNewline(t *testing.T) {
 
 // --- appendTokensReport tests ---
 
+func TestAppendTokensReport_CorruptSnapshotWarns(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".dreamland-session.json"), []byte("<<<<<<< Updated upstream\n{}\n=======\n>>>>>>> Stashed changes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msgFile := filepath.Join(root, "COMMIT_EDITMSG")
+	if err := os.WriteFile(msgFile, []byte("feat: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	orig := telemetry.Stderr
+	telemetry.Stderr = &stderr
+	t.Cleanup(func() { telemetry.Stderr = orig })
+
+	if err := appendTokensReport(msgFile, root); err != nil {
+		t.Fatalf("corrupt snapshot must not fail the commit: %v", err)
+	}
+	data, _ := os.ReadFile(msgFile)
+	if strings.Contains(string(data), "Tokens:") {
+		t.Errorf("expected no Tokens line for corrupt snapshot, got:\n%s", data)
+	}
+	if !strings.Contains(stderr.String(), "telemetry reset") {
+		t.Errorf("expected stderr warning naming the repair command, got %q", stderr.String())
+	}
+}
+
 func TestAppendTokensReport_NoSnapshot(t *testing.T) {
 	root := t.TempDir()
 	msgFile := filepath.Join(root, "COMMIT_EDITMSG")

@@ -266,14 +266,9 @@ func TestCopilotCollector_PrefersChatSessionFileOverOtel(t *testing.T) {
 	cfg := &config.Config{ModelID: "gpt-4o", RepoRoot: root}
 
 	// Also seed an OTEL mailbox with different numbers, to prove the chat-session file wins.
-	sessionsDir := filepath.Join(root, ".dreamland", "otel-sessions")
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	otelUsage := `{"model":"gpt-4o","input_tokens":1,"output_tokens":1,"cached_tokens":0,"captured_at":"2026-07-14T00:00:00Z"}`
-	if err := os.WriteFile(filepath.Join(sessionsDir, "real-session.json"), []byte(otelUsage), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	stateDir := t.TempDir()
+	t.Setenv("DREAMLAND_STATE_DIR", stateDir)
+	seedMailbox(t, stateDir, "real-session", `{"version":2,"model":"gpt-4o","input_tokens":1,"output_tokens":1,"cached_tokens":0,"span_count":1,"captured_at":"2026-07-14T00:00:00Z"}`)
 
 	stdin := strings.NewReader(`{"hook_event_name":"SubagentStop","session_id":"real-session"}`)
 	res, err := (&CopilotCollector{}).Collect(stdin, cfg)
@@ -289,15 +284,12 @@ func TestCopilotCollector_UsesOtelSessionMailbox(t *testing.T) {
 	root := t.TempDir()
 	cfg := &config.Config{ModelID: "default-model", RepoRoot: root}
 
-	// Simulate the OTLP receiver having already captured usage for this session.
-	sessionsDir := filepath.Join(root, ".dreamland", "otel-sessions")
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	usage := `{"model":"gpt-4o","input_tokens":1500,"output_tokens":300,"cached_tokens":40,"captured_at":"2026-07-14T00:00:00Z"}`
-	if err := os.WriteFile(filepath.Join(sessionsDir, "sess-abc.json"), []byte(usage), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// Simulate the shared OTLP receiver having already captured usage for this session in
+	// the per-user state directory (not in the repository).
+	stateDir := t.TempDir()
+	t.Setenv("DREAMLAND_STATE_DIR", stateDir)
+	t.Setenv("HOME", t.TempDir())
+	seedMailbox(t, stateDir, "sess-abc", `{"version":2,"model":"gpt-4o","input_tokens":1500,"output_tokens":300,"cached_tokens":40,"span_count":2,"captured_at":"2026-07-14T00:00:00Z"}`)
 
 	stdin := strings.NewReader(`{"hook_event_name":"SubagentStop","session_id":"sess-abc","transcript_path":"/nonexistent.jsonl"}`)
 	res, err := (&CopilotCollector{}).Collect(stdin, cfg)

@@ -10,6 +10,7 @@ import (
 
 	"dreamland/internal/config"
 	"dreamland/internal/telemetry"
+	"dreamland/internal/telemetry/cursor"
 	"dreamland/internal/telemetry/otelreceiver"
 )
 
@@ -26,8 +27,12 @@ import (
 //     non-zero promptTokens/completionTokens. Neither the hook payload, the transcript
 //     file, nor Copilot's OTel export (confirmed empirically: nothing ever arrives at a
 //     real running OTLP receiver in this environment) carry usage data.
-//  2. The local OTLP receiver's per-session mailbox (see internal/telemetry/otelreceiver),
-//     kept as a fallback in case the OTel export does start working in some environment.
+//  2. The shared OTLP receiver's per-session mailbox in the per-user state directory (see
+//     internal/telemetry/otelreceiver), kept as a fallback in case the OTel export does
+//     start working in some environment. The mailbox holds running totals, so this source
+//     is incremental: only the usage added since the last report (a per-session cursor in
+//     <repo>/.dreamland/otel-cursors/) is returned, because telemetry.Write accumulates.
+//     The cursor advances before Write runs; if Write then fails, that delta is lost.
 //  3. ParseTranscript, kept as a last-resort forward-compatible fallback.
 type CopilotCollector struct{}
 
@@ -56,11 +61,12 @@ func (c *CopilotCollector) Collect(stdin io.Reader, cfg *config.Config) (*teleme
 		}
 	}
 
-	if !sourceFound && cfg != nil && cfg.RepoRoot != "" {
-		if usage, oerr := otelreceiver.ReadSessionUsage(cfg.RepoRoot, sessionID); oerr == nil && usage != nil {
-			tu.InputTokens = usage.InputTokens
-			tu.OutputTokens = usage.OutputTokens
-			tu.CachedTokens = usage.CachedTokens
+	if !sourceFound && cfg != nil && cfg.RepoRoot != "" && otelreceiver.ValidConversationID(sessionID) {
+		if usage, oerr := otelreceiver.ReadSessionUsage(otelreceiver.StateDir(), sessionID); oerr == nil && usage != nil {
+			delta := incrementalUsage(cfg.RepoRoot, sessionID, usage)
+			tu.InputTokens = delta.Input
+			tu.OutputTokens = delta.Output
+			tu.CachedTokens = delta.Cached
 			if usage.Model != "" {
 				tu.Model = usage.Model
 			}
@@ -98,6 +104,39 @@ func (c *CopilotCollector) Collect(stdin io.Reader, cfg *config.Config) (*teleme
 		OutputTokens: tu.OutputTokens,
 		CachedTokens: tu.CachedTokens,
 	}, nil
+}
+
+// incrementalUsage returns the usage in the mailbox totals that has not been reported yet
+// for sessionID (per field max(total - cursor, 0)) and advances the cursor to the totals.
+// Cursor problems never fail the command: they print a warning and report zero for this
+// call. An unreadable cursor is overwritten so later calls recover; when the cursor cannot
+// be advanced, zero is reported too, because returning the delta again on every Stop would
+// double count.
+func incrementalUsage(repoRoot, sessionID string, totals *otelreceiver.SessionUsage) cursor.Counts {
+	cursor.Prune(repoRoot, 7*24*time.Hour)
+
+	total := cursor.Counts{Input: totals.InputTokens, Output: totals.OutputTokens, Cached: totals.CachedTokens}
+	last, _, loadErr := cursor.Load(repoRoot, sessionID)
+	if loadErr != nil {
+		fmt.Fprintf(telemetry.Stderr, "dreamland telemetry: unreadable otel cursor for session %s, reporting no new usage this time: %v\n", sessionID, loadErr)
+		last = total
+	}
+	if err := cursor.Store(repoRoot, sessionID, total); err != nil {
+		fmt.Fprintf(telemetry.Stderr, "dreamland telemetry: cannot write otel cursor for session %s, reporting no new usage: %v\n", sessionID, err)
+		return cursor.Counts{}
+	}
+	return cursor.Counts{
+		Input:  positive(total.Input - last.Input),
+		Output: positive(total.Output - last.Output),
+		Cached: positive(total.Cached - last.Cached),
+	}
+}
+
+func positive(n int64) int64 {
+	if n < 0 {
+		return 0
+	}
+	return n
 }
 
 // captureDebugPayload appends the raw hook payload and (if resolvable) a sample of the

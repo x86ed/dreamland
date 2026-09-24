@@ -1,3 +1,5 @@
+> **Superseded in part by `deterministic-routing-and-janus-guard` (user decision, 2026-09-20; that change wins where they conflict).** See the annotated Non-Goals and the per-agent `hooks.Stop` paragraph below. Neither change needs to archive first.
+
 ## Context
 
 Copilot's `.github/agents/*.agent.md` frontmatter (`name`/`description`/`role`/`tools`/`model` + `agents:` graph + agent-scoped `hooks:`) is more complete than Claude Code's (`name`/`description`/`role`/`tools`/`model` only). Ground truth, confirmed against `code.claude.com/docs/en/sub-agents`, `.../hooks`, and this repo's templates:
@@ -26,9 +28,10 @@ Also confirmed: running as the main-thread agent (`--agent`/`agent` setting) inh
 - Prove all of the above against this repo with the real CLI.
 
 **Non-Goals:**
-- Granting `Agent`/`Task` to any dreamland agent, Janus included. Real platform-capability difference (Copilot's `agent` tool is allowlist-scoped; Claude's isn't) — not an oversight. Would also let agents nest-spawn directly, a different architecture this change doesn't adopt.
+- Granting `Agent`/`Task` to any dreamland agent other than Janus. **Superseded for Janus** by `deterministic-routing-and-janus-guard` (Decision 4 there): Janus gets `Agent(<registered roster>)`. The original reasoning stands for the nine non-router agents: it would let them nest-spawn directly.
+- ~~Granting `Agent`/`Task` to any dreamland agent, Janus included.~~ (original text, kept for the reasoning:) Real platform-capability difference (Copilot's `agent` tool is allowlist-scoped; Claude's isn't) — not an oversight. Would also let agents nest-spawn directly, a different architecture this change doesn't adopt.
 - `permissions.deny`-blocking Claude Code's built-ins. The telemetry gap it would prevent doesn't exist here — rejected, not deferred.
-- Making Janus the main-thread agent (`"agent": "janus"`). Would change its model and require granting it `Agent` — explicitly rejected; Janus stays `Read, Bash`, no exceptions. Consequence: main-thread-direct edits with no subagent active aren't guardable.
+- Making Janus the main-thread agent by installing `"agent": "janus"` in project settings: still not done (`deterministic-routing-and-janus-guard` also declines it). The rest of this bullet is **superseded**: Janus no longer stays `Read, Bash` (it gets `Agent(<registered roster>)`), and main-thread-direct edits with no subagent active *are* now guarded, by `dreamland guard-router` (an unattributed main session is treated as `janus` and blocked by default) rather than by `guard-artifact`, which stays fail-open on absent identity.
 - A new telemetry schema. `SnapshotResult`/`.dreamland-session.json` unchanged — every fix here feeds the existing pipeline.
 - Cursor, Codex, Kiro, Antigravity. `--agent-name` and the coauthor trailer land there too since they're shared code, but no platform-specific work targets them — their gaps (no `SubagentStop`-equivalent, Antigravity's undocumented session-start) are pre-existing and untouched.
 
@@ -36,7 +39,7 @@ Also confirmed: running as the main-thread agent (`--agent`/`agent` setting) inh
 
 **`--agent-name <name>` flag on `coauthor` and `commit` only — not `telemetry write`.** Precedence: flag → env var → stdin `agent_type` sniff → coding-tool fallback. Used by the new per-agent-scoped hook blocks (identity is statically known there — no reason to re-derive it via a 200ms-timeout stdin read). The workspace-level shared array has no static value to use and keeps the runtime chain unchanged — this adds a second path, doesn't replace the first. Not a Copilot-parity item (checked — Copilot's own blocks don't do this either); applied to both platforms' templates anyway since it's strictly safer wherever usable. `telemetry write` was in scope originally but dropped once implementation started: checked `cmd/telemetry.go`, `internal/telemetry/tools/claude.go`, and `SnapshotResult` — none of them have any agent-identity concept at all (`SnapshotResult` has `Tool`/`Model`, no `Agent` field, consistent with the earlier decision not to touch that schema). A flag with no code path to affect would be dead weight, so it's scoped out; the per-agent hooks blocks still run `telemetry write --tool <platform>` unmodified, just without the argument.
 
-**Per-agent `hooks.Stop` block, uniform across all ten Claude Code files, including janus's `--if-agent janus` line — not Copilot's 4-vs-5 split.** Same five commands as the workspace `SubagentStop` array, plus `--agent-name`. Keeping the janus-only command on all ten is simpler than a per-file split and behaviorally identical (self-filtering).
+**Per-agent `hooks.Stop` block, uniform across the Claude Code files, including the `--if-agent janus` line — not Copilot's 4-vs-5 split.** *(Superseded for `janus.md`: `deterministic-routing-and-janus-guard` removes Janus's `hooks.Stop` block, since Janus is no longer spawned as a routing subagent and every entry is redundant with the workspace chain; the nine other files keep the uniform block. The next sentence describes the original ten-file decision.)* Same five commands as the workspace `SubagentStop` array, plus `--agent-name`. Keeping the janus-only command on all ten is simpler than a per-file split and behaviorally identical (self-filtering).
 
 **No frontmatter `SubagentStart` analog.** Doesn't exist for Claude Code frontmatter hooks. The workspace `PreToolUse(Task|Agent)` hook already covers that role.
 

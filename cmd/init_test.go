@@ -127,6 +127,37 @@ func TestInitGitignoresSkillAttachmentsCache(t *testing.T) {
 	}
 }
 
+// TestInitGitignoresTelemetryRuntimeFiles: the session snapshot and the Copilot OTLP
+// receiver's per-session mailbox/log are machine-local runtime state; committing the
+// snapshot is what let a stash conflict get baked into history and break telemetry.
+func TestInitGitignoresTelemetryRuntimeFiles(t *testing.T) {
+	root := makeGitRepo(t)
+
+	orig := wizardRunner
+	wizardRunner = stubWizard(&wizardResult{
+		tool:           "GitHub Copilot",
+		language:       "Go",
+		testCommand:    "go test ./...",
+		docCommand:     "godoc",
+		versionCommand: "go version",
+	}, nil)
+	t.Cleanup(func() { wizardRunner = orig })
+
+	if _, err := runInitWithBuf(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatalf("expected .gitignore to exist: %v", err)
+	}
+	for _, entry := range []string{".dreamland-session.json", ".dreamland/otel-sessions/", ".dreamland/otel-receiver.log", ".dreamland/otel-cursors/"} {
+		if !strings.Contains(string(data), entry) {
+			t.Errorf("expected .gitignore to contain %s, got:\n%s", entry, data)
+		}
+	}
+}
+
 func TestInitDocCommandSkipped(t *testing.T) {
 	makeGitRepo(t)
 

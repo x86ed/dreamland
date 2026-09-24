@@ -1,8 +1,11 @@
 package telemetry
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -97,6 +100,52 @@ func TestRead_CorruptJSON(t *testing.T) {
 	_, err := Read(root)
 	if err == nil {
 		t.Error("expected error for corrupt session file")
+	}
+}
+
+const conflictedSession = `{
+  "tool": "claude-code",
+<<<<<<< Updated upstream
+  "input_tokens": 10,
+=======
+  "input_tokens": 20,
+>>>>>>> Stashed changes
+}
+`
+
+func TestRead_ConflictMarkersIsCorruptSnapshot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, sessionFile), []byte(conflictedSession), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Read(root)
+	if !errors.Is(err, ErrCorruptSnapshot) {
+		t.Errorf("Read error = %v, want ErrCorruptSnapshot", err)
+	}
+}
+
+func TestWrite_CorruptSnapshotTreatedAsAbsent(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, sessionFile), []byte(conflictedSession), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	orig := Stderr
+	Stderr = &stderr
+	t.Cleanup(func() { Stderr = orig })
+
+	if err := Write(root, &SnapshotResult{Tool: "claude-code", InputTokens: 7, OutputTokens: 3}); err != nil {
+		t.Fatalf("Write over corrupt snapshot: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "unparseable") {
+		t.Errorf("expected stderr warning about unparseable snapshot, got %q", stderr.String())
+	}
+	got, err := Read(root)
+	if err != nil {
+		t.Fatalf("Read after repair: %v", err)
+	}
+	if got.InputTokens != 7 || got.OutputTokens != 3 || got.TotalTokens != 10 {
+		t.Errorf("repaired snapshot = %+v, want fresh 7/3/10 with no carry-over", got)
 	}
 }
 

@@ -35,3 +35,7 @@ dreamland
 .dreamland/workflow-positions.json
 .dreamland/workflow-skill-attachments.json
 .dreamland/hypnos.lock
+.dreamland-session.json
+.dreamland/otel-sessions/
+.dreamland/otel-receiver.log
+.dreamland/otel-cursors/
