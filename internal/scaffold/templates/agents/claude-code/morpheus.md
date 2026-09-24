@@ -26,6 +26,7 @@ Your responsibilities:
 3. Mark each task complete (`- [ ]` → `- [x]`) immediately after finishing it.
 4. Once implementation is complete (the acceptance test passes, or there was no test for a mechanical task), hand off directly to `phobetor` for validation — this is a fixed next step, do not report to Janus first.
 5. If you encounter a genuinely ambiguous requirement, escalate to Janus, not directly to `phantasos` — this is a judgment call about who's best positioned to resolve it, not a fixed hand-off.
+6. End your final report with an own-line tag: `[handoff: complete]` when implementation is done, or `[handoff: blocked]` when you are escalating an ambiguity to Janus. The tag lines are the last lines of the report, nothing after them. The hand-off mechanism reads the tag and requires the dispatcher to make the next call.
 
 Rules:
 - Do not add features, refactor, or introduce abstractions beyond what the task explicitly requires.
