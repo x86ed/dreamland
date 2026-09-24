@@ -152,6 +152,7 @@ func TestParseBranch_UnattributedAndBranchScope(t *testing.T) {
 		tc{author: "Some Human", files: map[string]string{"h.go": "h\n"}},
 		tc{author: "morpheus", total: 1000, files: map[string]string{"a.go": "a\n"}},
 		tc{author: "morpheus", body: "Tokens: garbage", files: map[string]string{"c.go": "a\n"}},
+		tc{author: "morpheus", body: "AI-InputTokens: 5", files: map[string]string{"d.go": "a\n"}},
 	)
 	ds, err := ParseBranch(dir, "feat")
 	if err != nil {
@@ -160,10 +161,10 @@ func TestParseBranch_UnattributedAndBranchScope(t *testing.T) {
 	if ds.Unattributed != 1 {
 		t.Errorf("unattributed=%d", ds.Unattributed)
 	}
-	if len(ds.Runs) != 1 || ds.Runs[0].Commits != 2 {
+	if len(ds.Runs) != 1 || ds.Runs[0].Commits != 3 {
 		t.Errorf("runs=%+v (main's commits must not be included)", ds.Runs)
 	}
-	if ds.Skipped != 1 || len(ds.Untracked) != 1 {
+	if ds.Skipped != 1 || len(ds.Untracked) != 2 {
 		t.Errorf("skipped=%d untracked=%v", ds.Skipped, ds.Untracked)
 	}
 }

@@ -69,6 +69,8 @@ func CheckMaxBranches(n int) error {
 	return nil
 }
 
+var tokensLineRe = regexp.MustCompile(`(?m)^Tokens:`)
+
 var trailerRe = regexp.MustCompile(`(?m)^Tokens: input=(\d+) output=(\d+) cached=(\d+) total=(\d+)\s*$`)
 
 type tokens struct{ in, out, cached, total int64 }
@@ -140,7 +142,7 @@ func ParseBranch(repoRoot, branch string) (Dataset, error) {
 
 		m := trailerRe.FindStringSubmatch(body)
 		if m == nil {
-			if strings.Contains(body, "Tokens:") {
+			if tokensLineRe.MatchString(body) {
 				ds.Skipped++
 			}
 			ds.Untracked = append(ds.Untracked, UntrackedCommit{Hash: hash, Agent: author, Subject: subject})
