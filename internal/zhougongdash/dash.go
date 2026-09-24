@@ -28,8 +28,17 @@ type Store struct {
 	repoRoot string
 	mu       sync.Mutex
 	live     []zhougongdata.Dataset
-	collect  sync.Mutex
+	cmu      sync.Mutex
+	inflight map[string]bool
+	order    []string
+	failed   map[string]failure
+	worker   sync.Mutex
 }
+
+type failure struct{ sha, msg string }
+
+// collectFn is the parse seam; tests replace it.
+var collectFn = zhougongdata.Collect
 
 // NewStore returns a Store that reads archived records from repoRoot.
 func NewStore(repoRoot string) *Store {
