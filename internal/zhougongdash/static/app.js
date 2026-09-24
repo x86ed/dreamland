@@ -268,3 +268,40 @@ async function load() {
 }
 $("banner").textContent = "collecting current branch...";
 load();
+
+// Tabs: one per <section>, labelled by its <h2>; the choice lives in the URL hash.
+(function tabs() {
+  const secs = [...document.querySelectorAll("main > section")];
+  const nav = $("tabs");
+  if (!secs.length || !nav) return;
+  document.querySelector("main").classList.add("tabbed");
+  const btns = secs.map(s => {
+    const b = document.createElement("button");
+    b.type = "button"; b.role = "tab"; b.id = "btn-" + s.id;
+    b.setAttribute("aria-controls", s.id);
+    b.textContent = s.querySelector("h2").textContent;
+    b.onclick = () => show(s.id, true);
+    s.setAttribute("role", "tabpanel"); s.setAttribute("aria-labelledby", b.id);
+    nav.appendChild(b);
+    return b;
+  });
+  function show(id, push) {
+    if (!secs.some(s => s.id === id)) id = secs[0].id;
+    secs.forEach((s, i) => {
+      const on = s.id === id;
+      s.hidden = !on;
+      btns[i].setAttribute("aria-selected", on);
+      btns[i].tabIndex = on ? 0 : -1;
+    });
+    if (push) history.replaceState(null, "", "#" + id);
+  }
+  nav.onkeydown = e => {
+    const i = btns.findIndex(b => b.getAttribute("aria-selected") === "true");
+    const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (!d) return;
+    const n = (i + d + btns.length) % btns.length;
+    show(secs[n].id, true); btns[n].focus();
+  };
+  window.onhashchange = () => show(location.hash.slice(1));
+  show(location.hash.slice(1));
+})();
