@@ -58,7 +58,7 @@ func TestZhougongTemplateGrantsMCPTools(t *testing.T) {
 	if !strings.Contains(fm, "mcpServers:") || !strings.Contains(fm, "mcp-zhougong") {
 		t.Errorf("frontmatter must declare the inline mcpServers entry:\n%s", fm)
 	}
-	for _, tool := range []string{"zhougong_collect", "zhougong_dashboard_start", "zhougong_dashboard_stop"} {
+	for _, tool := range []string{"zhougong_collect", "zhougong_dashboard_start", "zhougong_dashboard_stop", "zhougong_new_agent_issue"} {
 		if !strings.Contains(fm, "mcp__dreamland-zhougong__"+tool) {
 			t.Errorf("tools missing %s", tool)
 		}
@@ -106,5 +106,24 @@ func TestZhougongTemplateRequiresSnapshotFirst(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("zhougong.md missing %q", want)
 		}
+	}
+}
+
+func TestZhougongInstructionsRequireApprovalBeforeConfirm(t *testing.T) {
+	b, _ := fs.ReadFile(TemplateFS, "templates/agents/claude-code/zhougong.md")
+	for _, want := range []string{"confirm=false", "explicit approval", "confirm=true", "previewId"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("zhougong instructions missing %q", want)
+		}
+	}
+}
+
+func TestPhantasosTemplateHasIssueIntake(t *testing.T) {
+	b, _ := fs.ReadFile(TemplateFS, "templates/agents/claude-code/phantasos.md")
+	if !strings.Contains(string(b), "gh issue view <n> --json title,body,labels") {
+		t.Error("phantasos template missing issue-intake instruction")
+	}
+	if got, err := os.ReadFile("../../.claude/agents/phantasos.md"); err == nil && string(got) != string(b) {
+		t.Error(".claude/agents/phantasos.md differs from its template")
 	}
 }

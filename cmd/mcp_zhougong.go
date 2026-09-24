@@ -7,6 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
+	"dreamland/internal/agentissue"
 	"dreamland/internal/config"
 	"dreamland/internal/zhougongdash"
 	"dreamland/internal/zhougongdata"
@@ -81,12 +82,29 @@ type zhougongURLOutput struct {
 
 type zhougongEmpty struct{}
 
+type zhougongNewAgentIssueInput struct {
+	Name      string `json:"name" description:"agent name (oneiroi-style)"`
+	Role      string `json:"role" description:"one-line role"`
+	Rationale string `json:"rationale" description:"rationale and evidence (report link, metrics)"`
+	Tier      string `json:"tier" description:"router, read-dispatch-only, full-edit or write-only-no-edit"`
+	Routing   string `json:"routing" description:"receives from / hands off to"`
+	Criteria  string `json:"criteria" description:"acceptance criteria"`
+	Confirm   bool   `json:"confirm,omitempty" description:"false (default) returns a preview and previewId only; true creates the issue and requires the previewId, after the user has approved the preview"`
+	PreviewID string `json:"previewId,omitempty" description:"previewId returned by the confirm=false call"`
+}
+
+type zhougongNewAgentIssueOutput struct {
+	Preview   string `json:"preview,omitempty"`
+	PreviewID string `json:"previewId,omitempty"`
+	URL       string `json:"url,omitempty"`
+}
+
 func toolError(err error) *mcp.CallToolResult {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}, IsError: true}
 }
 
 // newZhougongMCPServer builds the *mcp.Server exposing zhougong_collect,
-// zhougong_snapshot, zhougong_dashboard_start and zhougong_dashboard_stop, bound to repoRoot. Extracted
+// zhougong_snapshot, zhougong_dashboard_start, zhougong_dashboard_stop and zhougong_new_agent_issue, bound to repoRoot. Extracted
 // as a testable seam like newOneiroiMCPServer.
 func newZhougongMCPServer(repoRoot string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "dreamland-zhougong", Version: "0.1.0"}, nil)
@@ -215,6 +233,29 @@ func newZhougongMCPServer(repoRoot string) *mcp.Server {
 			return toolError(err), zhougongEmpty{}, nil
 		}
 		return nil, zhougongEmpty{}, nil
+	})
+
+	issues := agentissue.NewPreviewStore()
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "zhougong_new_agent_issue",
+		Description: "Two-phase: confirm=false returns the rendered new-agent issue preview and a previewId without creating anything; only after the user explicitly approves the preview, call again with confirm=true and the same fields and previewId to create the GitHub issue",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in zhougongNewAgentIssueInput) (*mcp.CallToolResult, zhougongNewAgentIssueOutput, error) {
+		f := agentissue.Fields{Name: in.Name, Role: in.Role, Rationale: in.Rationale, Tier: in.Tier, Routing: in.Routing, Criteria: in.Criteria}
+		if !in.Confirm {
+			id, err := issues.Put(f)
+			if err != nil {
+				return toolError(err), zhougongNewAgentIssueOutput{}, nil
+			}
+			return nil, zhougongNewAgentIssueOutput{Preview: f.Preview(), PreviewID: id}, nil
+		}
+		if err := issues.Take(in.PreviewID, f); err != nil {
+			return toolError(err), zhougongNewAgentIssueOutput{}, nil
+		}
+		url, err := agentissue.Create(f)
+		if err != nil {
+			return toolError(err), zhougongNewAgentIssueOutput{}, nil
+		}
+		return nil, zhougongNewAgentIssueOutput{URL: url}, nil
 	})
 
 	return server

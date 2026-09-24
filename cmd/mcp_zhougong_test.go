@@ -14,6 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"dreamland/internal/agentissue"
 	"dreamland/internal/zhougongdata"
 )
 
@@ -70,7 +71,7 @@ func call(t *testing.T, s *mcp.ClientSession, name string, args map[string]any) 
 	return res
 }
 
-func TestMCPZhougong_ListsExactlyFourTools(t *testing.T) {
+func TestMCPZhougong_ListsExactlyFiveTools(t *testing.T) {
 	s := zhougongClient(t, t.TempDir())
 	res, err := s.ListTools(context.Background(), &mcp.ListToolsParams{})
 	if err != nil {
@@ -81,7 +82,7 @@ func TestMCPZhougong_ListsExactlyFourTools(t *testing.T) {
 		got = append(got, tool.Name)
 	}
 	sort.Strings(got)
-	want := "zhougong_collect,zhougong_dashboard_start,zhougong_dashboard_stop,zhougong_snapshot"
+	want := "zhougong_collect,zhougong_dashboard_start,zhougong_dashboard_stop,zhougong_new_agent_issue,zhougong_snapshot"
 	if strings.Join(got, ",") != want {
 		t.Errorf("tools=%v", got)
 	}
@@ -359,5 +360,60 @@ func TestMCPZhougong_SnapshotArchivedAndCap(t *testing.T) {
 	res := call(t, s, "zhougong_snapshot", map[string]any{"branches": nine})
 	if !res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "8") {
 		t.Errorf("cap not enforced: %+v", res)
+	}
+}
+
+func issueArgs(extra map[string]any) map[string]any {
+	m := map[string]any{"name": "sandman", "role": "r", "rationale": "why", "tier": "full-edit", "routing": "a->b", "criteria": "ok"}
+	for k, v := range extra {
+		m[k] = v
+	}
+	return m
+}
+
+func TestMCPZhougong_NewAgentIssueTwoPhase(t *testing.T) {
+	var calls [][]string
+	t.Cleanup(agentissue.SetRunGh(func(args ...string) (string, error) {
+		calls = append(calls, args)
+		if args[1] == "list" {
+			return "", nil
+		}
+		return "https://example.test/issues/9\n", nil
+	}))
+	s := zhougongClient(t, t.TempDir())
+
+	res := call(t, s, "zhougong_new_agent_issue", issueArgs(nil))
+	if res.IsError || len(calls) != 0 {
+		t.Fatalf("preview must not call gh: %+v calls=%v", res, calls)
+	}
+	var prev struct{ Preview, PreviewID string }
+	b, _ := json.Marshal(res.StructuredContent)
+	_ = json.Unmarshal(b, &prev)
+	if prev.PreviewID == "" || !strings.Contains(prev.Preview, "### Acceptance criteria") {
+		t.Fatalf("preview = %+v", prev)
+	}
+
+	res = call(t, s, "zhougong_new_agent_issue", issueArgs(map[string]any{"confirm": true, "previewId": prev.PreviewID}))
+	if res.IsError || len(calls) != 2 {
+		t.Fatalf("confirm: %+v calls=%v", res, calls)
+	}
+	create := calls[1]
+	want := agentissue.Fields{Name: "sandman", Role: "r", Rationale: "why", Tier: "full-edit", Routing: "a->b", Criteria: "ok"}
+	if create[3] != want.Title() || create[5] != want.Body() || create[7] != agentissue.Label {
+		t.Errorf("create args differ from command: %q", create)
+	}
+}
+
+func TestMCPZhougong_NewAgentIssueConfirmWithoutPreview(t *testing.T) {
+	var calls int
+	t.Cleanup(agentissue.SetRunGh(func(...string) (string, error) { calls++; return "", nil }))
+	s := zhougongClient(t, t.TempDir())
+	for _, extra := range []map[string]any{{"confirm": true}, {"confirm": true, "previewId": "unknown"}} {
+		if res := call(t, s, "zhougong_new_agent_issue", issueArgs(extra)); !res.IsError {
+			t.Errorf("want IsError for %v", extra)
+		}
+	}
+	if calls != 0 {
+		t.Error("gh called")
 	}
 }
