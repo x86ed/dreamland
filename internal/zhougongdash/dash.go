@@ -270,7 +270,8 @@ func (d *Dashboard) Stop() error {
 	if srv == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	srv.SetKeepAlivesEnabled(false)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		return srv.Close()

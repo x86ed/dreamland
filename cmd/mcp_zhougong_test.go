@@ -500,3 +500,81 @@ func TestMCPZhougong_StartReplacesStaleState(t *testing.T) {
 		t.Errorf("stale state reused: %q", u.URL)
 	}
 }
+
+func TestZhougongDashboardStopFreesPortPromptly(t *testing.T) {
+	root := zhougongRepo(t)
+	useRealDreamlandBinary(t)
+	t.Cleanup(func() { _ = stopZhougongDashboard(root) })
+	url, err := startZhougongDashboard(root, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _ := readZhougongDashState(root)
+	addr := strings.TrimPrefix(url, "http://")
+
+	// Hold an open keep-alive connection with a request in flight-idle state.
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "GET /api/summary HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive\r\n\r\n", addr)
+	buf := make([]byte, 1)
+	_, _ = conn.Read(buf) // response started; summary also kicks a background collect
+
+	start := time.Now()
+	if err := stopZhougongDashboard(root); err != nil {
+		t.Fatal(err)
+	}
+	if processAlive(st.PID) {
+		t.Fatalf("pid %d alive after stop", st.PID)
+	}
+	if d := time.Since(start); d > 4*time.Second {
+		t.Errorf("stop took %s", d)
+	}
+	if _, ok := readZhougongDashState(root); ok {
+		t.Error("state file remains")
+	}
+	if c, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
+		c.Close()
+		t.Error("port still accepting connections after stop")
+	}
+}
+
+func TestZhougongDashboardCLI(t *testing.T) {
+	root := zhougongRepo(t)
+	useRealDreamlandBinary(t)
+	t.Cleanup(func() { _ = stopZhougongDashboard(root) })
+	origWd := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = origWd })
+
+	run := func(arg string) string {
+		var out bytes.Buffer
+		rootCmd.SetOut(&out)
+		rootCmd.SetArgs([]string{"zhougong-dashboard", arg})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("%s: %v", arg, err)
+		}
+		return strings.TrimSpace(out.String())
+	}
+	if got := run("status"); got != "not running" {
+		t.Errorf("status = %q", got)
+	}
+	url := run("start")
+	if !strings.HasPrefix(url, "http://127.0.0.1:") {
+		t.Fatalf("start = %q", url)
+	}
+	if got := run("start"); got != url {
+		t.Errorf("second start = %q, want %q", got, url)
+	}
+	if got := run("status"); got != url {
+		t.Errorf("status = %q, want %q", got, url)
+	}
+	if got := run("stop"); !strings.Contains(got, "stopped") {
+		t.Errorf("stop = %q", got)
+	}
+	if got := run("status"); got != "not running" {
+		t.Errorf("status after stop = %q", got)
+	}
+}

@@ -25,7 +25,7 @@ const (
 
 var (
 	zhougongDashReadyTimeout = 5 * time.Second
-	zhougongDashStopTimeout  = 5 * time.Second
+	zhougongDashStopTimeout  = 3 * time.Second
 )
 
 type zhougongDashState struct {
@@ -72,7 +72,12 @@ func runZhougongDashboardServe(cmd *cobra.Command, _ []string) error {
 	<-ctx.Done()
 	err = dash.Stop()
 	removeZhougongDashState(repoRoot, os.Getpid())
-	return err
+	// A background collect may still be running; exit now rather than wait on it.
+	if err != nil {
+		fmt.Fprintln(cmd.ErrOrStderr(), err)
+	}
+	os.Exit(0)
+	return nil
 }
 
 func writeZhougongDashState(repoRoot string, st zhougongDashState) error {
@@ -159,7 +164,8 @@ func startZhougongDashboard(repoRoot string, port int) (string, error) {
 	}
 }
 
-// stopZhougongDashboard terminates the detached dashboard and removes its state file; a no-op when none runs.
+// stopZhougongDashboard terminates the detached dashboard (SIGTERM, then SIGKILL if it lingers)
+// and removes its state file only once the process is gone; a no-op when none runs.
 func stopZhougongDashboard(repoRoot string) error {
 	st, ok := readZhougongDashState(repoRoot)
 	if !ok {
@@ -169,14 +175,26 @@ func stopZhougongDashboard(repoRoot string) error {
 		if err := terminateProcess(st.PID); err != nil && processAlive(st.PID) {
 			return err
 		}
-		deadline := time.Now().Add(zhougongDashStopTimeout)
-		for processAlive(st.PID) {
-			if time.Now().After(deadline) {
-				return fmt.Errorf("dashboard (pid %d) did not exit within %s", st.PID, zhougongDashStopTimeout)
+		if !waitProcessGone(st.PID, zhougongDashStopTimeout) {
+			if err := killProcess(st.PID); err != nil && processAlive(st.PID) {
+				return err
 			}
-			time.Sleep(20 * time.Millisecond)
+			if !waitProcessGone(st.PID, zhougongDashStopTimeout) {
+				return fmt.Errorf("dashboard (pid %d) did not exit after SIGKILL", st.PID)
+			}
 		}
 	}
 	removeZhougongDashState(repoRoot, st.PID)
 	return nil
+}
+
+func waitProcessGone(pid int, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for processAlive(pid) {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return true
 }
