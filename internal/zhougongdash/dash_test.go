@@ -15,6 +15,27 @@ import (
 	"dreamland/internal/zhougongdata"
 )
 
+// newTestStore builds a Store whose background collection is drained before the test's
+// TempDir is removed; /api/summary kicks collection, which writes the cache under the repo
+// and would otherwise race the directory cleanup.
+func newTestStore(t *testing.T, root string) *Store {
+	t.Helper()
+	s := NewStore(root)
+	t.Cleanup(func() {
+		deadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) {
+			s.cmu.Lock()
+			idle := len(s.inflight) == 0
+			s.cmu.Unlock()
+			if idle {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
+	return s
+}
+
 func ds(name string, runs int) zhougongdata.Dataset {
 	d := zhougongdata.Dataset{Name: name, Branch: name, Source: "live"}
 	for i := 0; i < runs; i++ {
@@ -32,7 +53,7 @@ func get(t *testing.T, h http.Handler, url string) (int, string) {
 }
 
 func TestCompareAPI_ThreeBranchDeltas(t *testing.T) {
-	s := NewStore(t.TempDir())
+	s := newTestStore(t, t.TempDir())
 	s.Put(ds("A", 10))
 	s.Put(ds("B", 15))
 	s.Put(ds("C", 5))
@@ -52,7 +73,7 @@ func TestCompareAPI_ThreeBranchDeltas(t *testing.T) {
 }
 
 func TestCompareAPI_Limits(t *testing.T) {
-	h := New(NewStore(t.TempDir())).Handler()
+	h := New(newTestStore(t, t.TempDir())).Handler()
 	for _, q := range []string{"", "A", "A,B,C,D,E,F,G,H,I"} {
 		code, body := get(t, h, "/api/compare?branches="+q)
 		if code != 400 || !strings.Contains(body, "between 2 and 8") {
@@ -72,7 +93,7 @@ func TestStore_ResolveAndArchivedMix(t *testing.T) {
 	if _, err := zhougongdata.WriteArchive(root, "foo", old, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	s := NewStore(root)
+	s := newTestStore(t, root)
 	s.Put(ds("bar", 3))
 	s.Put(ds("bar", 4)) // replace
 	s.Put(ds("foo", 1)) // collides with the archived slug
@@ -114,7 +135,7 @@ func names(all []zhougongdata.Dataset) []string {
 }
 
 func TestDashboard_LoopbackAndStopReleasesPort(t *testing.T) {
-	d := New(NewStore(t.TempDir()))
+	d := New(newTestStore(t, t.TempDir()))
 	if d.Stop() != nil || d.Addr() != "" {
 		t.Fatal("stop on stopped dashboard must be a no-op")
 	}
@@ -153,7 +174,7 @@ func TestDashboard_StartFailsWhenPortBusy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	if _, err := New(NewStore(t.TempDir())).Start(ln.Addr().(*net.TCPAddr).Port); err == nil {
+	if _, err := New(newTestStore(t, t.TempDir())).Start(ln.Addr().(*net.TCPAddr).Port); err == nil {
 		t.Errorf("expected bind error")
 	}
 }
@@ -168,7 +189,7 @@ func TestSummary_CurrentBranch(t *testing.T) {
 			t.Skipf("git unavailable: %v %s", err, out)
 		}
 	}
-	s := NewStore(root)
+	s := newTestStore(t, root)
 	s.Put(ds("feat-x", 2))
 	s.Put(ds("other", 1))
 	_, body := get(t, New(s).Handler(), "/api/summary")
@@ -183,7 +204,7 @@ func TestSummary_CurrentBranch(t *testing.T) {
 		t.Errorf("got %+v", res)
 	}
 
-	_, body = get(t, New(NewStore(t.TempDir())).Handler(), "/api/summary")
+	_, body = get(t, New(newTestStore(t, t.TempDir())).Handler(), "/api/summary")
 	if !strings.Contains(body, `"currentBranch":""`) {
 		t.Errorf("non-repo should give empty currentBranch: %s", body)
 	}
@@ -235,7 +256,7 @@ func poll(t *testing.T, h http.Handler) summaryRes {
 
 func TestSummary_CollectsAllBranchesOnce(t *testing.T) {
 	root := initRepo(t, "feat-y")
-	h := New(NewStore(root)).Handler()
+	h := New(newTestStore(t, root)).Handler()
 	res := poll(t, h)
 	if res.CurrentDataset != "feat-y" || res.CollectError != "" || len(res.Datasets) != 2 {
 		t.Fatalf("got %+v", res)
@@ -263,7 +284,7 @@ func TestSummary_CollectError(t *testing.T) {
 	collectFn = func(string, string, bool) (zhougongdata.Dataset, *zhougongdata.Entry, error) {
 		return zhougongdata.Dataset{}, nil, errors.New("boom")
 	}
-	h := New(NewStore(root)).Handler()
+	h := New(newTestStore(t, root)).Handler()
 	res := poll(t, h)
 	if !strings.Contains(res.CollectError, "boom") {
 		t.Errorf("expected collectError, got %+v", res)
@@ -271,7 +292,7 @@ func TestSummary_CollectError(t *testing.T) {
 }
 
 func TestSummary_AgentMatrix(t *testing.T) {
-	s := NewStore(t.TempDir())
+	s := newTestStore(t, t.TempDir())
 	s.Put(ds("a", 2))
 	s.Put(ds("b", 1))
 	_, body := get(t, New(s).Handler(), "/api/summary")
@@ -288,7 +309,7 @@ func TestSummary_AgentMatrix(t *testing.T) {
 }
 
 func TestStoreHasReportsLiveDatasets(t *testing.T) {
-	s := NewStore(t.TempDir())
+	s := newTestStore(t, t.TempDir())
 	if s.Has("A") {
 		t.Fatal("empty store reports A")
 	}
