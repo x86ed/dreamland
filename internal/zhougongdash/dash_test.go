@@ -1,6 +1,7 @@
 package zhougongdash
 
 import (
+	"errors"
 	"encoding/json"
 	"io"
 	"net"
@@ -188,49 +189,83 @@ func TestSummary_CurrentBranch(t *testing.T) {
 	}
 }
 
-func TestSummary_CollectsCurrentBranchOnce(t *testing.T) {
+func initRepo(t *testing.T, branch string) string {
+	t.Helper()
 	root := t.TempDir()
 	for _, args := range [][]string{
-		{"init", "-q"}, {"checkout", "-q", "-b", "feat-y"},
+		{"init", "-q"}, {"checkout", "-q", "-b", branch},
 		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"},
+		{"branch", "other"},
 	} {
 		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
 			t.Skipf("git unavailable: %v %s", err, out)
 		}
 	}
+	return root
+}
+
+type summaryRes struct {
+	CurrentDataset string   `json:"currentDataset"`
+	CollectError   string   `json:"collectError"`
+	Collecting     []string `json:"collecting"`
+	Datasets       []struct {
+		Summary struct {
+			Name string `json:"name"`
+		} `json:"summary"`
+		Runs []zhougongdata.Run `json:"runs"`
+	} `json:"datasets"`
+}
+
+func poll(t *testing.T, h http.Handler) summaryRes {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		_, body := get(t, h, "/api/summary")
+		var res summaryRes
+		if err := json.Unmarshal([]byte(body), &res); err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Collecting) == 0 {
+			return res
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("collection never finished")
+	return summaryRes{}
+}
+
+func TestSummary_CollectsAllBranchesOnce(t *testing.T) {
+	root := initRepo(t, "feat-y")
 	h := New(NewStore(root)).Handler()
-	_, body := get(t, h, "/api/summary")
-	var res struct {
-		CurrentDataset string `json:"currentDataset"`
-		CollectError   string `json:"collectError"`
-	}
-	if err := json.Unmarshal([]byte(body), &res); err != nil {
-		t.Fatal(err)
-	}
-	if res.CurrentDataset != "feat-y" || res.CollectError != "" {
+	res := poll(t, h)
+	if res.CurrentDataset != "feat-y" || res.CollectError != "" || len(res.Datasets) != 2 {
 		t.Fatalf("got %+v", res)
 	}
-	e, ok, err := zhougongdata.Read(root, "feat-y")
-	if err != nil || !ok || e.HeadSha == "" {
-		t.Fatalf("cache not written: %v %v %+v", err, ok, e)
+	for _, b := range []string{"feat-y", "other"} {
+		if e, ok, err := zhougongdata.Read(root, b); err != nil || !ok || e.HeadSha == "" {
+			t.Fatalf("cache for %s not written: %v %v", b, err, ok)
+		}
 	}
+	e, _, _ := zhougongdata.Read(root, "feat-y")
 	e.Dataset.Runs = append(e.Dataset.Runs, zhougongdata.Run{Agent: "sentinel"})
 	if err := zhougongdata.Write(root, e); err != nil {
 		t.Fatal(err)
 	}
-	_, body = get(t, h, "/api/summary")
-	if !strings.Contains(body, "sentinel") {
-		t.Errorf("second call re-parsed instead of reusing cache")
+	_, body := get(t, h, "/api/summary")
+	if !strings.Contains(body, "sentinel") || strings.Contains(body, `"collecting":["`) {
+		t.Errorf("second call re-parsed instead of reusing cache: %s", body)
 	}
 }
 
 func TestSummary_CollectError(t *testing.T) {
-	root := t.TempDir()
-	if out, err := exec.Command("git", "-C", root, "init", "-q", "-b", "empty").CombinedOutput(); err != nil {
-		t.Skipf("git unavailable: %v %s", err, out)
+	root := initRepo(t, "feat-z")
+	old := collectFn
+	defer func() { collectFn = old }()
+	collectFn = func(string, string, bool) (zhougongdata.Dataset, *zhougongdata.Entry, error) {
+		return zhougongdata.Dataset{}, nil, errors.New("boom")
 	}
-	_, body := get(t, New(NewStore(root)).Handler(), "/api/summary")
-	if !strings.Contains(body, `"collectError"`) || strings.Contains(body, `"collectError":""`) {
-		t.Errorf("expected collectError for branch with no commits: %s", body)
+	h := New(NewStore(root)).Handler()
+	res := poll(t, h)
+	if !strings.Contains(res.CollectError, "boom") {
+		t.Errorf("expected collectError, got %+v", res)
 	}
 }

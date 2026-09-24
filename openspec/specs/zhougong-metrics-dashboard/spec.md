@@ -131,7 +131,7 @@ The dashboard SHALL provide an all-branches overview of every collected branch, 
 - **WHEN** no dataset matches the current branch
 - **THEN** the detail sections show all datasets
 
-#### Scenario: Dashboard collects the current branch itself
+#### Scenario: Dashboard builds the cache from git on load
 
-- **WHEN** `/api/summary` is requested and the current branch has no cache entry or a stale one (cached head sha differs from HEAD)
-- **THEN** the dashboard parses the branch once, writes the cache entry with its head sha, and includes the dataset; concurrent and later requests at the same HEAD reuse the cache without re-parsing; a parse failure yields the summary without it plus a `collectError` string that the frontend shows in the banner, and the frontend shows "collecting current branch..." while the request is pending
+- **WHEN** `/api/summary` is requested and any local branch (`refs/heads`) has no cache entry or a stale one (cached head sha differs from the branch head)
+- **THEN** the dashboard returns what is cached immediately with a `collecting` list of branches still being parsed, and parses them in the background (current branch first), writing each cache entry with its head sha; each branch is parsed at most once per head sha and never concurrently; the frontend polls `/api/summary` until `collecting` is empty; a parse failure is reported in a `collectError` string shown in the banner (not retried until the head sha changes); the disk cache plus git are the only sources, independent of `zhougong_collect`

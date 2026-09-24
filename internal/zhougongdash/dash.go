@@ -31,30 +31,96 @@ type Store struct {
 	collect  sync.Mutex
 }
 
-// EnsureCurrent collects the current branch's dataset (once per HEAD sha) into the disk cache
-// and the live store. Concurrent callers serialize, so the second finds the fresh cache entry.
-func (s *Store) EnsureCurrent() error {
-	branch := s.CurrentBranch()
-	if branch == "" {
-		return nil
-	}
-	s.collect.Lock()
-	defer s.collect.Unlock()
-	ds, e, err := zhougongdata.Collect(s.repoRoot, branch, false)
-	if err != nil {
-		return err
-	}
-	if e != nil {
-		if err := zhougongdata.Write(s.repoRoot, *e); err != nil {
-			return err
-		}
-	}
-	s.Put(ds)
-	return nil
+// NewStore returns a Store that reads archived records from repoRoot.
+func NewStore(repoRoot string) *Store {
+	return &Store{repoRoot: repoRoot, inflight: map[string]bool{}, failed: map[string]failure{}}
 }
 
-// NewStore returns a Store that reads archived records from repoRoot.
-func NewStore(repoRoot string) *Store { return &Store{repoRoot: repoRoot} }
+// localBranches lists refs/heads, current branch first.
+func (s *Store) localBranches() []string {
+	out, err := exec.Command("git", "-C", s.repoRoot, "for-each-ref", "--format=%(refname:short)", "refs/heads").Output()
+	if err != nil {
+		return nil
+	}
+	cur := s.CurrentBranch()
+	var branches []string
+	if cur != "" {
+		branches = append(branches, cur)
+	}
+	for _, b := range strings.Fields(string(out)) {
+		if b != cur {
+			branches = append(branches, b)
+		}
+	}
+	return branches
+}
+
+// Kick starts background collection for every local branch lacking a fresh cache entry (once
+// per HEAD sha, never twice concurrently) and returns the branches still collecting plus any
+// collect errors. The disk cache is the only shared state.
+func (s *Store) Kick() (collecting []string, errs string) {
+	s.cmu.Lock()
+	var batch []string
+	var msgs []string
+	for _, b := range s.localBranches() {
+		if s.inflight[b] {
+			continue
+		}
+		sha, err := zhougongdata.HeadSha(s.repoRoot, b)
+		if err != nil {
+			msgs = append(msgs, b+": "+err.Error())
+			continue
+		}
+		if e, ok, err := zhougongdata.Read(s.repoRoot, b); err == nil && ok && !zhougongdata.IsStale(e, sha) {
+			delete(s.failed, b)
+			continue
+		}
+		if f, ok := s.failed[b]; ok && f.sha == sha {
+			msgs = append(msgs, b+": "+f.msg)
+			continue
+		}
+		s.inflight[b] = true
+		s.order = append(s.order, b)
+		batch = append(batch, b)
+	}
+	collecting = append(collecting, s.order...)
+	s.cmu.Unlock()
+	if len(batch) > 0 {
+		go s.run(batch)
+	}
+	return collecting, strings.Join(msgs, "; ")
+}
+
+func (s *Store) run(batch []string) {
+	s.worker.Lock()
+	defer s.worker.Unlock()
+	for _, b := range batch {
+		var fail *failure
+		ds, e, err := collectFn(s.repoRoot, b, false)
+		_ = ds
+		if err == nil && e != nil {
+			err = zhougongdata.Write(s.repoRoot, *e)
+		}
+		if err != nil {
+			sha, _ := zhougongdata.HeadSha(s.repoRoot, b)
+			fail = &failure{sha: sha, msg: err.Error()}
+		}
+		s.cmu.Lock()
+		delete(s.inflight, b)
+		for i, o := range s.order {
+			if o == b {
+				s.order = append(s.order[:i], s.order[i+1:]...)
+				break
+			}
+		}
+		if fail != nil {
+			s.failed[b] = *fail
+		} else {
+			delete(s.failed, b)
+		}
+		s.cmu.Unlock()
+	}
+}
 
 // Put adds or replaces a live dataset by name.
 func (s *Store) Put(ds zhougongdata.Dataset) {
@@ -228,10 +294,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func (d *Dashboard) summary(w http.ResponseWriter, _ *http.Request) {
-	collectErr := ""
-	if err := d.store.EnsureCurrent(); err != nil {
-		collectErr = err.Error()
-	}
+	collecting, collectErr := d.store.Kick()
 	all := d.store.All()
 	entries := []Entry{}
 	for _, ds := range all {
@@ -250,6 +313,7 @@ func (d *Dashboard) summary(w http.ResponseWriter, _ *http.Request) {
 		"currentBranch":  current,
 		"currentDataset": currentDataset,
 		"collectError":   collectErr,
+		"collecting":     collecting,
 		"datasets":       entries,
 		"typicalFlow":    zhougongdata.TypicalFlow(all),
 		"exclusions":     zhougongdata.ExcludedCodeGlobs,
