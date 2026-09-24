@@ -284,6 +284,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	for _, r := range results {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", r.Action, r.Path)
 	}
+	warnUnknownBoundSubcommands(repoRoot, cmd.ErrOrStderr())
 
 	if r, err := scaffold.InstallIssueTemplate(repoRoot, false); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "issue template warning: %v\n", err)

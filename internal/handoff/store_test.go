@@ -206,3 +206,20 @@ func TestDirectiveIDStable(t *testing.T) {
 		t.Error("DirectiveID not deterministic/distinguishing")
 	}
 }
+
+func TestRenameReplacesExistingFile(t *testing.T) {
+	s := newTestStore(t)
+	for i := 0; i < 3; i++ {
+		if err := s.UpdateCounter("c1", inc); err != nil {
+			t.Fatalf("update %d (rename over existing): %v", i, err)
+		}
+	}
+	c, _ := s.ReadCounter("c1")
+	if c.PhobetorFailures != 3 {
+		t.Errorf("counter = %d", c.PhobetorFailures)
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(s.Dir, "*.tmp*"))
+	if len(leftovers) != 0 {
+		t.Errorf("temp files left behind: %v", leftovers)
+	}
+}

@@ -96,3 +96,16 @@ func nextPhobetor(tags Tags, c Counter) (Directive, Counter) {
 	}
 	return Directive{Kind: KindReport, Reason: "phobetor again produced no valid verdict tag; surface this to Janus", TagMissing: true}, c
 }
+
+// KnownAgent reports whether from appears in the edge table.
+func KnownAgent(from string) bool {
+	if _, ok := completeEdges[from]; ok {
+		return true
+	}
+	return TouchesCounter(from)
+}
+
+// TouchesCounter reports whether from's outcome reads or writes the failure counter.
+func TouchesCounter(from string) bool {
+	return from == "phobetor" || from == "phantasos" || from == "baku"
+}
