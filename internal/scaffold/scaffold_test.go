@@ -251,6 +251,7 @@ func TestInstall_ClaudeCode_SubagentStopCommands(t *testing.T) {
 		}
 	}
 	want := []string{
+		"dreamland handoff record --hook",
 		"dreamland telemetry write --tool claude-code",
 		"dreamland version-bump --patch",
 		"dreamland version-bump --minor --if-agent janus",
@@ -381,6 +382,7 @@ func TestInstall_ClaudeCode_AgentScopedHooksContainWorkspaceSharedCommands(t *te
 		}
 	}
 	if !reflect.DeepEqual(workspaceCommands, []string{
+		"dreamland handoff record --hook",
 		"dreamland telemetry write --tool claude-code",
 		"dreamland version-bump --patch",
 		"dreamland version-bump --minor --if-agent janus",

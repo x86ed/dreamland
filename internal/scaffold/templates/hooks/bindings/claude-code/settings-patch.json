@@ -17,6 +17,12 @@
         ]
       },
       {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {"type": "command", "command": "dreamland handoff enforce --hook"}
+        ]
+      },
+      {
         "matcher": "Write|Edit",
         "hooks": [
           {"type": "command", "command": "dreamland guard-artifact"}
@@ -24,6 +30,12 @@
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {"type": "command", "command": "dreamland handoff inject --hook"}
+        ]
+      },
       {
         "matcher": "Bash",
         "hooks": [
@@ -35,6 +47,12 @@
       {
         "matcher": "",
         "hooks": [
+          {"type": "command", "command": "dreamland handoff record --hook"}
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
           {"type": "command", "command": "dreamland telemetry write --tool claude-code"},
           {"type": "command", "command": "dreamland version-bump --patch"},
           {"type": "command", "command": "dreamland version-bump --minor --if-agent janus"},
@@ -42,7 +60,21 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "dreamland handoff release --hook"}
+        ]
+      }
+    ],
     "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "dreamland handoff stop-check --hook"}
+        ]
+      },
       {
         "matcher": "",
         "hooks": [
