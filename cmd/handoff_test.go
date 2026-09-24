@@ -459,3 +459,169 @@ func TestHandoffStatusListsEntries(t *testing.T) {
 		t.Errorf("status = %q", w.String())
 	}
 }
+
+func promptPayload(text string) hookPayload {
+	p := disp()
+	p.Prompt = text
+	return p
+}
+
+func TestPromptClassification(t *testing.T) {
+	cases := []struct {
+		prompt string
+		human  bool
+	}{
+		{"fix the tests please", true},
+		{"/drmlnd:morpheus complete the coding", true},
+		{"<agent-message from=\"a1\">\n[Subagent hand-back] ...", false},
+		{"<task-notification>\n<task-id>a1</task-id>", false},
+		{"[SYSTEM NOTIFICATION] something", false},
+		{"  <system-reminder>x</system-reminder>", false},
+		{"", false},
+		{"   ", false},
+	}
+	for _, c := range cases {
+		e, out, _ := newHandoffEnv(t, "block")
+		mustRecord(t, e, "morpheus", "[handoff: complete]")
+		if err := e.prompt(promptPayload(c.prompt)); err != nil {
+			t.Fatal(err)
+		}
+		released := entries(t, e)[0].State == handoff.StateReleased
+		if released != c.human {
+			t.Errorf("%q: released=%v, want %v", c.prompt, released, c.human)
+		}
+		if !c.human && !strings.Contains(out.String(), `"hookEventName":"UserPromptSubmit"`) {
+			t.Errorf("%q: system prompt did not inject: %q", c.prompt, out.String())
+		}
+		if c.human && out.Len() != 0 {
+			t.Errorf("%q: human prompt injected: %q", c.prompt, out.String())
+		}
+	}
+}
+
+func TestPromptIgnoresSubagentPayload(t *testing.T) {
+	e, out, _ := newHandoffEnv(t, "block")
+	mustRecord(t, e, "morpheus", "[handoff: complete]")
+	p := promptPayload("hello")
+	p.AgentID = "x"
+	if err := e.prompt(p); err != nil || out.Len() != 0 || entries(t, e)[0].State != handoff.StatePending {
+		t.Fatalf("subagent payload acted: err=%v out=%q", err, out.String())
+	}
+}
+
+func TestPromptHumanPathDoesNoOpenspecShellOut(t *testing.T) {
+	e, _, _ := newHandoffEnv(t, "block")
+	e.active = func() ([]string, error) { t.Fatal("openspec shell-out on the prompt path"); return nil, nil }
+	if err := e.prompt(promptPayload("typed")); err != nil {
+		t.Fatal(err)
+	}
+	mustRecord(t, e, "morpheus", "[handoff: complete]")
+	if err := e.prompt(promptPayload("typed again")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBackgroundSequence(t *testing.T) {
+	e, out, errOut := newHandoffEnv(t, "block")
+	// PostToolUse at launch: nothing recorded yet.
+	if err := e.inject(agentCall("morpheus")); err != nil || out.Len() != 0 {
+		t.Fatalf("launch inject: err=%v out=%q", err, out.String())
+	}
+	// hand-back prompt precedes SubagentStop: still nothing.
+	if err := e.prompt(promptPayload("<agent-message from=\"a1\">\nreport")); err != nil || out.Len() != 0 {
+		t.Fatalf("hand-back prompt: err=%v out=%q", err, out.String())
+	}
+	mustRecord(t, e, "morpheus", "[handoff: complete]")
+	// completion notification arrives after SubagentStop: injects, does not release.
+	if err := e.prompt(promptPayload("<task-notification>\n<task-id>a1</task-id>")); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "REQUIRED NEXT STEP") || entries(t, e)[0].State != handoff.StatePending {
+		t.Fatalf("notification: out=%q entries=%+v", out.String(), entries(t, e))
+	}
+	// enforce reads the entry written after launch.
+	if err := e.enforce(agentCall("Explore")); !errors.Is(err, errBlock) || !strings.Contains(errOut.String(), "phobetor") {
+		t.Fatalf("enforce err=%v stderr=%q", err, errOut.String())
+	}
+	if err := e.enforce(agentCall("phobetor")); err != nil || len(entries(t, e)) != 0 {
+		t.Fatalf("phobetor did not clear: err=%v", err)
+	}
+}
+
+func TestRecordIgnoresEmptyAgentType(t *testing.T) {
+	e, _, _ := newHandoffEnv(t, "block")
+	p := sub("", "[handoff: complete]")
+	p.AgentID = "a1"
+	if err := e.record(p); err != nil || len(entries(t, e)) != 0 {
+		t.Fatalf("err=%v entries=%+v", err, entries(t, e))
+	}
+}
+
+func TestPartialPassReportsAndFullPassDispatchesBaku(t *testing.T) {
+	e, _, _ := newHandoffEnv(t, "block")
+	dir := filepath.Join(e.repoRoot, "openspec", "changes", "c1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tasks.md"), []byte("- [x] 1\n- [ ] 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustRecord(t, e, "phobetor", "ok\n[verdict: pass]\n[change: c1]")
+	es := entries(t, e)
+	if len(es) != 1 || es[0].Blocking() || !strings.Contains(es[0].Directive.Reason, "partial pass: 1 tasks of c1 unticked") {
+		t.Fatalf("partial pass entries = %+v", es)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tasks.md"), []byte("- [x] 1\n- [x] 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustRecord(t, e, "phobetor", "ok again\n[verdict: pass]\n[change: c1]")
+	es = entries(t, e)
+	if len(es) != 2 || es[1].Directive.Target != "baku" {
+		t.Fatalf("full pass entries = %+v", es)
+	}
+}
+
+func TestUntaggedCompletionLeavesOtherSessionCounters(t *testing.T) {
+	e, _, _ := newHandoffEnv(t, "block")
+	e.active = func() ([]string, error) { return []string{"c9"}, nil }
+	other := sub("phobetor", "[verdict: fail]\n[change: c9]")
+	other.SessionID = "s2"
+	if err := e.record(other); err != nil {
+		t.Fatal(err)
+	}
+	mustRecord(t, e, "baku", "closed")
+	if c, _ := e.store.ReadCounter("c9"); c.PhobetorFailures != 1 {
+		t.Errorf("another session's counter was touched: %+v", c)
+	}
+}
+
+func TestStopCheckBlocksWithStopHookActivePayload(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DREAMLAND_STATE_DIR", t.TempDir())
+	oldWd := osGetwd
+	osGetwd = func() (string, error) { return repo, nil }
+	defer func() { osGetwd = oldWd }()
+	run := func(mode, payload string) error {
+		rootCmd.SetOut(&bytes.Buffer{})
+		rootCmd.SetErr(&bytes.Buffer{})
+		rootCmd.SetIn(strings.NewReader(payload))
+		rootCmd.SetArgs([]string{"handoff", mode, "--hook"})
+		defer rootCmd.SetArgs(nil)
+		return rootCmd.Execute()
+	}
+	if err := run("record", `{"session_id":"h2","agent_id":"a","agent_type":"morpheus","last_assistant_message":"[handoff: complete]"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("stop-check", `{"session_id":"h2","stop_hook_active":true}`); err == nil || !IsBlocking(err) {
+		t.Fatalf("stop_hook_active must not disable blocking: %v", err)
+	}
+	if err := run("prompt", `{"session_id":"h2","prompt":"go on"}`); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if err := run("stop-check", `{"session_id":"h2"}`); err != nil {
+		t.Fatalf("released entry blocks: %v", err)
+	}
+}
