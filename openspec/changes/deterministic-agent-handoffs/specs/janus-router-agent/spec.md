@@ -50,7 +50,7 @@ The narrow deterministic edges are:
 - `nyx` → `morpheus` (the acceptance test is written; implementation is always next).
 - `morpheus` → `phobetor` (implementation is complete; validation is always next).
 - `iktomi` → `phobetor` (its own work is complete; validation is always next).
-- `phobetor` → `baku` (`[verdict: pass]`).
+- `phobetor` → `baku` (`[verdict: pass]` and the change's `tasks.md` is fully ticked, or its task state is unknown).
 - `phobetor` → `morpheus` (`[verdict: fail]`, the first failure for the change).
 - `phobetor` → `phantasos` (`[verdict: fail]` after a `morpheus` retry has already failed for the change, or `[verdict: spec-defect]`).
 
@@ -58,6 +58,7 @@ The through-Janus cases (judgment or terminal, no fixed edge) are:
 
 - `nyx`, `morpheus`, or `iktomi` ending with `[handoff: blocked]`, including `morpheus` escalating a genuinely ambiguous requirement (Janus decides who's best positioned to resolve it, typically `phantasos`).
 - `phobetor` ending with `[verdict: unverified]` (tests could not be run).
+- `phobetor` ending with `[verdict: pass]` while the change still has unticked tasks (a partial pass: reported to Janus/the user with the remaining count; Janus decides between the next task via `morpheus` and stopping, and `baku` is not called until the tasks are ticked).
 - `baku` confirming a change is closed (terminal — no fixed next agent).
 - Any of the broad-routing agents (`iktomi`, `zhougong`, `hypnos`, `mengpo`), when their own work doesn't clearly point to a specific next agent.
 
