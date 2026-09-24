@@ -41,3 +41,5 @@ dreamland
 .dreamland/otel-cursors/
 .dreamland/cache/
 .dreamland/copilot-hook-debug.jsonl
+.dreamland/zhougong-dashboard.json
+.dreamland/zhougong-dashboard.log
