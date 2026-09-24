@@ -159,3 +159,25 @@ The dashboard SHALL render, with inline SVG and no external assets, paired chart
 #### Scenario: Stable agent ordering
 - **WHEN** `agentMatrix` is computed twice over the same data
 - **THEN** agents appear in the same order, highest total tokens first
+
+### Requirement: Dashboard is controllable by the user via CLI and slash commands
+
+The public CLI `dreamland zhougong-dashboard start|stop|status` SHALL call the same start/stop logic as the `zhougong_dashboard_start`/`zhougong_dashboard_stop` MCP tools. The slash commands `/drmlnd:zhougong-dashboard-start` and `/drmlnd:zhougong-dashboard-stop` (and bare `/zhougong-dashboard-start`, `/zhougong-dashboard-stop`) SHALL be scaffolded for every supported platform as direct Bash wrappers over the CLI, not routed through Janus or subagents, and SHALL NOT reference the zhougong-only MCP server. Stopping SHALL terminate the process promptly and remove the state file only after the process is gone.
+
+#### Scenario: CLI start reuses a running dashboard
+- **WHEN** `dreamland zhougong-dashboard start` runs while the dashboard is already running
+- **THEN** it prints the existing URL and starts no second process
+
+#### Scenario: CLI stop and status
+- **WHEN** `dreamland zhougong-dashboard stop` runs while the dashboard is running
+- **THEN** it prints a confirmation, the process exits, the port is released, and `status` prints `not running`
+- **WHEN** `status` runs while the dashboard is running
+- **THEN** it prints the URL
+
+#### Scenario: Slash commands are direct wrappers
+- **WHEN** `/drmlnd:zhougong-dashboard-start` or `/drmlnd:zhougong-dashboard-stop` is invoked
+- **THEN** the agent runs the corresponding CLI command via Bash and relays its output without dispatching to Janus or any subagent
+
+#### Scenario: Prompt stop under load
+- **WHEN** stop is requested while a keep-alive connection is open and a background collect is running
+- **THEN** the serve process exits within a few seconds on SIGTERM, escalating to SIGKILL if it lingers, and the port is freed
