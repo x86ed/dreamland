@@ -58,3 +58,4 @@ svg.chart.wide{width:100%;max-width:none}
 .pair:has(svg.wide){flex-direction:column;align-items:stretch}
 .legend{display:flex;flex-wrap:wrap;gap:.4rem 1rem;font-size:.78rem;color:var(--text-dim);margin:.4rem 0}
 .legend em{margin-left:auto}
+svg.chart.radar{max-width:760px;display:block;margin:.4rem auto}

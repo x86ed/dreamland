@@ -10,7 +10,7 @@ function selected() {
   const out = data.datasets.filter(d => pool.includes(d.summary.name));
   return out.length ? out : data.datasets;
 }
-function renderDetails() { renderAgents(); renderRatio(); renderRunPairs(); renderFlow(); }
+function renderDetails() { renderRadar(); renderAgents(); renderRatio(); renderRunPairs(); renderFlow(); }
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -28,7 +28,7 @@ function bars(rows, label, value) {
   ).join("") + "</table>";
 }
 
-const PALETTE = ["#00fff2","#ff00c8","#fff200","#ff2c1c","#20e8cf","#e3b520","#8a7cff","#ff7a33","#4dffb0","#ff6fae"];
+const PALETTE = ["#00fff2","#ff00c8","#fff200","#ff2c1c","#3d8bff","#a6ff3c","#8a7cff","#ff7a33","#4dffb0","#ff6fae"];
 const short = v => v === null || v === undefined ? "n/a" : Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(1) + "M" : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(1) + "k" : fmt(v);
 const num = v => typeof v === "number" && isFinite(v) ? v : 0;
 const ROW = 28, PW = 420;
@@ -160,6 +160,63 @@ function stacked(m) {
   });
   const legend = m.agents.map(a => `<span class="tag" style="color:${agentColor(m, a)};border-color:${agentColor(m, a)}">${esc(a)}</span>`).join("");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="token share by agent">${g}</svg><div>${legend}</div>`;
+}
+
+// Radar ("star") chart: one polygon per agent over the selected branches. Each axis is normalised
+// to 0..1 against the largest agent on that axis; raw values are in the hover tooltips.
+const RADAR_AXES = [
+  ["calls", "calls (commits)", a => a.calls],
+  ["runs", "runs", a => a.runs],
+  ["total", "total tokens", a => a.total],
+  ["output", "output tokens", a => a.output],
+  ["lines", "code lines", a => a.lines],
+  ["ratio", "tokens/line", a => a.lines > 0 ? a.output / a.lines : null],
+];
+function radarAgents() {
+  const by = new Map();
+  for (const d of selected()) {
+    const get = n => { if (!by.has(n)) by.set(n, { agent: n, calls: 0, runs: 0, total: 0, output: 0, lines: 0 }); return by.get(n); };
+    for (const a of d.agents) { const x = get(a.agent); x.calls += num(a.commits); x.runs += num(a.runs); x.total += num(a.total); x.output += num(a.output); }
+    for (const r of d.runs) get(r.agent).lines += num(r.linesAdded) + num(r.linesRemoved);
+  }
+  return [...by.values()].sort((a, b) => a.agent.localeCompare(b.agent));
+}
+function renderRadar() {
+  const el = $("radar");
+  if (!el) return;
+  const agents = radarAgents();
+  if (!agents.length) { el.innerHTML = "<em>no agent data for the selected branches</em>"; return; }
+  const all = data.agentMatrix ? data.agentMatrix.agents : [];
+  const col = a => all.includes(a) ? agentColor(data.agentMatrix, a) : PALETTE[agents.findIndex(x => x.agent === a) % PALETTE.length];
+  const W = 640, H = 560, cx = W / 2, cy = H / 2 + 5, R = 190, n = RADAR_AXES.length;
+  const ang = i => -Math.PI / 2 + 2 * Math.PI * i / n;
+  const pt = (i, f) => [cx + R * f * Math.cos(ang(i)), cy + R * f * Math.sin(ang(i))];
+  const maxes = RADAR_AXES.map(([, , f]) => Math.max(0, ...agents.map(a => num(f(a)))));
+  let g = "";
+  [.25, .5, .75, 1].forEach(f => {
+    g += `<polygon points="${RADAR_AXES.map((_, i) => pt(i, f).join(",")).join(" ")}" fill="none" stroke="${f === 1 ? "#5c584a" : "#2a2922"}"/>` +
+      `<text x="${cx + 4}" y="${cy - R * f - 2}" fill="#5f5c50" font-size="10">${Math.round(f * 100)}%</text>`;
+  });
+  RADAR_AXES.forEach(([, label], i) => {
+    const [x, y] = pt(i, 1), [lx, ly] = pt(i, 1.13), c = Math.cos(ang(i));
+    g += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="#2a2922"/>` +
+      `<text x="${lx}" y="${ly + 4}" fill="#93907f" font-size="11" text-anchor="${Math.abs(c) < .2 ? "middle" : c > 0 ? "start" : "end"}">${esc(label)}<tspan x="${lx}" dy="13" fill="#5f5c50" font-size="10">max ${short(maxes[i])}</tspan></text>`;
+  });
+  // Draw larger polygons first so small ones stay visible on top.
+  const norm = a => RADAR_AXES.map(([, , f], i) => { const v = f(a); return v !== null && maxes[i] > 0 ? num(v) / maxes[i] : 0; });
+  const order = agents.map(a => ({ a, v: norm(a) })).sort((p, q) => q.v.reduce((s, x) => s + x, 0) - p.v.reduce((s, x) => s + x, 0));
+  for (const { a, v } of order) {
+    const c = col(a.agent), raw = RADAR_AXES.map(([, l, f]) => `${l}: ${f(a) === null ? "n/a (0 lines)" : fmt(f(a))}`).join("\n");
+    g += `<polygon points="${v.map((f, i) => pt(i, f).join(",")).join(" ")}" fill="${c}" fill-opacity=".14" stroke="${c}" stroke-width="2" stroke-linejoin="round"><title>${esc(a.agent)}\n${esc(raw)}</title></polygon>`;
+    v.forEach((f, i) => {
+      const [x, y] = pt(i, f), val = RADAR_AXES[i][2](a);
+      g += `<circle cx="${x}" cy="${y}" r="4" fill="${c}"><title>${esc(a.agent)} - ${esc(RADAR_AXES[i][1])}: ${val === null ? "n/a (0 lines)" : fmt(val)} (${Math.round(f * 100)}% of max)</title></circle>`;
+    });
+  }
+  const legend = `<div class="legend">` + agents.map(a => `<span><i class="swatch" style="background:${col(a.agent)}"></i>${esc(a.agent)}</span>`).join("") +
+    `<em>axes normalised 0..100% to the largest agent; lower tokens/line is more efficient; agents with 0 lines plot 0 on tokens/line</em></div>`;
+  el.innerHTML = legend + `<svg class="chart wide radar" viewBox="0 0 ${W} ${H}" role="img" aria-label="agent radar chart">${g}</svg>` +
+    (agents.length === 1 ? "<small>only one agent in the selected branches; it defines the maximum on every axis</small>" : "");
 }
 
 function renderOverview() {
