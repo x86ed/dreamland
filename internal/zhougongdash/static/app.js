@@ -28,7 +28,7 @@ function bars(rows, label, value) {
   ).join("") + "</table>";
 }
 
-const PALETTE = ["#00ff9c","#00e5ff","#ff2bd6","#ffb000","#7c8cff","#ff6b6b","#b6ff00","#c78bff","#4dffd2","#ff9de2"];
+const PALETTE = ["#00fff2","#ff00c8","#fff200","#ff2c1c","#20e8cf","#e3b520","#8a7cff","#ff7a33","#4dffb0","#ff6fae"];
 const short = v => v === null || v === undefined ? "n/a" : Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(1) + "M" : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(1) + "k" : fmt(v);
 const num = v => typeof v === "number" && isFinite(v) ? v : 0;
 const ROW = 28, PW = 420;
@@ -38,16 +38,16 @@ function hbarPanel(title, items, color, opts) {
   opts = opts || {};
   const lw = opts.labels ? 170 : 0, bw = PW - lw - 70, H = 22 + ROW * items.length;
   const max = Math.max(1, ...items.map(i => Math.max(num(i.v), num(i.v2))));
-  let g = `<text x="${lw}" y="14" fill="#00e5ff" font-size="11">${esc(title)}</text>`;
+  let g = `<text x="${lw}" y="14" fill="#93907f" font-size="11">${esc(title)}</text>`;
   items.forEach((it, i) => {
     const y = 22 + i * ROW, w = Math.round(bw * num(it.v) / max), w2 = Math.round(bw * num(it.v2) / max);
-    if (it.cur) g += `<rect x="0" y="${y}" width="${PW}" height="${ROW - 2}" fill="rgba(0,255,156,.12)"/>`;
-    if (opts.labels) g += `<text x="2" y="${y + 17}" fill="${it.cur ? "#00ff9c" : "#0a9f68"}" font-size="11">${esc(it.label.length > 24 ? it.label.slice(0, 23) + "…" : it.label)}${it.cur ? " [HEAD]" : ""}</text>`;
-    if (opts.secondary && it.v2 !== undefined) g += `<rect x="${lw}" y="${y + 3}" width="${w2}" height="${ROW - 8}" fill="none" stroke="#ff2bd6" stroke-width="1"><title>${esc(it.label)} total tokens: ${fmt(it.v2)}</title></rect>`;
-    g += `<rect x="${lw}" y="${y + 7}" width="${w}" height="${ROW - 16}" fill="${color}" filter="url(#glow)"><title>${esc(it.label)}: ${fmt(it.v)}</title></rect>` +
+    if (it.cur) g += `<rect x="0" y="${y}" width="${PW}" height="${ROW - 2}" fill="rgba(255,44,28,.10)"/>`;
+    if (opts.labels) g += `<text x="2" y="${y + 17}" fill="${it.cur ? "#ff2c1c" : "#5f5c50"}" font-size="11">${esc(it.label.length > 24 ? it.label.slice(0, 23) + "…" : it.label)}${it.cur ? " [HEAD]" : ""}</text>`;
+    if (opts.secondary && it.v2 !== undefined) g += `<rect x="${lw}" y="${y + 3}" width="${w2}" height="${ROW - 8}" fill="none" stroke="#ff00c8" stroke-width="1"><title>${esc(it.label)} total tokens: ${fmt(it.v2)}</title></rect>`;
+    g += `<rect x="${lw}" y="${y + 7}" width="${w}" height="${ROW - 16}" fill="${color}"><title>${esc(it.label)}: ${fmt(it.v)}</title></rect>` +
       `<text x="${lw + Math.max(w, w2) + 5}" y="${y + 17}" fill="${color}" font-size="11">${it.v === null || it.v === undefined ? "n/a" : short(it.v)}</text>`;
   });
-  return `<svg class="chart" viewBox="0 0 ${PW} ${H}" width="${PW}" height="${H}" role="img" aria-label="${esc(title)}"><defs><filter id="glow"><feGaussianBlur stdDeviation="1.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>${g}</svg>`;
+  return `<svg class="chart" viewBox="0 0 ${PW} ${H}" width="${PW}" height="${H}" role="img" aria-label="${esc(title)}">${g}</svg>`;
 }
 
 function metricPairs(sums) {
@@ -57,9 +57,9 @@ function metricPairs(sums) {
   const ln = rows.map(r => ({ label: r.label, cur: r.cur, v: r.lines }));
   const rt = rows.map(r => ({ label: r.label, cur: r.cur, v: r.ratio }));
   return `<div class="pair">` +
-    hbarPanel("OUTPUT TOKENS (magenta outline = total tokens)", tok, "#00ff9c", { labels: true, secondary: true }) +
-    hbarPanel("CODE LINES (added+removed)", ln, "#00e5ff") +
-    hbarPanel("TOKENS / LINE (n/a when 0 lines)", rt, "#ffb000") + `</div>` + scatter(rows);
+    hbarPanel("OUTPUT TOKENS (magenta outline = total tokens)", tok, "#00fff2", { labels: true, secondary: true }) +
+    hbarPanel("CODE LINES (added+removed)", ln, "#fff200") +
+    hbarPanel("TOKENS / LINE (n/a when 0 lines)", rt, "#ff00c8") + `</div>` + scatter(rows);
 }
 
 function scatter(rows) {
@@ -68,32 +68,31 @@ function scatter(rows) {
   const W = 560, H = 320, L = 60, B = 36, T = 16, R = 90;
   const mx = Math.max(...pts.map(p => p.lines)), my = Math.max(1, ...pts.map(p => p.out));
   const X = v => L + (W - L - R) * v / mx, Y = v => H - B - (H - B - T) * v / my;
-  let g = `<line x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}" stroke="#0a9f68"/><line x1="${L}" y1="${T}" x2="${L}" y2="${H - B}" stroke="#0a9f68"/>` +
-    `<text x="${(L + W - R) / 2}" y="${H - 8}" fill="#00e5ff" font-size="11" text-anchor="middle">code lines changed</text>` +
-    `<text x="12" y="${(T + H - B) / 2}" fill="#00e5ff" font-size="11" text-anchor="middle" transform="rotate(-90 12 ${(T + H - B) / 2})">output tokens</text>` +
-    `<text x="${L}" y="${H - B + 13}" fill="#0a9f68" font-size="10">0</text><text x="${W - R}" y="${H - B + 13}" fill="#0a9f68" font-size="10" text-anchor="end">${short(mx)}</text>` +
-    `<text x="${L - 4}" y="${T + 8}" fill="#0a9f68" font-size="10" text-anchor="end">${short(my)}</text>`;
+  let g = `<line x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}" stroke="#5c584a"/><line x1="${L}" y1="${T}" x2="${L}" y2="${H - B}" stroke="#5c584a"/>` +
+    `<text x="${(L + W - R) / 2}" y="${H - 8}" fill="#93907f" font-size="11" text-anchor="middle">code lines changed</text>` +
+    `<text x="12" y="${(T + H - B) / 2}" fill="#93907f" font-size="11" text-anchor="middle" transform="rotate(-90 12 ${(T + H - B) / 2})">output tokens</text>` +
+    `<text x="${L}" y="${H - B + 13}" fill="#5f5c50" font-size="10">0</text><text x="${W - R}" y="${H - B + 13}" fill="#5f5c50" font-size="10" text-anchor="end">${short(mx)}</text>` +
+    `<text x="${L - 4}" y="${T + 8}" fill="#5f5c50" font-size="10" text-anchor="end">${short(my)}</text>`;
   for (const p of pts) {
-    const c = p.cur ? "#00ff9c" : "#ff2bd6", x = X(p.lines), y = Y(p.out);
-    g += `<circle cx="${x}" cy="${y}" r="${p.cur ? 7 : 5}" fill="${c}" filter="url(#glow)"><title>${esc(p.label)}: ${fmt(p.lines)} lines, ${fmt(p.out)} output tokens, ${fmt(p.ratio)} tokens/line</title></circle>` +
+    const c = p.cur ? "#ff2c1c" : "#ff00c8", x = X(p.lines), y = Y(p.out);
+    g += `<circle cx="${x}" cy="${y}" r="${p.cur ? 7 : 5}" fill="${c}"><title>${esc(p.label)}: ${fmt(p.lines)} lines, ${fmt(p.out)} output tokens, ${fmt(p.ratio)} tokens/line</title></circle>` +
       `<text x="${x + 9}" y="${y + 4}" fill="${c}" font-size="10">${esc(p.label.length > 14 ? p.label.slice(0, 13) + "…" : p.label)}</text>`;
   }
   const skipped = rows.length - pts.length;
-  return `<h4>Scatter: lines vs output tokens</h4><svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="scatter">` +
-    `<defs><filter id="glow"><feGaussianBlur stdDeviation="1.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>${g}</svg>` +
+  return `<h4>Scatter: lines vs output tokens</h4><svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="scatter">${g}</svg>` +
     (skipped ? `<small> ${skipped} branch(es) omitted (0 lines or no data)</small>` : "");
 }
 
 function vbars(title, vals, color, labels, vals2) {
   const W = Math.max(260, 30 * vals.length + 60), H = 170, L = 44, B = 22, T = 18;
   const max = Math.max(1, ...vals.map(num), ...(vals2 || []).map(num)), bw = (W - L - 8) / Math.max(1, vals.length);
-  let g = `<text x="${L}" y="12" fill="#00e5ff" font-size="11">${esc(title)}</text><line x1="${L}" y1="${H - B}" x2="${W}" y2="${H - B}" stroke="#0a9f68"/>` +
-    `<text x="${L - 4}" y="${T + 8}" fill="#0a9f68" font-size="10" text-anchor="end">${short(max)}</text><text x="${L - 4}" y="${H - B}" fill="#0a9f68" font-size="10" text-anchor="end">0</text>`;
+  let g = `<text x="${L}" y="12" fill="#93907f" font-size="11">${esc(title)}</text><line x1="${L}" y1="${H - B}" x2="${W}" y2="${H - B}" stroke="#5c584a"/>` +
+    `<text x="${L - 4}" y="${T + 8}" fill="#5f5c50" font-size="10" text-anchor="end">${short(max)}</text><text x="${L - 4}" y="${H - B}" fill="#5f5c50" font-size="10" text-anchor="end">0</text>`;
   vals.forEach((v, i) => {
     const x = L + i * bw, h = (H - B - T) * num(v) / max, h2 = vals2 ? (H - B - T) * num(vals2[i]) / max : 0;
-    if (vals2) g += `<rect x="${x + 1}" y="${H - B - h2}" width="${bw - 3}" height="${h2}" fill="none" stroke="#ff2bd6"><title>#${i + 1} ${esc(labels[i])} total tokens: ${fmt(vals2[i])}</title></rect>`;
+    if (vals2) g += `<rect x="${x + 1}" y="${H - B - h2}" width="${bw - 3}" height="${h2}" fill="none" stroke="#ff00c8"><title>#${i + 1} ${esc(labels[i])} total tokens: ${fmt(vals2[i])}</title></rect>`;
     g += `<rect x="${x + 4}" y="${H - B - h}" width="${Math.max(1, bw - 9)}" height="${h}" fill="${color}"><title>#${i + 1} ${esc(labels[i])}: ${v === null || v === undefined ? "n/a" : fmt(v)}</title></rect>` +
-      `<text x="${x + bw / 2}" y="${H - 8}" fill="#0a9f68" font-size="9" text-anchor="middle">${i + 1}</text>`;
+      `<text x="${x + bw / 2}" y="${H - 8}" fill="#5f5c50" font-size="9" text-anchor="middle">${i + 1}</text>`;
   });
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(title)}">${g}</svg>`;
 }
@@ -102,8 +101,8 @@ function runPair(d) {
   if (!d.runs.length) return "<em>no runs</em>";
   const labels = d.runs.map(r => r.agent);
   return `<div class="pair">` +
-    vbars("OUTPUT TOKENS per run (outline = total)", d.runs.map(r => r.output), "#00ff9c", labels, d.runs.map(r => r.total)) +
-    vbars("CODE LINES per run", d.runs.map(r => r.linesAdded + r.linesRemoved), "#00e5ff", labels) + `</div>`;
+    vbars("OUTPUT TOKENS per run (outline = total)", d.runs.map(r => r.output), "#00fff2", labels, d.runs.map(r => r.total)) +
+    vbars("CODE LINES per run", d.runs.map(r => r.linesAdded + r.linesRemoved), "#fff200", labels) + `</div>`;
 }
 function renderRunPairs() {
   $("runpairs").innerHTML = selected().map(d => `<h3>${esc(d.summary.name)}${isCur(d.summary.name) ? '<span class="tag head">HEAD</span>' : ""}</h3>${runPair(d)}`).join("");
@@ -122,7 +121,7 @@ function renderAgentMatrix() {
   m.agents.forEach((a, i) => {
     const tot = m.cells[i].reduce((s, c) => s + c.total, 0);
     h += `<tr><td><span class="swatch" style="background:${agentColor(m, a)}"></span>${esc(a)}</td>` + m.cells[i].map(c =>
-      c.commits || c.total ? `<td class="heat" style="background:rgba(0,255,156,${(0.08 + 0.7 * c.total / maxTok).toFixed(2)})" title="${esc(a)}: ${c.commits} commits, ${fmt(c.total)} total, ${fmt(c.output)} output">${c.commits} / ${short(c.total)}</td>` : `<td class="empty">-</td>`).join("") + `<td>${short(tot)}</td></tr>`;
+      c.commits || c.total ? `<td class="heat" style="background:rgba(0,255,242,${(0.08 + 0.7 * c.total / maxTok).toFixed(2)})" title="${esc(a)}: ${c.commits} commits, ${fmt(c.total)} total, ${fmt(c.output)} output">${c.commits} / ${short(c.total)}</td>` : `<td class="empty">-</td>`).join("") + `<td>${short(tot)}</td></tr>`;
   });
   h += `</table><small>cell = calls (commits) / total tokens; brighter = more tokens</small><h3>Agents used per branch</h3><table>`;
   m.branches.forEach((b, j) => {
@@ -137,8 +136,8 @@ function stacked(m) {
   let g = "";
   m.branches.forEach((b, j) => {
     const y = 6 + j * ROW, tot = m.agents.reduce((s, a, i) => s + m.cells[i][j].total, 0);
-    g += `<text x="2" y="${y + 16}" fill="${isCur(b) ? "#00ff9c" : "#0a9f68"}" font-size="11">${esc(b.length > 24 ? b.slice(0, 23) + "…" : b)}</text>`;
-    if (!tot) { g += `<text x="${L}" y="${y + 16}" fill="#0a9f68" font-size="11">n/a</text>`; return; }
+    g += `<text x="2" y="${y + 16}" fill="${isCur(b) ? "#ff2c1c" : "#5f5c50"}" font-size="11">${esc(b.length > 24 ? b.slice(0, 23) + "…" : b)}</text>`;
+    if (!tot) { g += `<text x="${L}" y="${y + 16}" fill="#5f5c50" font-size="11">n/a</text>`; return; }
     let x = L;
     m.agents.forEach((a, i) => {
       const t = m.cells[i][j].total, w = (W - L - 4) * t / tot;
