@@ -83,26 +83,38 @@ function scatter(rows) {
     (skipped ? `<small> ${skipped} branch(es) omitted (0 lines or no data)</small>` : "");
 }
 
-function vbars(title, vals, color, labels, vals2) {
-  const W = Math.max(260, 30 * vals.length + 60), H = 170, L = 44, B = 22, T = 18;
-  const max = Math.max(1, ...vals.map(num), ...(vals2 || []).map(num)), bw = (W - L - 8) / Math.max(1, vals.length);
-  let g = `<text x="${L}" y="12" fill="#93907f" font-size="11">${esc(title)}</text><line x1="${L}" y1="${H - B}" x2="${W}" y2="${H - B}" stroke="#5c584a"/>` +
-    `<text x="${L - 4}" y="${T + 8}" fill="#5f5c50" font-size="10" text-anchor="end">${short(max)}</text><text x="${L - 4}" y="${H - B}" fill="#5f5c50" font-size="10" text-anchor="end">0</text>`;
-  vals.forEach((v, i) => {
-    const x = L + i * bw, h = (H - B - T) * num(v) / max, h2 = vals2 ? (H - B - T) * num(vals2[i]) / max : 0;
-    if (vals2) g += `<rect x="${x + 1}" y="${H - B - h2}" width="${bw - 3}" height="${h2}" fill="none" stroke="#ff00c8"><title>#${i + 1} ${esc(labels[i])} total tokens: ${fmt(vals2[i])}</title></rect>`;
-    g += `<rect x="${x + 4}" y="${H - B - h}" width="${Math.max(1, bw - 9)}" height="${h}" fill="${color}"><title>#${i + 1} ${esc(labels[i])}: ${v === null || v === undefined ? "n/a" : fmt(v)}</title></rect>` +
-      `<text x="${x + bw / 2}" y="${H - 8}" fill="#5f5c50" font-size="9" text-anchor="middle">${i + 1}</text>`;
+// vbars draws one bar per run in a fixed-width viewBox that scales to the container, so
+// hundreds of runs stay legible: bars are coloured by agent, x ticks are sparse run numbers.
+function vbars(title, vals, labels, colors, extra) {
+  const W = 900, H = 200, L = 52, R = 8, T = 22, B = 24, n = Math.max(1, vals.length);
+  const max = Math.max(1, ...vals.map(num)), ph = H - B - T, bw = (W - L - R) / n;
+  const y = v => H - B - ph * Math.sqrt(num(v) / max); // sqrt scale: one huge run must not flatten the rest
+  let g = `<text x="${L}" y="13" fill="#93907f" font-size="12">${esc(title)} <tspan fill="#5f5c50">(sqrt scale)</tspan></text>`;
+  [0, .25, .5, .75, 1].forEach(f => {
+    const yy = H - B - ph * f;
+    g += `<line x1="${L}" y1="${yy}" x2="${W - R}" y2="${yy}" stroke="${f ? "#2a2922" : "#5c584a"}"/>` +
+      `<text x="${L - 6}" y="${yy + 4}" fill="#93907f" font-size="11" text-anchor="end">${short(Math.round(max * f * f))}</text>`;
   });
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(title)}">${g}</svg>`;
+  vals.forEach((v, i) => {
+    const x = L + i * bw, top = y(v), w = Math.max(1, bw - (bw > 6 ? 2 : 0.5));
+    g += `<rect x="${x}" y="${top}" width="${w}" height="${Math.max(0, H - B - top)}" fill="${colors[i]}"><title>#${i + 1} ${esc(labels[i])}: ${v === null || v === undefined ? "n/a" : fmt(v)}${extra ? " (total tokens " + fmt(extra[i]) + ")" : ""}</title></rect>`;
+  });
+  const step = Math.max(1, Math.ceil(n / Math.floor((W - L - R) / 42)));
+  for (let i = 0; i < n; i += step) {
+    g += `<text x="${L + i * bw + bw / 2}" y="${H - 8}" fill="#93907f" font-size="11" text-anchor="middle">${i + 1}</text>`;
+  }
+  return `<svg class="chart wide" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)}">${g}</svg>`;
 }
 
 function runPair(d) {
   if (!d.runs.length) return "<em>no runs</em>";
-  const labels = d.runs.map(r => r.agent);
-  return `<div class="pair">` +
-    vbars("OUTPUT TOKENS per run (outline = total)", d.runs.map(r => r.output), "#00fff2", labels, d.runs.map(r => r.total)) +
-    vbars("CODE LINES per run", d.runs.map(r => r.linesAdded + r.linesRemoved), "#fff200", labels) + `</div>`;
+  const agents = [...new Set(d.runs.map(r => r.agent))];
+  const col = a => PALETTE[agents.indexOf(a) % PALETTE.length];
+  const labels = d.runs.map(r => r.agent), colors = d.runs.map(r => col(r.agent));
+  const legend = `<div class="legend">` + agents.map(a => `<span><i class="swatch" style="background:${col(a)}"></i>${esc(a)}</span>`).join("") + `<em>x axis: run number in commit order</em></div>`;
+  return legend + `<div class="pair">` +
+    vbars("OUTPUT TOKENS per run", d.runs.map(r => r.output), labels, colors, d.runs.map(r => r.total)) +
+    vbars("CODE LINES (added + removed) per run", d.runs.map(r => r.linesAdded + r.linesRemoved), labels, colors) + `</div>`;
 }
 function renderRunPairs() {
   $("runpairs").innerHTML = selected().map(d => `<h3>${esc(d.summary.name)}${isCur(d.summary.name) ? '<span class="tag head">HEAD</span>' : ""}</h3>${runPair(d)}`).join("");
