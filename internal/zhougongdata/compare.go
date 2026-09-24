@@ -213,9 +213,10 @@ func Compare(datasets []Dataset, baseline string) CompareResult {
 			bi = i
 		}
 	}
-	if len(datasets) > 0 {
-		res.Baseline = datasets[bi].Name
+	if len(datasets) == 0 {
+		return res
 	}
+	res.Baseline = datasets[bi].Name
 	for _, m := range MetricNames {
 		row := MetricRow{Metric: m}
 		base := metricValue(res.Branches[bi], m)
