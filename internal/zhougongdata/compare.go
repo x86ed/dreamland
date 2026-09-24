@@ -291,3 +291,52 @@ func MarkdownTable(datasets []Dataset, baseline string) (string, error) {
 	}
 	return b.String(), nil
 }
+
+// AgentCell is one agent's usage within one branch of an AgentMatrix.
+type AgentCell struct {
+	Commits int   `json:"commits"`
+	Output  int64 `json:"output"`
+	Total   int64 `json:"total"`
+}
+
+// AgentMatrix has agents as rows and branches as columns; Cells[agent][branch].
+type AgentMatrix struct {
+	Branches []string      `json:"branches"`
+	Agents   []string      `json:"agents"`
+	Cells    [][]AgentCell `json:"cells"`
+}
+
+// BuildAgentMatrix aggregates AgentStats across datasets. Agents are ordered by total
+// tokens descending, ties broken by name, so the order is stable.
+func BuildAgentMatrix(datasets []Dataset) AgentMatrix {
+	m := AgentMatrix{Branches: []string{}, Agents: []string{}, Cells: [][]AgentCell{}}
+	totals := map[string]int64{}
+	per := make([]map[string]AgentStat, len(datasets))
+	for i, ds := range datasets {
+		m.Branches = append(m.Branches, ds.Name)
+		per[i] = map[string]AgentStat{}
+		for _, a := range AgentStats(ds.Runs) {
+			per[i][a.Agent] = a
+			if _, ok := totals[a.Agent]; !ok {
+				m.Agents = append(m.Agents, a.Agent)
+			}
+			totals[a.Agent] += a.Total
+		}
+	}
+	sort.SliceStable(m.Agents, func(i, j int) bool {
+		a, b := m.Agents[i], m.Agents[j]
+		if totals[a] != totals[b] {
+			return totals[a] > totals[b]
+		}
+		return a < b
+	})
+	for _, ag := range m.Agents {
+		row := make([]AgentCell, len(datasets))
+		for i := range datasets {
+			s := per[i][ag]
+			row[i] = AgentCell{Commits: s.Commits, Output: s.Output, Total: s.Total}
+		}
+		m.Cells = append(m.Cells, row)
+	}
+	return m
+}

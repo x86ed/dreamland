@@ -123,7 +123,10 @@ func TestPhantasosTemplateHasIssueIntake(t *testing.T) {
 	if !strings.Contains(string(b), "gh issue view <n> --json title,body,labels") {
 		t.Error("phantasos template missing issue-intake instruction")
 	}
-	if got, err := os.ReadFile("../../.claude/agents/phantasos.md"); err == nil && string(got) != string(b) {
-		t.Error(".claude/agents/phantasos.md differs from its template")
+	// Only a dreamland-managed live copy is held to its template; an unmarked
+	// legacy copy is re-synced by `dreamland init --force` (design Decision 12).
+	if got, err := os.ReadFile("../../.claude/agents/phantasos.md"); err == nil && hasManagedMarker(got) &&
+		string(got) != string(withManagedMarker("phantasos.md", b)) {
+		t.Error(".claude/agents/phantasos.md differs from its template; run `dreamland init`")
 	}
 }

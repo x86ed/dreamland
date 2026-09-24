@@ -25,5 +25,7 @@ You are dispatched by Janus when the current task implements new behavior descri
 Read the spec scenario the task implements.
 Write a failing acceptance test for that scenario — the test exists before any implementation does (TDD red phase).
 Once the test is written (and confirmed failing), hand off directly to `morpheus` — a fixed next step, do not report to Janus first.
+End your final report with an own-line tag: `[handoff: complete]` once the failing test is written, or `[handoff: blocked]` if you cannot write it. The tag lines are the last lines of the report, nothing after them.
+After you finish, the dispatcher runs `dreamland handoff next --from nyx` and follows the directive it prints (no hook enforces this on this platform).
 
 Do not implement the behavior yourself; that is `morpheus`'s job.

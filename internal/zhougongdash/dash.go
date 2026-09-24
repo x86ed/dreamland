@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -27,10 +28,108 @@ type Store struct {
 	repoRoot string
 	mu       sync.Mutex
 	live     []zhougongdata.Dataset
+	cmu      sync.Mutex
+	inflight map[string]bool
+	order    []string
+	failed   map[string]failure
+	worker   sync.Mutex
 }
 
+type failure struct{ sha, msg string }
+
+// collectFn is the parse seam; tests replace it.
+var collectFn = zhougongdata.Collect
+
 // NewStore returns a Store that reads archived records from repoRoot.
-func NewStore(repoRoot string) *Store { return &Store{repoRoot: repoRoot} }
+func NewStore(repoRoot string) *Store {
+	return &Store{repoRoot: repoRoot, inflight: map[string]bool{}, failed: map[string]failure{}}
+}
+
+// localBranches lists refs/heads, current branch first.
+func (s *Store) localBranches() []string {
+	out, err := exec.Command("git", "-C", s.repoRoot, "for-each-ref", "--format=%(refname:short)", "refs/heads").Output()
+	if err != nil {
+		return nil
+	}
+	cur := s.CurrentBranch()
+	var branches []string
+	if cur != "" {
+		branches = append(branches, cur)
+	}
+	for _, b := range strings.Fields(string(out)) {
+		if b != cur {
+			branches = append(branches, b)
+		}
+	}
+	return branches
+}
+
+// Kick starts background collection for every local branch lacking a fresh cache entry (once
+// per HEAD sha, never twice concurrently) and returns the branches still collecting plus any
+// collect errors. The disk cache is the only shared state.
+func (s *Store) Kick() (collecting []string, errs string) {
+	s.cmu.Lock()
+	var batch []string
+	var msgs []string
+	for _, b := range s.localBranches() {
+		if s.inflight[b] {
+			continue
+		}
+		sha, err := zhougongdata.HeadSha(s.repoRoot, b)
+		if err != nil {
+			msgs = append(msgs, b+": "+err.Error())
+			continue
+		}
+		if e, ok, err := zhougongdata.Read(s.repoRoot, b); err == nil && ok && !zhougongdata.IsStale(e, sha) {
+			delete(s.failed, b)
+			continue
+		}
+		if f, ok := s.failed[b]; ok && f.sha == sha {
+			msgs = append(msgs, b+": "+f.msg)
+			continue
+		}
+		s.inflight[b] = true
+		s.order = append(s.order, b)
+		batch = append(batch, b)
+	}
+	collecting = append(collecting, s.order...)
+	s.cmu.Unlock()
+	if len(batch) > 0 {
+		go s.run(batch)
+	}
+	return collecting, strings.Join(msgs, "; ")
+}
+
+func (s *Store) run(batch []string) {
+	s.worker.Lock()
+	defer s.worker.Unlock()
+	for _, b := range batch {
+		var fail *failure
+		ds, e, err := collectFn(s.repoRoot, b, false)
+		_ = ds
+		if err == nil && e != nil {
+			err = zhougongdata.Write(s.repoRoot, *e)
+		}
+		if err != nil {
+			sha, _ := zhougongdata.HeadSha(s.repoRoot, b)
+			fail = &failure{sha: sha, msg: err.Error()}
+		}
+		s.cmu.Lock()
+		delete(s.inflight, b)
+		for i, o := range s.order {
+			if o == b {
+				s.order = append(s.order[:i], s.order[i+1:]...)
+				break
+			}
+		}
+		if fail != nil {
+			s.failed[b] = *fail
+		} else {
+			delete(s.failed, b)
+		}
+		s.cmu.Unlock()
+	}
+}
 
 // Put adds or replaces a live dataset by name.
 func (s *Store) Put(ds zhougongdata.Dataset) {
@@ -110,6 +209,20 @@ func (s *Store) Resolve(sel string) zhougongdata.Dataset {
 	return zhougongdata.NoData(sel)
 }
 
+// CurrentBranch returns the branch checked out at the store's repo root, or "" when
+// unavailable or detached.
+func (s *Store) CurrentBranch() string {
+	out, err := exec.Command("git", "-C", s.repoRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	b := strings.TrimSpace(string(out))
+	if b == "HEAD" {
+		return ""
+	}
+	return b
+}
+
 // Dashboard is a start/stop-able localhost HTTP server.
 type Dashboard struct {
 	store *Store
@@ -157,7 +270,8 @@ func (d *Dashboard) Stop() error {
 	if srv == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	srv.SetKeepAlivesEnabled(false)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		return srv.Close()
@@ -190,6 +304,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func (d *Dashboard) summary(w http.ResponseWriter, _ *http.Request) {
+	collecting, collectErr := d.store.Kick()
 	all := d.store.All()
 	entries := []Entry{}
 	for _, ds := range all {
@@ -198,13 +313,24 @@ func (d *Dashboard) summary(w http.ResponseWriter, _ *http.Request) {
 			Runs: ds.Runs, Transitions: zhougongdata.Transitions(ds.Runs),
 		})
 	}
+	current, currentDataset := d.store.CurrentBranch(), ""
+	if current != "" {
+		if r := d.store.Resolve(current); r.Source != "nodata" {
+			currentDataset = r.Name
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"datasets":    entries,
-		"typicalFlow": zhougongdata.TypicalFlow(all),
-		"exclusions":  zhougongdata.ExcludedCodeGlobs,
-		"attribution": AttributionNote,
-		"maxCompare":  zhougongdata.MaxBranches,
-		"minCompare":  2,
+		"currentBranch":  current,
+		"currentDataset": currentDataset,
+		"collectError":   collectErr,
+		"collecting":     collecting,
+		"datasets":       entries,
+		"typicalFlow":    zhougongdata.TypicalFlow(all),
+		"agentMatrix":    zhougongdata.BuildAgentMatrix(all),
+		"exclusions":     zhougongdata.ExcludedCodeGlobs,
+		"attribution":    AttributionNote,
+		"maxCompare":     zhougongdata.MaxBranches,
+		"minCompare":     2,
 	})
 }
 

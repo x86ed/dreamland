@@ -106,3 +106,6 @@ func processCommandLine(pid int) (string, []string, error) {
 	}
 	return doc.ExecutablePath, splitWindowsCommandLine(doc.CommandLine), nil
 }
+
+// killProcess force-kills pid.
+func killProcess(pid int) error { return terminateProcess(pid) }

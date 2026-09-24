@@ -109,7 +109,6 @@ func toolError(err error) *mcp.CallToolResult {
 func newZhougongMCPServer(repoRoot string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "dreamland-zhougong", Version: "0.1.0"}, nil)
 	store := zhougongdash.NewStore(repoRoot)
-	dash := zhougongdash.New(store)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "zhougong_collect",
@@ -124,24 +123,14 @@ func newZhougongMCPServer(repoRoot string) *mcp.Server {
 		var parsed []zhougongdata.Dataset
 		var toWrite []zhougongdata.Entry
 		for _, b := range in.Branches {
-			sha, err := zhougongdata.HeadSha(repoRoot, b)
-			if err != nil {
-				return toolError(err), zhougongCollectOutput{}, nil
-			}
-			if !in.Refresh {
-				if e, ok, err := zhougongdata.Read(repoRoot, b); err == nil && ok && !zhougongdata.IsStale(e, sha) {
-					ds := e.Dataset
-					ds.Name, ds.Source = e.Branch, "live"
-					parsed = append(parsed, ds)
-					continue
-				}
-			}
-			ds, err := zhougongdata.ParseBranch(repoRoot, b)
+			ds, e, err := zhougongdata.Collect(repoRoot, b, in.Refresh)
 			if err != nil {
 				return toolError(err), zhougongCollectOutput{}, nil
 			}
 			parsed = append(parsed, ds)
-			toWrite = append(toWrite, zhougongdata.Entry{Dataset: ds, HeadSha: sha})
+			if e != nil {
+				toWrite = append(toWrite, *e)
+			}
 		}
 		for _, e := range toWrite {
 			if err := zhougongdata.Write(repoRoot, e); err != nil {
@@ -216,9 +205,9 @@ func newZhougongMCPServer(repoRoot string) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "zhougong_dashboard_start",
-		Description: "Start the localhost metrics dashboard (127.0.0.1 only) and return its URL",
+		Description: "Start the localhost metrics dashboard (127.0.0.1 only) in a detached process that outlives this agent, and return its URL",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in zhougongStartInput) (*mcp.CallToolResult, zhougongURLOutput, error) {
-		url, err := dash.Start(in.Port)
+		url, err := startZhougongDashboard(repoRoot, in.Port)
 		if err != nil {
 			return toolError(err), zhougongURLOutput{}, nil
 		}
@@ -229,7 +218,7 @@ func newZhougongMCPServer(repoRoot string) *mcp.Server {
 		Name:        "zhougong_dashboard_stop",
 		Description: "Stop the localhost metrics dashboard and release its port",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ zhougongEmpty) (*mcp.CallToolResult, zhougongEmpty, error) {
-		if err := dash.Stop(); err != nil {
+		if err := stopZhougongDashboard(repoRoot); err != nil {
 			return toolError(err), zhougongEmpty{}, nil
 		}
 		return nil, zhougongEmpty{}, nil

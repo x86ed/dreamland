@@ -27,6 +27,20 @@ type Config struct {
 	EmailSuffix        string `json:"email_suffix,omitempty"`
 	OtelEndpoint       string `json:"otel_endpoint,omitempty"`
 	BedrockLogGroup    string `json:"bedrock_log_group,omitempty"`
+	HandoffEnforcement string `json:"handoff_enforcement,omitempty"`
+}
+
+// HandoffMode returns the effective hand-off enforcement mode: "block"
+// (default; also used for unknown values), "warn", or "off".
+func (c *Config) HandoffMode() string {
+	if c == nil {
+		return "block"
+	}
+	switch c.HandoffEnforcement {
+	case "warn", "off":
+		return c.HandoffEnforcement
+	}
+	return "block"
 }
 
 var reNotAllowed = regexp.MustCompile(`[^a-z0-9.\-]`)

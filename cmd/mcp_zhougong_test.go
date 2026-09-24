@@ -1,14 +1,18 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,8 +51,40 @@ func zhougongRepo(t *testing.T) string {
 	return dir
 }
 
+var (
+	dreamlandBinOnce sync.Once
+	dreamlandBinPath string
+	dreamlandBinErr  error
+)
+
+// useRealDreamlandBinary points osExecutable at a freshly built dreamland binary, since the
+// detached dashboard child must not be the test binary.
+func useRealDreamlandBinary(t *testing.T) {
+	t.Helper()
+	dreamlandBinOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "dreamland-bin")
+		if err != nil {
+			dreamlandBinErr = err
+			return
+		}
+		dreamlandBinPath = filepath.Join(dir, "dreamland")
+		c := exec.Command("go", "build", "-o", dreamlandBinPath, "..")
+		if out, err := c.CombinedOutput(); err != nil {
+			dreamlandBinErr = fmt.Errorf("go build: %v\n%s", err, out)
+		}
+	})
+	if dreamlandBinErr != nil {
+		t.Fatal(dreamlandBinErr)
+	}
+	orig := osExecutable
+	osExecutable = func() (string, error) { return dreamlandBinPath, nil }
+	t.Cleanup(func() { osExecutable = orig })
+}
+
 func zhougongClient(t *testing.T, root string) *mcp.ClientSession {
 	t.Helper()
+	useRealDreamlandBinary(t)
+	t.Cleanup(func() { _ = stopZhougongDashboard(root) })
 	ctx := context.Background()
 	st, ct := mcp.NewInMemoryTransports()
 	if _, err := newZhougongMCPServer(root).Connect(ctx, st, nil); err != nil {
@@ -415,5 +451,132 @@ func TestMCPZhougong_NewAgentIssueConfirmWithoutPreview(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Error("gh called")
+	}
+}
+
+func TestMCPZhougong_DashboardOutlivesServerAndStateFileTracksIt(t *testing.T) {
+	root := zhougongRepo(t)
+	s := zhougongClient(t, root)
+	var u struct{ URL string }
+	structured(t, call(t, s, "zhougong_dashboard_start", map[string]any{}), &u)
+
+	st, ok := readZhougongDashState(root)
+	if !ok || st.URL != u.URL || !processAlive(st.PID) || st.PID == os.Getpid() {
+		t.Fatalf("state=%+v ok=%v url=%q", st, ok, u.URL)
+	}
+
+	// A new server (the previous agent exited) sees the same dashboard, still serving.
+	_ = s.Close()
+	s2 := zhougongClient(t, root)
+	var u2 struct{ URL string }
+	structured(t, call(t, s2, "zhougong_dashboard_start", map[string]any{}), &u2)
+	if u2.URL != u.URL {
+		t.Fatalf("second server url %q != %q", u2.URL, u.URL)
+	}
+	resp, err := http.Get(u.URL + "/api/summary")
+	if err != nil {
+		t.Fatalf("dashboard died with its starter: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if r := call(t, s2, "zhougong_dashboard_stop", map[string]any{}); r.IsError {
+		t.Fatalf("stop: %+v", r.Content)
+	}
+	if processAlive(st.PID) {
+		t.Errorf("pid %d still alive after stop", st.PID)
+	}
+	if _, ok := readZhougongDashState(root); ok {
+		t.Errorf("state file should be removed after stop")
+	}
+}
+
+func TestMCPZhougong_StartReplacesStaleState(t *testing.T) {
+	root := zhougongRepo(t)
+	s := zhougongClient(t, root)
+	if err := writeZhougongDashState(root, zhougongDashState{PID: 2147483646, URL: "http://127.0.0.1:1"}); err != nil {
+		t.Fatal(err)
+	}
+	var u struct{ URL string }
+	structured(t, call(t, s, "zhougong_dashboard_start", map[string]any{}), &u)
+	if u.URL == "http://127.0.0.1:1" || !strings.HasPrefix(u.URL, "http://127.0.0.1:") {
+		t.Errorf("stale state reused: %q", u.URL)
+	}
+}
+
+func TestZhougongDashboardStopFreesPortPromptly(t *testing.T) {
+	root := zhougongRepo(t)
+	useRealDreamlandBinary(t)
+	t.Cleanup(func() { _ = stopZhougongDashboard(root) })
+	url, err := startZhougongDashboard(root, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _ := readZhougongDashState(root)
+	addr := strings.TrimPrefix(url, "http://")
+
+	// Hold an open keep-alive connection with a request in flight-idle state.
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "GET /api/summary HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive\r\n\r\n", addr)
+	buf := make([]byte, 1)
+	_, _ = conn.Read(buf) // response started; summary also kicks a background collect
+
+	start := time.Now()
+	if err := stopZhougongDashboard(root); err != nil {
+		t.Fatal(err)
+	}
+	if processAlive(st.PID) {
+		t.Fatalf("pid %d alive after stop", st.PID)
+	}
+	if d := time.Since(start); d > 4*time.Second {
+		t.Errorf("stop took %s", d)
+	}
+	if _, ok := readZhougongDashState(root); ok {
+		t.Error("state file remains")
+	}
+	if c, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
+		c.Close()
+		t.Error("port still accepting connections after stop")
+	}
+}
+
+func TestZhougongDashboardCLI(t *testing.T) {
+	root := zhougongRepo(t)
+	useRealDreamlandBinary(t)
+	t.Cleanup(func() { _ = stopZhougongDashboard(root) })
+	origWd := osGetwd
+	osGetwd = func() (string, error) { return root, nil }
+	t.Cleanup(func() { osGetwd = origWd })
+
+	run := func(arg string) string {
+		var out bytes.Buffer
+		rootCmd.SetOut(&out)
+		rootCmd.SetArgs([]string{"zhougong-dashboard", arg})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("%s: %v", arg, err)
+		}
+		return strings.TrimSpace(out.String())
+	}
+	if got := run("status"); got != "not running" {
+		t.Errorf("status = %q", got)
+	}
+	url := run("start")
+	if !strings.HasPrefix(url, "http://127.0.0.1:") {
+		t.Fatalf("start = %q", url)
+	}
+	if got := run("start"); got != url {
+		t.Errorf("second start = %q, want %q", got, url)
+	}
+	if got := run("status"); got != url {
+		t.Errorf("status = %q, want %q", got, url)
+	}
+	if got := run("stop"); !strings.Contains(got, "stopped") {
+		t.Errorf("stop = %q", got)
+	}
+	if got := run("status"); got != "not running" {
+		t.Errorf("status after stop = %q", got)
 	}
 }

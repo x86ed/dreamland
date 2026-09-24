@@ -390,11 +390,14 @@ func otelReceiverAddr(otelEndpoint string) string {
 	if endpoint == "" {
 		endpoint = "http://localhost:4317"
 	}
-	endpoint = strings.ReplaceAll(endpoint, ":4317", ":4318")
 
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Host == "" {
 		return "localhost:4318"
+	}
+	// Swap only an exact 4317 port; a substring replace would corrupt ports like 43179.
+	if u.Port() == "4317" {
+		return net.JoinHostPort(u.Hostname(), "4318")
 	}
 	return u.Host
 }

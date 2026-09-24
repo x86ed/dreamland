@@ -212,6 +212,116 @@ func installAgents(cfg Config) ([]Result, error) {
 	return installFlatAgents(cfg, spec)
 }
 
+// DreamlandManagedMarker identifies an agent file this scaffolder installed. It is
+// appended after the body (frontmatter must stay on line 1) and lets a plain
+// `dreamland init` refresh the file when its template changes.
+const DreamlandManagedMarker = "dreamland-managed: safe to overwrite on `dreamland init`"
+
+// managedMarkerLine is the marker in the file's comment syntax (TOML uses `#`).
+func managedMarkerLine(path string) string {
+	if strings.HasSuffix(path, ".toml") {
+		return "# " + DreamlandManagedMarker
+	}
+	return "<!-- " + DreamlandManagedMarker + " -->"
+}
+
+func withManagedMarker(path string, data []byte) []byte {
+	return append(append([]byte(nil), data...), []byte("\n"+managedMarkerLine(path)+"\n")...)
+}
+
+func hasManagedMarker(existing []byte) bool {
+	return strings.Contains(string(existing), DreamlandManagedMarker)
+}
+
+// syncAgentFile installs or refreshes one agent file. A marked file that differs
+// from its template is overwritten ("updated"); an unmarked differing file is left
+// alone with a warning unless Force adopts it; an unmarked identical file just
+// gains the marker.
+func syncAgentFile(cfg Config, targetPath string, template []byte) (Result, error) {
+	want := withManagedMarker(targetPath, template)
+	existing, err := os.ReadFile(targetPath)
+	if err != nil {
+		if err := os.WriteFile(targetPath, want, 0o644); err != nil {
+			return Result{}, err
+		}
+		action := "installed"
+		if cfg.Force {
+			action = "installed (forced)"
+		}
+		return Result{Path: targetPath, Action: action}, nil
+	}
+	if cfg.Force {
+		if err := os.WriteFile(targetPath, want, 0o644); err != nil {
+			return Result{}, err
+		}
+		return Result{Path: targetPath, Action: "installed (forced)"}, nil
+	}
+	switch {
+	case string(existing) == string(want):
+		return Result{Path: targetPath, Action: "skipped (already exists)"}, nil
+	case hasManagedMarker(existing), string(existing) == string(template):
+		if err := os.WriteFile(targetPath, want, 0o644); err != nil {
+			return Result{}, err
+		}
+		return Result{Path: targetPath, Action: "updated"}, nil
+	}
+	fmt.Fprintf(os.Stderr, "dreamland: %s differs from its template and is not dreamland-managed; run `dreamland init --force` to adopt it\n", targetPath)
+	return Result{Path: targetPath, Action: "skipped (already exists)"}, nil
+}
+
+// AgentFileIssue is one installed agent file that is stale or unmanaged.
+type AgentFileIssue struct {
+	Path string
+	Kind string // "out-of-date" (marked, differs) or "unmarked-different"
+}
+
+// CheckAgentFiles reports installed agent files, across every platform layout,
+// that differ from their templates.
+func CheckAgentFiles(repoRoot string) []AgentFileIssue {
+	var issues []AgentFileIssue
+	for _, tool := range []string{"Claude Code", "Codex CLI", "Cursor", "Kiro", "Antigravity", "GitHub Copilot"} {
+		spec, ok := platformAgentSpec(tool, repoRoot)
+		if !ok {
+			continue
+		}
+		templateDir := "templates/" + spec.templateDir
+		entries, err := fs.ReadDir(TemplateFS, templateDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			var tmplPath, target string
+			if spec.skillFile != "" {
+				if !entry.IsDir() {
+					continue
+				}
+				tmplPath = templateDir + "/" + entry.Name() + "/" + spec.skillFile
+				target = filepath.Join(spec.targetDir, entry.Name(), spec.skillFile)
+			} else {
+				if entry.IsDir() {
+					continue
+				}
+				tmplPath = templateDir + "/" + entry.Name()
+				target = filepath.Join(spec.targetDir, entry.Name())
+			}
+			existing, err := os.ReadFile(target)
+			if err != nil {
+				continue
+			}
+			tmpl, err := fs.ReadFile(TemplateFS, tmplPath)
+			if err != nil || string(existing) == string(withManagedMarker(target, tmpl)) || string(existing) == string(tmpl) {
+				continue
+			}
+			kind := "unmarked-different"
+			if hasManagedMarker(existing) {
+				kind = "out-of-date"
+			}
+			issues = append(issues, AgentFileIssue{Path: target, Kind: kind})
+		}
+	}
+	return issues
+}
+
 // installFlatAgents copies each file in templateDir directly into targetDir (all platforms except Antigravity).
 func installFlatAgents(cfg Config, spec platformSpec) ([]Result, error) {
 	if err := os.MkdirAll(spec.targetDir, 0o755); err != nil {
@@ -230,24 +340,15 @@ func installFlatAgents(cfg Config, spec platformSpec) ([]Result, error) {
 			continue
 		}
 		targetPath := filepath.Join(spec.targetDir, entry.Name())
-
-		if _, err := os.Stat(targetPath); err == nil && !cfg.Force {
-			results = append(results, Result{Path: targetPath, Action: "skipped (already exists)"})
-			continue
-		}
-
 		data, err := fs.ReadFile(TemplateFS, templateDir+"/"+entry.Name())
 		if err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+		res, err := syncAgentFile(cfg, targetPath, data)
+		if err != nil {
 			return nil, err
 		}
-		action := "installed"
-		if cfg.Force {
-			action = "installed (forced)"
-		}
-		results = append(results, Result{Path: targetPath, Action: action})
+		results = append(results, res)
 	}
 
 	return results, nil
@@ -334,28 +435,18 @@ func installSkills(cfg Config, spec platformSpec) ([]Result, error) {
 		skillName := entry.Name()
 		skillDir := filepath.Join(spec.targetDir, skillName)
 		targetPath := filepath.Join(skillDir, spec.skillFile)
-
-		if _, err := os.Stat(targetPath); err == nil && !cfg.Force {
-			results = append(results, Result{Path: targetPath, Action: "skipped (already exists)"})
-			continue
-		}
-
-		if err := os.MkdirAll(skillDir, 0o755); err != nil {
-			return nil, err
-		}
-
 		data, err := fs.ReadFile(TemplateFS, templateDir+"/"+skillName+"/"+spec.skillFile)
 		if err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
 			return nil, err
 		}
-		action := "installed"
-		if cfg.Force {
-			action = "installed (forced)"
+		res, err := syncAgentFile(cfg, targetPath, data)
+		if err != nil {
+			return nil, err
 		}
-		results = append(results, Result{Path: targetPath, Action: action})
+		results = append(results, res)
 	}
 
 	return results, nil

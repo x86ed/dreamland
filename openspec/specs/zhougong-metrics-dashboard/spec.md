@@ -70,7 +70,7 @@ Every multi-branch analysis surface SHALL reject more than 8 branches/records wi
 
 ### Requirement: Dashboard serves the metric views on localhost only
 
-`zhougong_dashboard_start` SHALL serve an embedded static site on `127.0.0.1` and return its URL. The site SHALL show: calls per agent, tokens per agent, token-to-code ratio per run, number of runs per branch, and the typical flow path (most frequent ordered agent sequence and an agent-to-agent transition count table). Calling start while running SHALL return the existing URL.
+`zhougong_dashboard_start` SHALL serve an embedded static site on `127.0.0.1` and return its URL. The site SHALL show: calls per agent, tokens per agent, token-to-code ratio per run, number of runs per branch, and the typical flow path (most frequent ordered agent sequence and an agent-to-agent transition count table). The server SHALL run in a detached process (hidden `dreamland zhougong-dashboard-serve`, own session) that outlives the calling MCP server and agent, recording its pid and URL in `.dreamland/zhougong-dashboard.json` and removing that file on SIGTERM/SIGINT. Calling start while that process is alive SHALL return the existing URL; a state file naming a dead pid SHALL be replaced.
 
 #### Scenario: Loopback binding
 
@@ -80,7 +80,12 @@ Every multi-branch analysis surface SHALL reject more than 8 branches/records wi
 #### Scenario: Stop releases the port
 
 - **WHEN** `zhougong_dashboard_stop` is called
-- **THEN** the port is closed and a subsequent request fails to connect
+- **THEN** the detached process is terminated, its state file is removed, the port is closed and a subsequent request fails to connect; stopping when nothing runs succeeds
+
+#### Scenario: Dashboard outlives the starting agent
+
+- **WHEN** `zhougong_dashboard_start` was called by an MCP server that has since exited
+- **THEN** the returned URL still serves, and a new MCP server's start returns the same URL
 
 ### Requirement: Dashboard compares multiple branches or features side by side
 
@@ -106,3 +111,73 @@ The dashboard SHALL provide an all-branches overview of every collected branch, 
 - **WHEN** the user selects change slug `foo` and a branch containing that slug exists
 - **THEN** the compare view uses that branch's dataset; if none exists it shows an explicit "no data" column
 
+
+### Requirement: Dashboard defaults to the current branch
+
+`/api/summary` SHALL include `currentBranch` (the git branch checked out at the repo root the store is bound to; empty when unavailable or detached) and `currentDataset` (the name of the dataset resolved for it using the same exact-then-substring matching as compare; empty when none). The landing view SHALL pre-check the current branch in the branch picker and show the detail sections (agent calls and tokens, token-to-code ratio, flow path) only for the selected branches, defaulting to the current branch's dataset when nothing is selected and falling back to all datasets when the current branch has none. The overview SHALL still list all branches, marking the current one.
+
+#### Scenario: Default to current branch
+
+- **WHEN** the repo is on branch `feat-x` and datasets `feat-x` and `other` exist
+- **THEN** `/api/summary` reports `currentBranch` `feat-x`, and the landing view pre-checks `feat-x` and shows the detail sections for it only
+
+#### Scenario: Selection changes detail sections
+
+- **WHEN** the user changes the checked branches in the picker
+- **THEN** the detail sections re-render for the checked branches; with none checked they show the current branch again
+
+#### Scenario: Current branch has no dataset
+
+- **WHEN** no dataset matches the current branch
+- **THEN** the detail sections show all datasets
+
+#### Scenario: Dashboard builds the cache from git on load
+
+- **WHEN** `/api/summary` is requested and any local branch (`refs/heads`) has no cache entry or a stale one (cached head sha differs from the branch head)
+- **THEN** the dashboard returns what is cached immediately with a `collecting` list of branches still being parsed, and parses them in the background (current branch first), writing each cache entry with its head sha; each branch is parsed at most once per head sha and never concurrently; the frontend polls `/api/summary` until `collecting` is empty; a parse failure is reported in a `collectError` string shown in the banner (not retried until the head sha changes); the disk cache plus git are the only sources, independent of `zhougong_collect`
+
+### Requirement: Dashboard charts tokens and code lines side by side
+
+The dashboard SHALL render, with inline SVG and no external assets, paired charts of output tokens (with total tokens as a secondary series) and code lines changed (lines added plus removed, excluding `ExcludedCodeGlobs`) per branch, plus tokens per line, with the same branch order and aligned rows; a scatter of code lines (x) against output tokens (y) with a labelled point per branch and the ratio in a `<title>` tooltip; and a per-run pair of charts (tokens per run, code lines per run) for the selected branches. The current branch is highlighted.
+
+#### Scenario: Paired per-branch charts
+- **WHEN** the dashboard loads with several cached branches
+- **THEN** the tokens panel and code-lines panel list the same branches in the same order, the current branch is marked HEAD, and each row shows tokens/line
+
+#### Scenario: Zero or missing values
+- **WHEN** a branch has zero code lines or no data
+- **THEN** its bar is empty, its ratio shows n/a, and it is omitted from the scatter rather than breaking the chart
+
+### Requirement: Dashboard tracks agents per branch
+
+`/api/summary` SHALL include `agentMatrix` with `branches`, `agents` and `cells[agent][branch]` (`commits`, `output`, `total`) computed from per-branch agent stats, with agents ordered by total tokens descending (ties by name). The dashboard SHALL render it as a heatmap (rows agents, columns branches), a per-branch agent list, and a stacked bar of token share by agent per branch.
+
+#### Scenario: Agent used in some branches only
+- **WHEN** agent `baku` has runs in branch `a` but not `b`
+- **THEN** `agentMatrix` has a zero cell for `baku`/`b` and the heatmap shows it empty
+
+#### Scenario: Stable agent ordering
+- **WHEN** `agentMatrix` is computed twice over the same data
+- **THEN** agents appear in the same order, highest total tokens first
+
+### Requirement: Dashboard is controllable by the user via CLI and slash commands
+
+The public CLI `dreamland zhougong-dashboard start|stop|status` SHALL call the same start/stop logic as the `zhougong_dashboard_start`/`zhougong_dashboard_stop` MCP tools. The slash commands `/drmlnd:zhougong-dashboard-start` and `/drmlnd:zhougong-dashboard-stop` (and bare `/zhougong-dashboard-start`, `/zhougong-dashboard-stop`) SHALL be scaffolded for every supported platform as direct Bash wrappers over the CLI, not routed through Janus or subagents, and SHALL NOT reference the zhougong-only MCP server. Stopping SHALL terminate the process promptly and remove the state file only after the process is gone.
+
+#### Scenario: CLI start reuses a running dashboard
+- **WHEN** `dreamland zhougong-dashboard start` runs while the dashboard is already running
+- **THEN** it prints the existing URL and starts no second process
+
+#### Scenario: CLI stop and status
+- **WHEN** `dreamland zhougong-dashboard stop` runs while the dashboard is running
+- **THEN** it prints a confirmation, the process exits, the port is released, and `status` prints `not running`
+- **WHEN** `status` runs while the dashboard is running
+- **THEN** it prints the URL
+
+#### Scenario: Slash commands are direct wrappers
+- **WHEN** `/drmlnd:zhougong-dashboard-start` or `/drmlnd:zhougong-dashboard-stop` is invoked
+- **THEN** the agent runs the corresponding CLI command via Bash and relays its output without dispatching to Janus or any subagent
+
+#### Scenario: Prompt stop under load
+- **WHEN** stop is requested while a keep-alive connection is open and a background collect is running
+- **THEN** the serve process exits within a few seconds on SIGTERM, escalating to SIGKILL if it lingers, and the port is freed
