@@ -48,6 +48,29 @@ type zhougongCollectOutput struct {
 	ComparisonTable string                 `json:"comparisonTable,omitempty"`
 }
 
+type zhougongSnapshotInput struct {
+	Branches []string `json:"branches,omitempty" description:"branches or archived record names (max 8); empty means every cached branch"`
+	Baseline string   `json:"baseline,omitempty" description:"name to compute deltas against; defaults to the first branch"`
+}
+
+type zhougongSnapshotBranch struct {
+	Name        string                   `json:"name"`
+	Source      string                   `json:"source,omitempty"`
+	Missing     bool                     `json:"missing,omitempty"`
+	Stale       bool                     `json:"stale"`
+	HeadSha     string                   `json:"headSha,omitempty"`
+	CollectedAt string                   `json:"collectedAt,omitempty"`
+	Summary     *zhougongdata.Summary    `json:"summary,omitempty"`
+	Agents      []zhougongdata.AgentStat `json:"agents,omitempty"`
+	Runs        []zhougongdata.Run       `json:"runs,omitempty"`
+}
+
+type zhougongSnapshotOutput struct {
+	Branches    []zhougongSnapshotBranch    `json:"branches"`
+	Comparison  *zhougongdata.CompareResult `json:"comparison,omitempty"`
+	Attribution string                      `json:"attribution"`
+}
+
 type zhougongStartInput struct {
 	Port int `json:"port,omitempty" description:"port to bind on 127.0.0.1; 0 picks a free port"`
 }
@@ -63,7 +86,7 @@ func toolError(err error) *mcp.CallToolResult {
 }
 
 // newZhougongMCPServer builds the *mcp.Server exposing zhougong_collect,
-// zhougong_dashboard_start and zhougong_dashboard_stop, bound to repoRoot. Extracted
+// zhougong_snapshot, zhougong_dashboard_start and zhougong_dashboard_stop, bound to repoRoot. Extracted
 // as a testable seam like newOneiroiMCPServer.
 func newZhougongMCPServer(repoRoot string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "dreamland-zhougong", Version: "0.1.0"}, nil)
@@ -81,16 +104,31 @@ func newZhougongMCPServer(repoRoot string) *mcp.Server {
 			return toolError(fmt.Errorf("at least one branch is required")), zhougongCollectOutput{}, nil
 		}
 		var parsed []zhougongdata.Dataset
+		var toWrite []zhougongdata.Entry
 		for _, b := range in.Branches {
-			if !in.Refresh && store.Has(b) {
-				parsed = append(parsed, store.Resolve(b))
-				continue
+			sha, err := zhougongdata.HeadSha(repoRoot, b)
+			if err != nil {
+				return toolError(err), zhougongCollectOutput{}, nil
+			}
+			if !in.Refresh {
+				if e, ok, err := zhougongdata.Read(repoRoot, b); err == nil && ok && !zhougongdata.IsStale(e, sha) {
+					ds := e.Dataset
+					ds.Name, ds.Source = e.Branch, "live"
+					parsed = append(parsed, ds)
+					continue
+				}
 			}
 			ds, err := zhougongdata.ParseBranch(repoRoot, b)
 			if err != nil {
 				return toolError(err), zhougongCollectOutput{}, nil
 			}
 			parsed = append(parsed, ds)
+			toWrite = append(toWrite, zhougongdata.Entry{Dataset: ds, HeadSha: sha})
+		}
+		for _, e := range toWrite {
+			if err := zhougongdata.Write(repoRoot, e); err != nil {
+				return toolError(err), zhougongCollectOutput{}, nil
+			}
 		}
 		out := zhougongCollectOutput{}
 		for _, ds := range parsed {
@@ -103,6 +141,57 @@ func newZhougongMCPServer(repoRoot string) *mcp.Server {
 				return toolError(err), zhougongCollectOutput{}, nil
 			}
 			out.ComparisonTable = table
+		}
+		return nil, out, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "zhougong_snapshot",
+		Description: "Return cached per-branch metrics (with collectedAt, stale, missing) and a precomputed comparison; call before answering any report or diff question",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in zhougongSnapshotInput) (*mcp.CallToolResult, zhougongSnapshotOutput, error) {
+		if err := zhougongdata.CheckMaxBranches(len(in.Branches)); err != nil {
+			return toolError(err), zhougongSnapshotOutput{}, nil
+		}
+		names := in.Branches
+		if len(names) == 0 {
+			for _, e := range zhougongdata.ReadAll(repoRoot) {
+				names = append(names, e.Branch)
+			}
+			if err := zhougongdata.CheckMaxBranches(len(names)); err != nil {
+				return toolError(err), zhougongSnapshotOutput{}, nil
+			}
+		}
+		archived, err := zhougongdata.LoadArchived(repoRoot)
+		if err != nil {
+			return toolError(err), zhougongSnapshotOutput{}, nil
+		}
+		out := zhougongSnapshotOutput{Branches: []zhougongSnapshotBranch{}, Attribution: zhougongdash.AttributionNote}
+		var sets []zhougongdata.Dataset
+		for _, n := range names {
+			var ds zhougongdata.Dataset
+			sb := zhougongSnapshotBranch{Name: n}
+			if e, ok, err := zhougongdata.Read(repoRoot, n); err == nil && ok {
+				sha, shaErr := zhougongdata.HeadSha(repoRoot, n)
+				ds = e.Dataset
+				ds.Name, ds.Source = e.Branch, "live"
+				sb.Source, sb.HeadSha, sb.CollectedAt = "live", e.HeadSha, e.CollectedAt
+				sb.Stale = shaErr != nil || zhougongdata.IsStale(e, sha)
+			} else if a, ok := findArchived(archived, n); ok {
+				ds = a
+				sb.Source, sb.CollectedAt = "archived", a.MergedAt
+			} else {
+				sb.Missing = true
+				out.Branches = append(out.Branches, sb)
+				continue
+			}
+			sum := zhougongdata.Summarize(ds)
+			sb.Summary, sb.Agents, sb.Runs = &sum, zhougongdata.AgentStats(ds.Runs), ds.Runs
+			out.Branches = append(out.Branches, sb)
+			sets = append(sets, ds)
+		}
+		if len(sets) > 0 {
+			cmp := zhougongdata.Compare(sets, in.Baseline)
+			out.Comparison = &cmp
 		}
 		return nil, out, nil
 	})
@@ -129,4 +218,13 @@ func newZhougongMCPServer(repoRoot string) *mcp.Server {
 	})
 
 	return server
+}
+
+func findArchived(archived []zhougongdata.Dataset, name string) (zhougongdata.Dataset, bool) {
+	for _, a := range archived {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return zhougongdata.Dataset{}, false
 }
