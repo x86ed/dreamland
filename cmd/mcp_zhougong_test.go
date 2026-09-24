@@ -10,8 +10,11 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"dreamland/internal/zhougongdata"
 )
 
 func zhougongGit(t *testing.T, dir, author string, args ...string) {
@@ -67,7 +70,7 @@ func call(t *testing.T, s *mcp.ClientSession, name string, args map[string]any) 
 	return res
 }
 
-func TestMCPZhougong_ListsExactlyThreeTools(t *testing.T) {
+func TestMCPZhougong_ListsExactlyFourTools(t *testing.T) {
 	s := zhougongClient(t, t.TempDir())
 	res, err := s.ListTools(context.Background(), &mcp.ListToolsParams{})
 	if err != nil {
@@ -78,7 +81,7 @@ func TestMCPZhougong_ListsExactlyThreeTools(t *testing.T) {
 		got = append(got, tool.Name)
 	}
 	sort.Strings(got)
-	want := "zhougong_collect,zhougong_dashboard_start,zhougong_dashboard_stop"
+	want := "zhougong_collect,zhougong_dashboard_start,zhougong_dashboard_stop,zhougong_snapshot"
 	if strings.Join(got, ",") != want {
 		t.Errorf("tools=%v", got)
 	}
@@ -102,7 +105,7 @@ func TestMCPZhougong_CollectUnknownBranchAndCap(t *testing.T) {
 		t.Errorf("cap not enforced: %+v", res)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".dreamland")); err == nil {
-		t.Errorf("collect must not write anything")
+		t.Errorf("failed collect must not write anything")
 	}
 }
 
@@ -183,5 +186,178 @@ func TestZhougongArchiveCommand(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".dreamland", "runs", "custom.json")); err != nil {
 		t.Errorf("slug flag: %v", err)
+	}
+}
+
+func structured(t *testing.T, r *mcp.CallToolResult, v any) {
+	t.Helper()
+	if r.IsError {
+		t.Fatalf("tool error: %+v", r.Content)
+	}
+	b, _ := json.Marshal(r.StructuredContent)
+	if err := json.Unmarshal(b, v); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMCPZhougong_CollectWritesCacheAndSkipsFresh(t *testing.T) {
+	root := zhougongRepo(t)
+	s := zhougongClient(t, root)
+	path := filepath.Join(root, ".dreamland", "cache", "zhougong", "feat.json")
+
+	call(t, s, "zhougong_collect", map[string]any{"branches": []string{"feat"}})
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.TrimSpace(gitOut(t, root, "rev-parse", "feat"))
+	if !strings.Contains(string(first), sha) {
+		t.Errorf("cache lacks head sha: %s", first)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	call(t, s, "zhougong_collect", map[string]any{"branches": []string{"feat"}})
+	if again, _ := os.ReadFile(path); string(again) != string(first) {
+		t.Errorf("fresh entry was recollected")
+	}
+	call(t, s, "zhougong_collect", map[string]any{"branches": []string{"feat"}, "refresh": true})
+	if again, _ := os.ReadFile(path); string(again) == string(first) {
+		t.Errorf("refresh=true should rewrite the entry")
+	}
+	zhougongGit(t, root, "morpheus", "commit", "-q", "--allow-empty", "-m", "w\n\nTokens: input=1 output=500 cached=1 total=2000")
+	call(t, s, "zhougong_collect", map[string]any{"branches": []string{"feat"}})
+	if b, _ := os.ReadFile(path); !strings.Contains(string(b), strings.TrimSpace(gitOut(t, root, "rev-parse", "feat"))) {
+		t.Errorf("stale entry not recollected")
+	}
+}
+
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	c := exec.Command("git", args...)
+	c.Dir = dir
+	out, err := c.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+type snapshotOut struct {
+	Branches []struct {
+		Name, Source, HeadSha, CollectedAt string
+		Missing, Stale                     bool
+		Summary                            *struct{ Total int64 }
+	}
+	Comparison *struct {
+		Baseline string
+		Metrics  []struct {
+			Metric string
+			Cells  []struct{ Value, Delta *float64 }
+		}
+	}
+}
+
+func TestMCPZhougong_SnapshotStaleMissingAndComparison(t *testing.T) {
+	root := zhougongRepo(t)
+	zhougongGit(t, root, "Adam", "branch", "other", "feat")
+	s := zhougongClient(t, root)
+	call(t, s, "zhougong_collect", map[string]any{"branches": []string{"feat", "other"}})
+
+	var out snapshotOut
+	structured(t, call(t, s, "zhougong_snapshot", map[string]any{"branches": []string{"feat", "other", "ghost"}, "baseline": "feat"}), &out)
+	if len(out.Branches) != 3 || out.Branches[0].Stale || out.Branches[0].CollectedAt == "" || out.Branches[0].HeadSha == "" {
+		t.Fatalf("branches: %+v", out.Branches)
+	}
+	if !out.Branches[2].Missing || out.Branches[2].Summary != nil {
+		t.Errorf("ghost should be missing: %+v", out.Branches[2])
+	}
+	if out.Comparison == nil || out.Comparison.Baseline != "feat" || len(out.Comparison.Metrics[0].Cells) != 2 {
+		t.Errorf("comparison must cover only non-missing branches: %+v", out.Comparison)
+	}
+
+	zhougongGit(t, root, "morpheus", "commit", "-q", "--allow-empty", "-m", "more")
+	out = snapshotOut{}
+	structured(t, call(t, s, "zhougong_snapshot", map[string]any{"branches": []string{"feat", "other"}}), &out)
+	if !out.Branches[0].Stale || out.Branches[1].Stale {
+		t.Errorf("only feat should be stale: %+v", out.Branches)
+	}
+
+	out = snapshotOut{}
+	structured(t, call(t, s, "zhougong_snapshot", map[string]any{}), &out)
+	if len(out.Branches) != 2 {
+		t.Errorf("empty list should return all cached, got %d", len(out.Branches))
+	}
+}
+
+func TestMCPZhougong_SnapshotMatchesDashboardCompare(t *testing.T) {
+	root := zhougongRepo(t)
+	zhougongGit(t, root, "Adam", "branch", "other", "feat")
+	s := zhougongClient(t, root)
+	call(t, s, "zhougong_collect", map[string]any{"branches": []string{"feat", "other"}})
+
+	var out struct{ Comparison json.RawMessage }
+	structured(t, call(t, s, "zhougong_snapshot", map[string]any{"branches": []string{"feat", "other"}}), &out)
+
+	var u struct{ URL string }
+	structured(t, call(t, s, "zhougong_dashboard_start", map[string]any{}), &u)
+	defer call(t, s, "zhougong_dashboard_stop", map[string]any{})
+	resp, err := http.Get(u.URL + "/api/compare?branches=feat,other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var dash json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&dash); err != nil {
+		t.Fatal(err)
+	}
+	norm := func(b []byte) string {
+		var v any
+		_ = json.Unmarshal(b, &v)
+		n, _ := json.Marshal(v)
+		return string(n)
+	}
+	if norm(out.Comparison) != norm(dash) {
+		t.Errorf("snapshot comparison differs from dashboard:\n%s\n%s", out.Comparison, dash)
+	}
+}
+
+func TestMCPZhougong_DashboardReadsDiskCache(t *testing.T) {
+	root := zhougongRepo(t)
+	call(t, zhougongClient(t, root), "zhougong_collect", map[string]any{"branches": []string{"feat"}})
+
+	s := zhougongClient(t, root) // fresh server, empty in-memory store
+	var u struct{ URL string }
+	structured(t, call(t, s, "zhougong_dashboard_start", map[string]any{}), &u)
+	defer call(t, s, "zhougong_dashboard_stop", map[string]any{})
+	resp, err := http.Get(u.URL + "/api/summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Datasets []struct{ Summary struct{ Name string } }
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Datasets) != 1 || body.Datasets[0].Summary.Name != "feat" {
+		t.Errorf("dashboard should list cached feat: %+v", body)
+	}
+}
+
+func TestMCPZhougong_SnapshotArchivedAndCap(t *testing.T) {
+	root := zhougongRepo(t)
+	if _, err := zhougongdata.WriteArchive(root, "foo", zhougongdata.Dataset{Branch: "feat", Runs: []zhougongdata.Run{{Agent: "morpheus", Commits: 1, Total: 5}}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s := zhougongClient(t, root)
+	var out snapshotOut
+	structured(t, call(t, s, "zhougong_snapshot", map[string]any{"branches": []string{"foo"}}), &out)
+	if len(out.Branches) != 1 || out.Branches[0].Source != "archived" || out.Branches[0].Stale || out.Branches[0].Missing {
+		t.Errorf("archived: %+v", out.Branches)
+	}
+	nine := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"}
+	res := call(t, s, "zhougong_snapshot", map[string]any{"branches": nine})
+	if !res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "8") {
+		t.Errorf("cap not enforced: %+v", res)
 	}
 }

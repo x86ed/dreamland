@@ -82,3 +82,29 @@ func TestRepoZhougongAgentMatchesTemplate(t *testing.T) {
 		}
 	}
 }
+
+// TestZhougongTemplateRequiresSnapshotFirst asserts the scaffolded zhougong agent
+// carries the snapshot-first interpretation requirement and can call the tool.
+func TestZhougongTemplateRequiresSnapshotFirst(t *testing.T) {
+	root := fakeGitRepo(t)
+	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".claude", "agents", "zhougong.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(b)
+	for _, want := range []string{
+		"mcp__dreamland-zhougong__zhougong_snapshot",
+		"Before answering the first question about a report or a branch/feature diff, call `zhougong_snapshot`",
+		"`collectedAt`",
+		"`stale`",
+		"`unattributed` or `untracked`",
+		"commit-author based",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("zhougong.md missing %q", want)
+		}
+	}
+}
