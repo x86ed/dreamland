@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"dreamland/internal/handoff"
+	"dreamland/internal/scaffold"
 )
 
 func newHandoffEnv(t *testing.T, mode string) (*handoffEnv, *bytes.Buffer, *bytes.Buffer) {
@@ -623,5 +624,25 @@ func TestStopCheckBlocksWithStopHookActivePayload(t *testing.T) {
 	}
 	if err := run("stop-check", `{"session_id":"h2"}`); err != nil {
 		t.Fatalf("released entry blocks: %v", err)
+	}
+}
+
+func TestStatusListsAgentFileIssues(t *testing.T) {
+	repo := t.TempDir()
+	dir := filepath.Join(repo, ".claude", "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "morpheus.md"), []byte("legacy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "iktomi.md"), []byte("old\n<!-- "+scaffold.DreamlandManagedMarker+" -->\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var w bytes.Buffer
+	printAgentFileIssues(repo, &w)
+	out := w.String()
+	if !strings.Contains(out, "morpheus.md differs from its template and is not dreamland-managed") || !strings.Contains(out, "iktomi.md is out of date") {
+		t.Errorf("status = %q", out)
 	}
 }

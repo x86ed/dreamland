@@ -18,6 +18,7 @@ import (
 
 	"dreamland/internal/config"
 	"dreamland/internal/handoff"
+	"dreamland/internal/scaffold"
 )
 
 var handoffCmd = &cobra.Command{
@@ -638,6 +639,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	printHandoffStatus(handoff.NewStore(repoRoot), cmd.OutOrStdout())
+	printAgentFileIssues(repoRoot, cmd.OutOrStdout())
 	warnUnknownBoundSubcommands(repoRoot, cmd.ErrOrStderr())
 	return nil
 }
@@ -660,6 +662,17 @@ func printHandoffStatus(store *handoff.Store, w io.Writer) {
 	}
 	if n == 0 {
 		fmt.Fprintln(w, "handoff: no entries")
+	}
+}
+
+func printAgentFileIssues(repoRoot string, w io.Writer) {
+	for _, i := range scaffold.CheckAgentFiles(repoRoot) {
+		switch i.Kind {
+		case "out-of-date":
+			fmt.Fprintf(w, "agents: %s is out of date; run `dreamland init`\n", i.Path)
+		default:
+			fmt.Fprintf(w, "agents: %s differs from its template and is not dreamland-managed; run `dreamland init --force` to adopt it\n", i.Path)
+		}
 	}
 }
 
