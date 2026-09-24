@@ -2,6 +2,16 @@
 let data = null;
 let sortKey = "name", sortDir = 1;
 
+const isCur = n => data.currentDataset && n === data.currentDataset;
+function selected() {
+  const el = $("picker");
+  const sel = el ? [...el.querySelectorAll("input:checked")].map(i => i.value) : [];
+  const pool = sel.length ? sel : (data.currentDataset ? [data.currentDataset] : []);
+  const out = data.datasets.filter(d => pool.includes(d.summary.name));
+  return out.length ? out : data.datasets;
+}
+function renderDetails() { renderAgents(); renderRatio(); renderFlow(); }
+
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt = v => v === null || v === undefined ? "n/a" : (Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2));
@@ -29,8 +39,8 @@ function renderOverview() {
   });
   let h = "<table><tr>" + COLUMNS.map(([k, t]) => `<th data-k="${k}">${t}${k === sortKey ? (sortDir > 0 ? " ▲" : " ▼") : ""}</th>`).join("") + "</tr>";
   for (const s of rows) {
-    h += "<tr>" + COLUMNS.map(([k]) => k === "name"
-      ? `<td>${esc(s.name)}<span class="tag">${esc(s.source)}</span></td>` : `<td>${fmt(s[k])}</td>`).join("") + "</tr>";
+    h += `<tr${isCur(s.name) ? ' class="current"' : ""}>` + COLUMNS.map(([k]) => k === "name"
+      ? `<td>${esc(s.name)}<span class="tag">${esc(s.source)}</span>${isCur(s.name) ? '<span class="tag head">HEAD</span>' : ""}</td>` : `<td>${fmt(s[k])}</td>`).join("") + "</tr>";
   }
   $("overview").innerHTML = h + "</table>";
   $("overview").querySelectorAll("th").forEach(th => th.onclick = () => {
@@ -42,14 +52,14 @@ function renderOverview() {
 }
 
 function renderAgents() {
-  $("agents").innerHTML = data.datasets.map(d =>
+  $("agents").innerHTML = selected().map(d =>
     `<h3>${esc(d.summary.name)}</h3><table><tr><th>agent</th><th>calls (commits)</th><th>runs</th><th>total tokens</th><th>output tokens</th></tr>` +
     d.agents.map(a => `<tr><td>${esc(a.agent)}</td><td>${fmt(a.commits)}</td><td>${fmt(a.runs)}</td><td>${fmt(a.total)}</td><td>${fmt(a.output)}</td></tr>`).join("") +
     `</table>` + bars(d.agents, a => a.agent + " tokens", a => a.total)).join("");
 }
 
 function renderRatio() {
-  $("ratio").innerHTML = data.datasets.map(d =>
+  $("ratio").innerHTML = selected().map(d =>
     `<h3>${esc(d.summary.name)}</h3><table>` + d.runs.map((r, i) =>
       `<tr><td>#${i + 1} ${esc(r.agent)}</td><td style="text-align:left">${r.tokenToCode === null ? "n/a" :
         `<span class="bar" style="width:${Math.min(300, Math.round(r.tokenToCode))}px"></span>${fmt(r.tokenToCode)}`}</td></tr>`).join("") + "</table>").join("");
@@ -64,19 +74,20 @@ function trHtml(tr) {
 }
 function renderFlow() {
   $("flow").innerHTML = "<h3>Typical flow (most frequent across branches)</h3>" + flowHtml(data.typicalFlow) +
-    data.datasets.map(d => `<h3>${esc(d.summary.name)}</h3>${flowHtml(d.summary.flow)}${trHtml(d.transitions)}`).join("");
+    selected().map(d => `<h3>${esc(d.summary.name)}</h3>${flowHtml(d.summary.flow)}${trHtml(d.transitions)}`).join("");
 }
 
 function renderPicker() {
   $("picker").className = "picker";
   $("picker").innerHTML = data.datasets.map(d =>
-    `<label><input type="checkbox" value="${esc(d.summary.name)}"> ${esc(d.summary.name)}</label>`).join("");
+    `<label><input type="checkbox" value="${esc(d.summary.name)}"${isCur(d.summary.name) ? " checked" : ""}> ${esc(d.summary.name)}</label>`).join("");
   const sync = () => {
     const sel = [...$("picker").querySelectorAll("input:checked")].map(i => i.value);
     const cur = $("baseline").value;
     $("baseline").innerHTML = sel.map(n => `<option${n === cur ? " selected" : ""}>${esc(n)}</option>`).join("");
   };
-  $("picker").onchange = sync;
+  $("picker").onchange = () => { sync(); renderDetails(); };
+  sync();
   $("go").onclick = runCompare;
 }
 
@@ -124,6 +135,6 @@ async function load() {
   data = await (await fetch("/api/summary")).json();
   $("banner").textContent = data.attribution;
   $("foot").textContent = "Code lines exclude: " + data.exclusions.join(", ") + ". Token-to-code = output tokens / (lines added + removed); n/a when 0 lines.";
-  renderOverview(); renderAgents(); renderRatio(); renderFlow(); renderPicker();
+  renderPicker(); renderOverview(); renderDetails();
 }
 load();
