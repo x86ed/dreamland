@@ -130,7 +130,7 @@ type Summary struct {
 // Summarize computes totals and per-run averages for ds.
 func Summarize(ds Dataset) Summary {
 	s := Summary{Name: ds.Name, Source: ds.Source, Runs: len(ds.Runs), Unattributed: ds.Unattributed,
-		Untracked: len(ds.Untracked), Skipped: ds.Skipped, Flow: FlowPath(ds.Runs)}
+		Untracked: len(ds.Untracked), Skipped: ds.Skipped, Flow: FlowPath(ds.Runs), NoData: ds.Source == "nodata"}
 	for _, r := range ds.Runs {
 		s.Commits += r.Commits
 		s.Input += r.Input
@@ -236,7 +236,7 @@ func Compare(datasets []Dataset, baseline string) CompareResult {
 	return res
 }
 
-// NoDataSummary is the placeholder column for a selection that resolves to nothing.
-func NoDataSummary(name string) Summary {
-	return Summary{Name: name, NoData: true, Flow: []string{}}
+// NoData returns the placeholder dataset for a selection that resolves to nothing.
+func NoData(name string) Dataset {
+	return Dataset{Name: name, Branch: name, Source: "nodata", Runs: []Run{}, Untracked: []UntrackedCommit{}}
 }
