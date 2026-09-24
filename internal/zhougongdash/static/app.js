@@ -10,7 +10,7 @@ function selected() {
   const out = data.datasets.filter(d => pool.includes(d.summary.name));
   return out.length ? out : data.datasets;
 }
-function renderDetails() { renderAgents(); renderRatio(); renderRunPairs(); renderFlow(); }
+function renderDetails() { renderRadar(); renderAgents(); renderRatio(); renderRunPairs(); renderFlow(); }
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -28,7 +28,7 @@ function bars(rows, label, value) {
   ).join("") + "</table>";
 }
 
-const PALETTE = ["#00fff2","#ff00c8","#fff200","#ff2c1c","#20e8cf","#e3b520","#8a7cff","#ff7a33","#4dffb0","#ff6fae"];
+const PALETTE = ["#00fff2","#ff00c8","#fff200","#ff2c1c","#3d8bff","#a6ff3c","#8a7cff","#ff7a33","#4dffb0","#ff6fae"];
 const short = v => v === null || v === undefined ? "n/a" : Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(1) + "M" : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(1) + "k" : fmt(v);
 const num = v => typeof v === "number" && isFinite(v) ? v : 0;
 const ROW = 28, PW = 420;
@@ -83,26 +83,38 @@ function scatter(rows) {
     (skipped ? `<small> ${skipped} branch(es) omitted (0 lines or no data)</small>` : "");
 }
 
-function vbars(title, vals, color, labels, vals2) {
-  const W = Math.max(260, 30 * vals.length + 60), H = 170, L = 44, B = 22, T = 18;
-  const max = Math.max(1, ...vals.map(num), ...(vals2 || []).map(num)), bw = (W - L - 8) / Math.max(1, vals.length);
-  let g = `<text x="${L}" y="12" fill="#93907f" font-size="11">${esc(title)}</text><line x1="${L}" y1="${H - B}" x2="${W}" y2="${H - B}" stroke="#5c584a"/>` +
-    `<text x="${L - 4}" y="${T + 8}" fill="#5f5c50" font-size="10" text-anchor="end">${short(max)}</text><text x="${L - 4}" y="${H - B}" fill="#5f5c50" font-size="10" text-anchor="end">0</text>`;
-  vals.forEach((v, i) => {
-    const x = L + i * bw, h = (H - B - T) * num(v) / max, h2 = vals2 ? (H - B - T) * num(vals2[i]) / max : 0;
-    if (vals2) g += `<rect x="${x + 1}" y="${H - B - h2}" width="${bw - 3}" height="${h2}" fill="none" stroke="#ff00c8"><title>#${i + 1} ${esc(labels[i])} total tokens: ${fmt(vals2[i])}</title></rect>`;
-    g += `<rect x="${x + 4}" y="${H - B - h}" width="${Math.max(1, bw - 9)}" height="${h}" fill="${color}"><title>#${i + 1} ${esc(labels[i])}: ${v === null || v === undefined ? "n/a" : fmt(v)}</title></rect>` +
-      `<text x="${x + bw / 2}" y="${H - 8}" fill="#5f5c50" font-size="9" text-anchor="middle">${i + 1}</text>`;
+// vbars draws one bar per run in a fixed-width viewBox that scales to the container, so
+// hundreds of runs stay legible: bars are coloured by agent, x ticks are sparse run numbers.
+function vbars(title, vals, labels, colors, extra) {
+  const W = 900, H = 200, L = 52, R = 8, T = 22, B = 24, n = Math.max(1, vals.length);
+  const max = Math.max(1, ...vals.map(num)), ph = H - B - T, bw = (W - L - R) / n;
+  const y = v => H - B - ph * Math.sqrt(num(v) / max); // sqrt scale: one huge run must not flatten the rest
+  let g = `<text x="${L}" y="13" fill="#93907f" font-size="12">${esc(title)} <tspan fill="#5f5c50">(sqrt scale)</tspan></text>`;
+  [0, .25, .5, .75, 1].forEach(f => {
+    const yy = H - B - ph * f;
+    g += `<line x1="${L}" y1="${yy}" x2="${W - R}" y2="${yy}" stroke="${f ? "#2a2922" : "#5c584a"}"/>` +
+      `<text x="${L - 6}" y="${yy + 4}" fill="#93907f" font-size="11" text-anchor="end">${short(Math.round(max * f * f))}</text>`;
   });
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(title)}">${g}</svg>`;
+  vals.forEach((v, i) => {
+    const x = L + i * bw, top = y(v), w = Math.max(1, bw - (bw > 6 ? 2 : 0.5));
+    g += `<rect x="${x}" y="${top}" width="${w}" height="${Math.max(0, H - B - top)}" fill="${colors[i]}"><title>#${i + 1} ${esc(labels[i])}: ${v === null || v === undefined ? "n/a" : fmt(v)}${extra ? " (total tokens " + fmt(extra[i]) + ")" : ""}</title></rect>`;
+  });
+  const step = Math.max(1, Math.ceil(n / Math.floor((W - L - R) / 42)));
+  for (let i = 0; i < n; i += step) {
+    g += `<text x="${L + i * bw + bw / 2}" y="${H - 8}" fill="#93907f" font-size="11" text-anchor="middle">${i + 1}</text>`;
+  }
+  return `<svg class="chart wide" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)}">${g}</svg>`;
 }
 
 function runPair(d) {
   if (!d.runs.length) return "<em>no runs</em>";
-  const labels = d.runs.map(r => r.agent);
-  return `<div class="pair">` +
-    vbars("OUTPUT TOKENS per run (outline = total)", d.runs.map(r => r.output), "#00fff2", labels, d.runs.map(r => r.total)) +
-    vbars("CODE LINES per run", d.runs.map(r => r.linesAdded + r.linesRemoved), "#fff200", labels) + `</div>`;
+  const agents = [...new Set(d.runs.map(r => r.agent))];
+  const col = a => PALETTE[agents.indexOf(a) % PALETTE.length];
+  const labels = d.runs.map(r => r.agent), colors = d.runs.map(r => col(r.agent));
+  const legend = `<div class="legend">` + agents.map(a => `<span><i class="swatch" style="background:${col(a)}"></i>${esc(a)}</span>`).join("") + `<em>x axis: run number in commit order</em></div>`;
+  return legend + `<div class="pair">` +
+    vbars("OUTPUT TOKENS per run", d.runs.map(r => r.output), labels, colors, d.runs.map(r => r.total)) +
+    vbars("CODE LINES (added + removed) per run", d.runs.map(r => r.linesAdded + r.linesRemoved), labels, colors) + `</div>`;
 }
 function renderRunPairs() {
   $("runpairs").innerHTML = selected().map(d => `<h3>${esc(d.summary.name)}${isCur(d.summary.name) ? '<span class="tag head">HEAD</span>' : ""}</h3>${runPair(d)}`).join("");
@@ -148,6 +160,63 @@ function stacked(m) {
   });
   const legend = m.agents.map(a => `<span class="tag" style="color:${agentColor(m, a)};border-color:${agentColor(m, a)}">${esc(a)}</span>`).join("");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="token share by agent">${g}</svg><div>${legend}</div>`;
+}
+
+// Radar ("star") chart: one polygon per agent over the selected branches. Each axis is normalised
+// to 0..1 against the largest agent on that axis; raw values are in the hover tooltips.
+const RADAR_AXES = [
+  ["calls", "calls (commits)", a => a.calls],
+  ["runs", "runs", a => a.runs],
+  ["total", "total tokens", a => a.total],
+  ["output", "output tokens", a => a.output],
+  ["lines", "code lines", a => a.lines],
+  ["ratio", "tokens/line", a => a.lines > 0 ? a.output / a.lines : null],
+];
+function radarAgents() {
+  const by = new Map();
+  for (const d of selected()) {
+    const get = n => { if (!by.has(n)) by.set(n, { agent: n, calls: 0, runs: 0, total: 0, output: 0, lines: 0 }); return by.get(n); };
+    for (const a of d.agents) { const x = get(a.agent); x.calls += num(a.commits); x.runs += num(a.runs); x.total += num(a.total); x.output += num(a.output); }
+    for (const r of d.runs) get(r.agent).lines += num(r.linesAdded) + num(r.linesRemoved);
+  }
+  return [...by.values()].sort((a, b) => a.agent.localeCompare(b.agent));
+}
+function renderRadar() {
+  const el = $("radar");
+  if (!el) return;
+  const agents = radarAgents();
+  if (!agents.length) { el.innerHTML = "<em>no agent data for the selected branches</em>"; return; }
+  const all = data.agentMatrix ? data.agentMatrix.agents : [];
+  const col = a => all.includes(a) ? agentColor(data.agentMatrix, a) : PALETTE[agents.findIndex(x => x.agent === a) % PALETTE.length];
+  const W = 640, H = 560, cx = W / 2, cy = H / 2 + 5, R = 190, n = RADAR_AXES.length;
+  const ang = i => -Math.PI / 2 + 2 * Math.PI * i / n;
+  const pt = (i, f) => [cx + R * f * Math.cos(ang(i)), cy + R * f * Math.sin(ang(i))];
+  const maxes = RADAR_AXES.map(([, , f]) => Math.max(0, ...agents.map(a => num(f(a)))));
+  let g = "";
+  [.25, .5, .75, 1].forEach(f => {
+    g += `<polygon points="${RADAR_AXES.map((_, i) => pt(i, f).join(",")).join(" ")}" fill="none" stroke="${f === 1 ? "#5c584a" : "#2a2922"}"/>` +
+      `<text x="${cx + 4}" y="${cy - R * f - 2}" fill="#5f5c50" font-size="10">${Math.round(f * 100)}%</text>`;
+  });
+  RADAR_AXES.forEach(([, label], i) => {
+    const [x, y] = pt(i, 1), [lx, ly] = pt(i, 1.13), c = Math.cos(ang(i));
+    g += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="#2a2922"/>` +
+      `<text x="${lx}" y="${ly + 4}" fill="#93907f" font-size="11" text-anchor="${Math.abs(c) < .2 ? "middle" : c > 0 ? "start" : "end"}">${esc(label)}<tspan x="${lx}" dy="13" fill="#5f5c50" font-size="10">max ${short(maxes[i])}</tspan></text>`;
+  });
+  // Draw larger polygons first so small ones stay visible on top.
+  const norm = a => RADAR_AXES.map(([, , f], i) => { const v = f(a); return v !== null && maxes[i] > 0 ? num(v) / maxes[i] : 0; });
+  const order = agents.map(a => ({ a, v: norm(a) })).sort((p, q) => q.v.reduce((s, x) => s + x, 0) - p.v.reduce((s, x) => s + x, 0));
+  for (const { a, v } of order) {
+    const c = col(a.agent), raw = RADAR_AXES.map(([, l, f]) => `${l}: ${f(a) === null ? "n/a (0 lines)" : fmt(f(a))}`).join("\n");
+    g += `<polygon points="${v.map((f, i) => pt(i, f).join(",")).join(" ")}" fill="${c}" fill-opacity=".14" stroke="${c}" stroke-width="2" stroke-linejoin="round"><title>${esc(a.agent)}\n${esc(raw)}</title></polygon>`;
+    v.forEach((f, i) => {
+      const [x, y] = pt(i, f), val = RADAR_AXES[i][2](a);
+      g += `<circle cx="${x}" cy="${y}" r="4" fill="${c}"><title>${esc(a.agent)} - ${esc(RADAR_AXES[i][1])}: ${val === null ? "n/a (0 lines)" : fmt(val)} (${Math.round(f * 100)}% of max)</title></circle>`;
+    });
+  }
+  const legend = `<div class="legend">` + agents.map(a => `<span><i class="swatch" style="background:${col(a.agent)}"></i>${esc(a.agent)}</span>`).join("") +
+    `<em>axes normalised 0..100% to the largest agent; lower tokens/line is more efficient; agents with 0 lines plot 0 on tokens/line</em></div>`;
+  el.innerHTML = legend + `<svg class="chart wide radar" viewBox="0 0 ${W} ${H}" role="img" aria-label="agent radar chart">${g}</svg>` +
+    (agents.length === 1 ? "<small>only one agent in the selected branches; it defines the maximum on every axis</small>" : "");
 }
 
 function renderOverview() {
@@ -268,3 +337,40 @@ async function load() {
 }
 $("banner").textContent = "collecting current branch...";
 load();
+
+// Tabs: one per <section>, labelled by its <h2>; the choice lives in the URL hash.
+(function tabs() {
+  const secs = [...document.querySelectorAll("main > section")];
+  const nav = $("tabs");
+  if (!secs.length || !nav) return;
+  document.querySelector("main").classList.add("tabbed");
+  const btns = secs.map(s => {
+    const b = document.createElement("button");
+    b.type = "button"; b.role = "tab"; b.id = "btn-" + s.id;
+    b.setAttribute("aria-controls", s.id);
+    b.textContent = s.querySelector("h2").textContent;
+    b.onclick = () => show(s.id, true);
+    s.setAttribute("role", "tabpanel"); s.setAttribute("aria-labelledby", b.id);
+    nav.appendChild(b);
+    return b;
+  });
+  function show(id, push) {
+    if (!secs.some(s => s.id === id)) id = secs[0].id;
+    secs.forEach((s, i) => {
+      const on = s.id === id;
+      s.hidden = !on;
+      btns[i].setAttribute("aria-selected", on);
+      btns[i].tabIndex = on ? 0 : -1;
+    });
+    if (push) history.replaceState(null, "", "#" + id);
+  }
+  nav.onkeydown = e => {
+    const i = btns.findIndex(b => b.getAttribute("aria-selected") === "true");
+    const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (!d) return;
+    const n = (i + d + btns.length) % btns.length;
+    show(secs[n].id, true); btns[n].focus();
+  };
+  window.onhashchange = () => show(location.hash.slice(1));
+  show(location.hash.slice(1));
+})();

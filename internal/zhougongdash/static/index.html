@@ -11,20 +11,22 @@
 <body>
 <header><h1>ZHOUGONG//METRICS<span class="cursor"></span></h1><div id="banner" class="banner"></div></header>
 <main>
-<section><h2>All branches</h2><div id="overview"></div></section>
-<section><h2>Tokens vs code lines</h2><div id="graphs"></div></section>
-<section><h2>Agents per branch</h2><div id="agentmatrix"></div></section>
-<section><h2>Compare</h2>
+<nav id="tabs" role="tablist" aria-label="Dashboard sections"></nav>
+<section id="tab-all-branches"><h2>All branches</h2><div id="overview"></div></section>
+<section id="tab-tokens-vs-lines"><h2>Tokens vs code lines</h2><div id="graphs"></div></section>
+<section id="tab-agents-per-branch"><h2>Agents per branch</h2><div id="agentmatrix"></div></section>
+<section id="tab-agent-radar"><h2>Agent radar</h2><div id="radar"></div></section>
+<section id="tab-compare"><h2>Compare</h2>
   <div id="picker"></div>
   <label>Baseline <select id="baseline"></select></label>
   <button id="go">Compare</button>
   <div id="cmp-error" class="error"></div>
   <div id="compare"></div>
 </section>
-<section><h2>Agent calls and tokens</h2><div id="agents"></div></section>
-<section><h2>Token-to-code ratio per run</h2><div id="ratio"></div></section>
-<section><h2>Tokens and code lines per run</h2><div id="runpairs"></div></section>
-<section><h2>Flow path</h2><div id="flow"></div></section>
+<section id="tab-agent-calls"><h2>Agent calls and tokens</h2><div id="agents"></div></section>
+<section id="tab-token-ratio"><h2>Token-to-code ratio per run</h2><div id="ratio"></div></section>
+<section id="tab-per-run"><h2>Tokens and code lines per run</h2><div id="runpairs"></div></section>
+<section id="tab-flow-path"><h2>Flow path</h2><div id="flow"></div></section>
 <footer id="foot"></footer>
 </main>
 <script src="app.js"></script>
