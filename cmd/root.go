@@ -10,8 +10,8 @@ import (
 
 var (
 	rootCmd = &cobra.Command{
-		Use:              "dreamland",
-		Short:            "Dreamland CLI",
+		Use:               "dreamland",
+		Short:             "Dreamland CLI",
 		PersistentPreRunE: loadConfig,
 	}
 	currentConfig *config.Config

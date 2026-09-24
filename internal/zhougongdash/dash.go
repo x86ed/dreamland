@@ -57,12 +57,25 @@ func (s *Store) Has(name string) bool {
 	return false
 }
 
-// All returns live datasets followed by archived records. An archived record whose
+// All returns live datasets (disk cache entries, overridden by in-memory ones) followed by archived records. An archived record whose
 // name collides with a live dataset is renamed "<name> (archived)".
 func (s *Store) All() []zhougongdata.Dataset {
 	s.mu.Lock()
-	out := append([]zhougongdata.Dataset{}, s.live...)
+	live := append([]zhougongdata.Dataset{}, s.live...)
 	s.mu.Unlock()
+	out := []zhougongdata.Dataset{}
+	inMem := map[string]bool{}
+	for _, d := range live {
+		inMem[d.Name] = true
+	}
+	for _, e := range zhougongdata.ReadAll(s.repoRoot) {
+		if !inMem[e.Branch] {
+			ds := e.Dataset
+			ds.Name, ds.Source = e.Branch, "live"
+			out = append(out, ds)
+		}
+	}
+	out = append(out, live...)
 	taken := map[string]bool{}
 	for _, d := range out {
 		taken[d.Name] = true

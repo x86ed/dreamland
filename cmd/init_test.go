@@ -856,3 +856,29 @@ func TestWriteCodexOtelConfig_Declined(t *testing.T) {
 		t.Errorf("expected skip message, got: %q", buf.String())
 	}
 }
+
+// TestInitGitignoresZhougongCache: the zhougong report cache is regenerated local state.
+func TestInitGitignoresZhougongCache(t *testing.T) {
+	root := makeGitRepo(t)
+
+	orig := wizardRunner
+	wizardRunner = stubWizard(&wizardResult{
+		tool:           "Claude Code",
+		language:       "Go",
+		testCommand:    "go test ./...",
+		docCommand:     "godoc",
+		versionCommand: "go version",
+	}, nil)
+	t.Cleanup(func() { wizardRunner = orig })
+
+	if _, err := runInitWithBuf(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), ".dreamland/cache/") {
+		t.Errorf("expected .gitignore to contain .dreamland/cache/, got:\n%s", data)
+	}
+}

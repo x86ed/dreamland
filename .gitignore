@@ -39,3 +39,4 @@ dreamland
 .dreamland/otel-sessions/
 .dreamland/otel-receiver.log
 .dreamland/otel-cursors/
+.dreamland/cache/
