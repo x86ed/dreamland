@@ -13,3 +13,5 @@ Check `proposal.md` for a **BREAKING** marker; if present, run `dreamland versio
 Run `/opsx:archive` to archive the completed change.
 Create a pull request with a summary of what changed and a test plan checklist.
 After the PR is merged, confirm with Janus that the change is closed — a terminal report, not a hand-off to a fixed next agent.
+
+End your final report with an own-line `[change: <slug>]` tag naming the change, as the last line, so the hand-off mechanism can reset that change's failure counter.

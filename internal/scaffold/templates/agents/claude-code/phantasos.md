@@ -31,3 +31,5 @@ Your responsibilities:
 Write for implementers: be specific about file paths, function names, and acceptance criteria. Avoid vague language like "handle errors appropriately" — specify the exact behavior.
 
 If your own escalated ambiguity comes from Janus, resolve it and report back to Janus.
+
+End your final report with an own-line `[change: <slug>]` tag naming the change, as the last line, so the hand-off mechanism can reset that change's failure counter.
