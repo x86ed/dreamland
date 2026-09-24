@@ -28,6 +28,29 @@ type Store struct {
 	repoRoot string
 	mu       sync.Mutex
 	live     []zhougongdata.Dataset
+	collect  sync.Mutex
+}
+
+// EnsureCurrent collects the current branch's dataset (once per HEAD sha) into the disk cache
+// and the live store. Concurrent callers serialize, so the second finds the fresh cache entry.
+func (s *Store) EnsureCurrent() error {
+	branch := s.CurrentBranch()
+	if branch == "" {
+		return nil
+	}
+	s.collect.Lock()
+	defer s.collect.Unlock()
+	ds, e, err := zhougongdata.Collect(s.repoRoot, branch, false)
+	if err != nil {
+		return err
+	}
+	if e != nil {
+		if err := zhougongdata.Write(s.repoRoot, *e); err != nil {
+			return err
+		}
+	}
+	s.Put(ds)
+	return nil
 }
 
 // NewStore returns a Store that reads archived records from repoRoot.
@@ -205,6 +228,10 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func (d *Dashboard) summary(w http.ResponseWriter, _ *http.Request) {
+	collectErr := ""
+	if err := d.store.EnsureCurrent(); err != nil {
+		collectErr = err.Error()
+	}
 	all := d.store.All()
 	entries := []Entry{}
 	for _, ds := range all {
@@ -222,6 +249,7 @@ func (d *Dashboard) summary(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"currentBranch":  current,
 		"currentDataset": currentDataset,
+		"collectError":   collectErr,
 		"datasets":       entries,
 		"typicalFlow":    zhougongdata.TypicalFlow(all),
 		"exclusions":     zhougongdata.ExcludedCodeGlobs,

@@ -139,3 +139,24 @@ func HeadSha(repoRoot, branch string) (string, error) {
 	}
 	return strings.TrimSpace(out), nil
 }
+
+// Collect returns the dataset for branch, reusing a fresh cache entry unless refresh is set.
+// When it had to parse, the returned Entry is non-nil and the caller should Write it.
+func Collect(repoRoot, branch string, refresh bool) (Dataset, *Entry, error) {
+	sha, err := HeadSha(repoRoot, branch)
+	if err != nil {
+		return Dataset{}, nil, err
+	}
+	if !refresh {
+		if e, ok, err := Read(repoRoot, branch); err == nil && ok && !IsStale(e, sha) {
+			ds := e.Dataset
+			ds.Name, ds.Source = e.Branch, "live"
+			return ds, nil, nil
+		}
+	}
+	ds, err := ParseBranch(repoRoot, branch)
+	if err != nil {
+		return Dataset{}, nil, err
+	}
+	return ds, &Entry{Dataset: ds, HeadSha: sha}, nil
+}

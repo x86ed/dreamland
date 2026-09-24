@@ -123,24 +123,14 @@ func newZhougongMCPServer(repoRoot string) *mcp.Server {
 		var parsed []zhougongdata.Dataset
 		var toWrite []zhougongdata.Entry
 		for _, b := range in.Branches {
-			sha, err := zhougongdata.HeadSha(repoRoot, b)
-			if err != nil {
-				return toolError(err), zhougongCollectOutput{}, nil
-			}
-			if !in.Refresh {
-				if e, ok, err := zhougongdata.Read(repoRoot, b); err == nil && ok && !zhougongdata.IsStale(e, sha) {
-					ds := e.Dataset
-					ds.Name, ds.Source = e.Branch, "live"
-					parsed = append(parsed, ds)
-					continue
-				}
-			}
-			ds, err := zhougongdata.ParseBranch(repoRoot, b)
+			ds, e, err := zhougongdata.Collect(repoRoot, b, in.Refresh)
 			if err != nil {
 				return toolError(err), zhougongCollectOutput{}, nil
 			}
 			parsed = append(parsed, ds)
-			toWrite = append(toWrite, zhougongdata.Entry{Dataset: ds, HeadSha: sha})
+			if e != nil {
+				toWrite = append(toWrite, *e)
+			}
 		}
 		for _, e := range toWrite {
 			if err := zhougongdata.Write(repoRoot, e); err != nil {
