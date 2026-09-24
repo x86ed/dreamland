@@ -109,7 +109,6 @@ func toolError(err error) *mcp.CallToolResult {
 func newZhougongMCPServer(repoRoot string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "dreamland-zhougong", Version: "0.1.0"}, nil)
 	store := zhougongdash.NewStore(repoRoot)
-	dash := zhougongdash.New(store)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "zhougong_collect",
@@ -216,9 +215,9 @@ func newZhougongMCPServer(repoRoot string) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "zhougong_dashboard_start",
-		Description: "Start the localhost metrics dashboard (127.0.0.1 only) and return its URL",
+		Description: "Start the localhost metrics dashboard (127.0.0.1 only) in a detached process that outlives this agent, and return its URL",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in zhougongStartInput) (*mcp.CallToolResult, zhougongURLOutput, error) {
-		url, err := dash.Start(in.Port)
+		url, err := startZhougongDashboard(repoRoot, in.Port)
 		if err != nil {
 			return toolError(err), zhougongURLOutput{}, nil
 		}
@@ -229,7 +228,7 @@ func newZhougongMCPServer(repoRoot string) *mcp.Server {
 		Name:        "zhougong_dashboard_stop",
 		Description: "Stop the localhost metrics dashboard and release its port",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ zhougongEmpty) (*mcp.CallToolResult, zhougongEmpty, error) {
-		if err := dash.Stop(); err != nil {
+		if err := stopZhougongDashboard(repoRoot); err != nil {
 			return toolError(err), zhougongEmpty{}, nil
 		}
 		return nil, zhougongEmpty{}, nil

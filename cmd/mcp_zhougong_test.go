@@ -3,12 +3,14 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,8 +49,40 @@ func zhougongRepo(t *testing.T) string {
 	return dir
 }
 
+var (
+	dreamlandBinOnce sync.Once
+	dreamlandBinPath string
+	dreamlandBinErr  error
+)
+
+// useRealDreamlandBinary points osExecutable at a freshly built dreamland binary, since the
+// detached dashboard child must not be the test binary.
+func useRealDreamlandBinary(t *testing.T) {
+	t.Helper()
+	dreamlandBinOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "dreamland-bin")
+		if err != nil {
+			dreamlandBinErr = err
+			return
+		}
+		dreamlandBinPath = filepath.Join(dir, "dreamland")
+		c := exec.Command("go", "build", "-o", dreamlandBinPath, "..")
+		if out, err := c.CombinedOutput(); err != nil {
+			dreamlandBinErr = fmt.Errorf("go build: %v\n%s", err, out)
+		}
+	})
+	if dreamlandBinErr != nil {
+		t.Fatal(dreamlandBinErr)
+	}
+	orig := osExecutable
+	osExecutable = func() (string, error) { return dreamlandBinPath, nil }
+	t.Cleanup(func() { osExecutable = orig })
+}
+
 func zhougongClient(t *testing.T, root string) *mcp.ClientSession {
 	t.Helper()
+	useRealDreamlandBinary(t)
+	t.Cleanup(func() { _ = stopZhougongDashboard(root) })
 	ctx := context.Background()
 	st, ct := mcp.NewInMemoryTransports()
 	if _, err := newZhougongMCPServer(root).Connect(ctx, st, nil); err != nil {
@@ -415,5 +449,54 @@ func TestMCPZhougong_NewAgentIssueConfirmWithoutPreview(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Error("gh called")
+	}
+}
+
+func TestMCPZhougong_DashboardOutlivesServerAndStateFileTracksIt(t *testing.T) {
+	root := zhougongRepo(t)
+	s := zhougongClient(t, root)
+	var u struct{ URL string }
+	structured(t, call(t, s, "zhougong_dashboard_start", map[string]any{}), &u)
+
+	st, ok := readZhougongDashState(root)
+	if !ok || st.URL != u.URL || !processAlive(st.PID) || st.PID == os.Getpid() {
+		t.Fatalf("state=%+v ok=%v url=%q", st, ok, u.URL)
+	}
+
+	// A new server (the previous agent exited) sees the same dashboard, still serving.
+	_ = s.Close()
+	s2 := zhougongClient(t, root)
+	var u2 struct{ URL string }
+	structured(t, call(t, s2, "zhougong_dashboard_start", map[string]any{}), &u2)
+	if u2.URL != u.URL {
+		t.Fatalf("second server url %q != %q", u2.URL, u.URL)
+	}
+	resp, err := http.Get(u.URL + "/api/summary")
+	if err != nil {
+		t.Fatalf("dashboard died with its starter: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if r := call(t, s2, "zhougong_dashboard_stop", map[string]any{}); r.IsError {
+		t.Fatalf("stop: %+v", r.Content)
+	}
+	if processAlive(st.PID) {
+		t.Errorf("pid %d still alive after stop", st.PID)
+	}
+	if _, ok := readZhougongDashState(root); ok {
+		t.Errorf("state file should be removed after stop")
+	}
+}
+
+func TestMCPZhougong_StartReplacesStaleState(t *testing.T) {
+	root := zhougongRepo(t)
+	s := zhougongClient(t, root)
+	if err := writeZhougongDashState(root, zhougongDashState{PID: 2147483646, URL: "http://127.0.0.1:1"}); err != nil {
+		t.Fatal(err)
+	}
+	var u struct{ URL string }
+	structured(t, call(t, s, "zhougong_dashboard_start", map[string]any{}), &u)
+	if u.URL == "http://127.0.0.1:1" || !strings.HasPrefix(u.URL, "http://127.0.0.1:") {
+		t.Errorf("stale state reused: %q", u.URL)
 	}
 }

@@ -70,7 +70,7 @@ Every multi-branch analysis surface SHALL reject more than 8 branches/records wi
 
 ### Requirement: Dashboard serves the metric views on localhost only
 
-`zhougong_dashboard_start` SHALL serve an embedded static site on `127.0.0.1` and return its URL. The site SHALL show: calls per agent, tokens per agent, token-to-code ratio per run, number of runs per branch, and the typical flow path (most frequent ordered agent sequence and an agent-to-agent transition count table). Calling start while running SHALL return the existing URL.
+`zhougong_dashboard_start` SHALL serve an embedded static site on `127.0.0.1` and return its URL. The site SHALL show: calls per agent, tokens per agent, token-to-code ratio per run, number of runs per branch, and the typical flow path (most frequent ordered agent sequence and an agent-to-agent transition count table). The server SHALL run in a detached process (hidden `dreamland zhougong-dashboard-serve`, own session) that outlives the calling MCP server and agent, recording its pid and URL in `.dreamland/zhougong-dashboard.json` and removing that file on SIGTERM/SIGINT. Calling start while that process is alive SHALL return the existing URL; a state file naming a dead pid SHALL be replaced.
 
 #### Scenario: Loopback binding
 
@@ -80,7 +80,12 @@ Every multi-branch analysis surface SHALL reject more than 8 branches/records wi
 #### Scenario: Stop releases the port
 
 - **WHEN** `zhougong_dashboard_stop` is called
-- **THEN** the port is closed and a subsequent request fails to connect
+- **THEN** the detached process is terminated, its state file is removed, the port is closed and a subsequent request fails to connect; stopping when nothing runs succeeds
+
+#### Scenario: Dashboard outlives the starting agent
+
+- **WHEN** `zhougong_dashboard_start` was called by an MCP server that has since exited
+- **THEN** the returned URL still serves, and a new MCP server's start returns the same URL
 
 ### Requirement: Dashboard compares multiple branches or features side by side
 
