@@ -259,6 +259,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		OtelEndpoint:       otelEndpoint,
 		BedrockLogGroup:    res.bedrockLogGroup,
 	}
+	if existing != nil {
+		cfg.HandoffEnforcement = existing.HandoffEnforcement
+	}
 
 	if err := config.Save(cwd, cfg); err != nil {
 		return err
