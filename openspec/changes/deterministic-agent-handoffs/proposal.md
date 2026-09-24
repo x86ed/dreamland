@@ -19,12 +19,13 @@ Facts checked in the repository while drafting:
 
 ## What Changes
 
-- **New `dreamland handoff` command family** (`cmd/handoff.go`, `internal/handoff/`): a single edge table (`internal/handoff/edges.go`) and a pure `Next(from, tag, counter) -> Directive` function, plus four hook modes:
+- **New `dreamland handoff` command family** (`cmd/handoff.go`, `internal/handoff/`): a single edge table (`internal/handoff/edges.go`) and a pure `Next(from, tag, counter) -> Directive` function, plus hook modes (`record`, `inject`, `enforce`, `stop-check`, `prompt`):
   - `handoff record --hook` (`SubagentStop`): parses the finished subagent's report for its machine-readable tags, computes the next target, updates the per-change failure counter, and writes a pending directive.
   - `handoff inject --hook` (`PostToolUse`, matcher `Task|Agent`): emits the directive as `additionalContext` into the dispatcher's context the moment the subagent's result returns: "Your next call MUST be `Agent(subagent_type=phobetor)`".
   - `handoff enforce --hook` (`PreToolUse`, matcher `Task|Agent`): while a directive is pending, an `Agent` call to any other target is blocked (exit 2) with a message naming the required target; the matching call clears the directive.
   - `handoff stop-check --hook` (`Stop`): the session cannot end while a directive is unsatisfied; it is blocked with the required next call as the reason, up to a bounded number of times.
   - `handoff next` (CLI, no hook): prints the directive for `--from`/`--verdict`/`--change`; used by platforms without hooks and by tests.
+- **Live-session corrections (added after an interactive test).** A `handoff prompt --hook` on `UserPromptSubmit` replaces the naive `release`: it releases only on a real human prompt and injects on the harness's background-completion notification (which arrives as a `UserPromptSubmit`); `inject` no longer depends on `PostToolUse` ordering, so background (asynchronous) and foreground dispatch both work; each mode is its own hook entry; the dispatcher is identified by absence of `agent_id`; `stop-check` ignores `stop_hook_active`; `phobetor` `pass` goes to `baku` only when the change's `tasks.md` is fully ticked, otherwise a partial-pass report; `phantasos`/`baku` reports carry `[change: <slug>]` and counter files record the writing session; `dreamland init` refreshes marker-carrying agent files when templates change. The stale-binary SHA check is deliberately left to a separate change (design Decision 13).
 - **Machine-readable report tags.** `morpheus` and `iktomi` end their report with `[handoff: complete]` or `[handoff: blocked]`. `phobetor` ends with `[verdict: pass]`, `[verdict: fail]`, or `[verdict: spec-defect]`, plus `[change: <slug>]` when it knows it. Nothing in the mechanism judges prose.
 - **Per-change failure counter** in the per-user state directory (`<root>/handoff/<repo-id>/<change>.json`), locked and atomically written, so it survives across subagent turns and parallel sessions. First `phobetor` failure for a change -> `morpheus`; a failure after that retry -> `phantasos`. Reset on pass, and when `phantasos` completes a re-spec turn.
 - **`iktomi-always-handoff-phobetor` is folded in**, not duplicated: this change carries all six platform iktomi template edits (superseding that change's unchecked tasks), the same unconditional rule, and the same "blocked reports a blocker to Janus" rule, now with a tag the hook reads. See design.md, Decision 9.
@@ -36,7 +37,7 @@ Facts checked in the repository while drafting:
 
 ### New Capabilities
 
-- `deterministic-handoffs`: the edge table, report tags, failure counter, four hook modes, enforcement and its bounded escape, stale-binary tolerance, Windows safety, drift test, and platform scope.
+- `deterministic-handoffs`: the edge table, report tags, failure counter, hook modes, enforcement and its bounded escape, stale-binary tolerance, Windows safety, drift test, and platform scope.
 
 ### Modified Capabilities
 
@@ -48,4 +49,5 @@ Facts checked in the repository while drafting:
 - **Templates** (`hypnos`-owned): `internal/scaffold/templates/agents/{claude-code,cursor,codex,kiro,antigravity,github-copilot}/{morpheus,iktomi,phobetor,nyx}.*`; `hooks/bindings/claude-code/settings-patch.json` (not `hypnos`-owned; `nyx`/`morpheus` work) gains the four bindings.
 - **Live files** (`.claude/agents/*.md`, `.claude/settings.json`) are re-synced by `dreamland init`, not hand-edited.
 - **Overlaps and order** (details in design.md, "Overlap and sequencing"): `iktomi-always-handoff-phobetor` (folded in; archive this change, then archive that one with `--skip-specs`), `deterministic-routing-and-janus-guard` (shares `settings-patch.json` and the state root; this change is order-independent from it but its live task 0 verification can be shared), `claude-code-parity` (task 9.4 live re-sync is the same re-sync), `harden-commit-hook-enforcement` (archived; reused mechanism).
+- **Also affected by the live findings**: `internal/scaffold/scaffold.go` (agent-file marker and refresh), `cmd/status.go`/`cmd/init.go` (out-of-date agent-file report), `internal/handoff` (`tasks.md` reader, counter `session_id`), `phantasos.*`/`baku.*` templates on six platforms (`[change: <slug>]`).
 - **Behavior change** on Claude Code: after installing, a dispatcher that receives a `morpheus`/`iktomi`/`phobetor`/`nyx` report cannot end its turn or dispatch a different agent until the required call is made (bounded; escape and opt-out in design.md).
