@@ -40,3 +40,4 @@ dreamland
 .dreamland/otel-receiver.log
 .dreamland/otel-cursors/
 .dreamland/cache/
+.dreamland/copilot-hook-debug.jsonl

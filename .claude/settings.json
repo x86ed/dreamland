@@ -1,5 +1,167 @@
 {
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "dreamland version-bump --change-from-command",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "dreamland handoff inject --hook",
+            "type": "command"
+          }
+        ],
+        "matcher": "Task|Agent"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "dreamland coauthor --hook",
+            "type": "command"
+          }
+        ],
+        "matcher": "Task|Agent"
+      },
+      {
+        "hooks": [
+          {
+            "command": "dreamland handoff enforce --hook",
+            "type": "command"
+          }
+        ],
+        "matcher": "Task|Agent"
+      },
+      {
+        "hooks": [
+          {
+            "command": "dreamland guard-artifact",
+            "type": "command"
+          }
+        ],
+        "matcher": "Write|Edit"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "dreamland version-bump",
+            "type": "command"
+          },
+          {
+            "command": "dreamland coauthor --hook",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "bash .claude/scripts/dreamland-otel-env.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "bash scripts/pre-merge-check.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "dreamland version-bump --patch",
+            "type": "command"
+          },
+          {
+            "command": "dreamland transition-log",
+            "type": "command"
+          },
+          {
+            "command": "dreamland telemetry write --tool claude-code",
+            "type": "command"
+          },
+          {
+            "command": "dreamland test-and-commit --reason turn-complete",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "dreamland handoff stop-check --hook",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "command": "dreamland telemetry write --tool claude-code",
+            "type": "command"
+          },
+          {
+            "command": "dreamland version-bump --patch",
+            "type": "command"
+          },
+          {
+            "command": "dreamland version-bump --minor --if-agent janus",
+            "type": "command"
+          },
+          {
+            "command": "dreamland commit --reason handoff --hook",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          {
+            "command": "dreamland handoff record --hook",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "dreamland handoff release --hook",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ]
+  },
   "permissions": {
+    "additionalDirectories": [
+      "/private/tmp/claude-501/-Users-adamsiegel-Workspace-git-dreamland/0cf79e38-5fd3-4fd7-b954-b7b81a9c71ba/scratchpad"
+    ],
     "allow": [
       "Bash(go version *)",
       "Bash(go get *)",
@@ -27,7 +189,7 @@
       "WebFetch(domain:docs.anthropic.com)",
       "WebFetch(domain:discuss.ai.google.dev)",
       "Bash(awk '{if \\($3 != \"100.0%\"\\) print}')",
-      "Bash(awk '{if \\($3 ~ /[0-9]+\\\\.[0-9]+%/\\) {pct=substr\\($3, 1, length\\($3\\)-1\\); if \\(pct<100\\) print $1, $2, $3}}')",
+      "Bash(awk '{if \\($3 ~ /[0-9]+\\\\.[0-9]+%/\\) {pct=substr\\($3, 1, length\\($3\\)-1\\); if \\(pct\u003c100\\) print $1, $2, $3}}')",
       "Bash(openspec --version)",
       "Bash(openspec validate *)",
       "Bash(openspec --help)",
@@ -75,103 +237,6 @@
       "Bash(awk '{n=split\\($0,a,\" \"\\); if \\(a[n]==\"0\"\\) print $0}')",
       "Bash(MERGE_CHECK=1 bash scripts/pre-merge-check.sh check_coverage)",
       "Bash(rm -f /private/tmp/claude-501/-Users-adamsiegel-Workspace-git-dreamland/0cf79e38-5fd3-4fd7-b954-b7b81a9c71ba/scratchpad/cover*.out /private/tmp/claude-501/-Users-adamsiegel-Workspace-git-dreamland/0cf79e38-5fd3-4fd7-b954-b7b81a9c71ba/scratchpad/testout.txt *)"
-    ],
-    "additionalDirectories": [
-      "/private/tmp/claude-501/-Users-adamsiegel-Workspace-git-dreamland/0cf79e38-5fd3-4fd7-b954-b7b81a9c71ba/scratchpad"
-    ]
-  },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dreamland version-bump --change-from-command"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Task|Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dreamland coauthor --hook"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dreamland version-bump"
-          },
-          {
-            "type": "command",
-            "command": "dreamland coauthor --hook"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash scripts/pre-merge-check.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dreamland version-bump --patch"
-          },
-          {
-            "type": "command",
-            "command": "dreamland transition-log"
-          },
-          {
-            "type": "command",
-            "command": "dreamland telemetry write --tool claude-code"
-          },
-          {
-            "type": "command",
-            "command": "dreamland test-and-commit --reason turn-complete"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dreamland telemetry write --tool claude-code"
-          },
-          {
-            "type": "command",
-            "command": "dreamland version-bump --patch"
-          },
-          {
-            "type": "command",
-            "command": "dreamland version-bump --minor --if-agent janus"
-          },
-          {
-            "type": "command",
-            "command": "dreamland commit --reason handoff --hook"
-          }
-        ]
-      }
     ]
   }
 }
