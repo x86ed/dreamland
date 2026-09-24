@@ -130,3 +130,8 @@ The dashboard SHALL provide an all-branches overview of every collected branch, 
 
 - **WHEN** no dataset matches the current branch
 - **THEN** the detail sections show all datasets
+
+#### Scenario: Dashboard collects the current branch itself
+
+- **WHEN** `/api/summary` is requested and the current branch has no cache entry or a stale one (cached head sha differs from HEAD)
+- **THEN** the dashboard parses the branch once, writes the cache entry with its head sha, and includes the dataset; concurrent and later requests at the same HEAD reuse the cache without re-parsing; a parse failure yields the summary without it plus a `collectError` string that the frontend shows in the banner, and the frontend shows "collecting current branch..." while the request is pending

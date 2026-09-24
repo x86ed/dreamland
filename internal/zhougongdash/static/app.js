@@ -132,8 +132,9 @@ function transitionMatrix(names, trs) {
 }
 
 async function load() {
+  $("banner").textContent = "collecting current branch...";
   data = await (await fetch("/api/summary")).json();
-  $("banner").textContent = data.attribution;
+  $("banner").textContent = data.attribution + (data.collectError ? " Collect failed: " + data.collectError : "");
   $("foot").textContent = "Code lines exclude: " + data.exclusions.join(", ") + ". Token-to-code = output tokens / (lines added + removed); n/a when 0 lines.";
   renderPicker(); renderOverview(); renderDetails();
 }

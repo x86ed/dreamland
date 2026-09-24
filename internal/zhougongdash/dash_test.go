@@ -187,3 +187,50 @@ func TestSummary_CurrentBranch(t *testing.T) {
 		t.Errorf("non-repo should give empty currentBranch: %s", body)
 	}
 }
+
+func TestSummary_CollectsCurrentBranchOnce(t *testing.T) {
+	root := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"}, {"checkout", "-q", "-b", "feat-y"},
+		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Skipf("git unavailable: %v %s", err, out)
+		}
+	}
+	h := New(NewStore(root)).Handler()
+	_, body := get(t, h, "/api/summary")
+	var res struct {
+		CurrentDataset string `json:"currentDataset"`
+		CollectError   string `json:"collectError"`
+	}
+	if err := json.Unmarshal([]byte(body), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.CurrentDataset != "feat-y" || res.CollectError != "" {
+		t.Fatalf("got %+v", res)
+	}
+	e, ok, err := zhougongdata.Read(root, "feat-y")
+	if err != nil || !ok || e.HeadSha == "" {
+		t.Fatalf("cache not written: %v %v %+v", err, ok, e)
+	}
+	e.Dataset.Runs = append(e.Dataset.Runs, zhougongdata.Run{Agent: "sentinel"})
+	if err := zhougongdata.Write(root, e); err != nil {
+		t.Fatal(err)
+	}
+	_, body = get(t, h, "/api/summary")
+	if !strings.Contains(body, "sentinel") {
+		t.Errorf("second call re-parsed instead of reusing cache")
+	}
+}
+
+func TestSummary_CollectError(t *testing.T) {
+	root := t.TempDir()
+	if out, err := exec.Command("git", "-C", root, "init", "-q", "-b", "empty").CombinedOutput(); err != nil {
+		t.Skipf("git unavailable: %v %s", err, out)
+	}
+	_, body := get(t, New(NewStore(root)).Handler(), "/api/summary")
+	if !strings.Contains(body, `"collectError"`) || strings.Contains(body, `"collectError":""`) {
+		t.Errorf("expected collectError for branch with no commits: %s", body)
+	}
+}
