@@ -135,3 +135,27 @@ The dashboard SHALL provide an all-branches overview of every collected branch, 
 
 - **WHEN** `/api/summary` is requested and any local branch (`refs/heads`) has no cache entry or a stale one (cached head sha differs from the branch head)
 - **THEN** the dashboard returns what is cached immediately with a `collecting` list of branches still being parsed, and parses them in the background (current branch first), writing each cache entry with its head sha; each branch is parsed at most once per head sha and never concurrently; the frontend polls `/api/summary` until `collecting` is empty; a parse failure is reported in a `collectError` string shown in the banner (not retried until the head sha changes); the disk cache plus git are the only sources, independent of `zhougong_collect`
+
+### Requirement: Dashboard charts tokens and code lines side by side
+
+The dashboard SHALL render, with inline SVG and no external assets, paired charts of output tokens (with total tokens as a secondary series) and code lines changed (lines added plus removed, excluding `ExcludedCodeGlobs`) per branch, plus tokens per line, with the same branch order and aligned rows; a scatter of code lines (x) against output tokens (y) with a labelled point per branch and the ratio in a `<title>` tooltip; and a per-run pair of charts (tokens per run, code lines per run) for the selected branches. The current branch is highlighted.
+
+#### Scenario: Paired per-branch charts
+- **WHEN** the dashboard loads with several cached branches
+- **THEN** the tokens panel and code-lines panel list the same branches in the same order, the current branch is marked HEAD, and each row shows tokens/line
+
+#### Scenario: Zero or missing values
+- **WHEN** a branch has zero code lines or no data
+- **THEN** its bar is empty, its ratio shows n/a, and it is omitted from the scatter rather than breaking the chart
+
+### Requirement: Dashboard tracks agents per branch
+
+`/api/summary` SHALL include `agentMatrix` with `branches`, `agents` and `cells[agent][branch]` (`commits`, `output`, `total`) computed from per-branch agent stats, with agents ordered by total tokens descending (ties by name). The dashboard SHALL render it as a heatmap (rows agents, columns branches), a per-branch agent list, and a stacked bar of token share by agent per branch.
+
+#### Scenario: Agent used in some branches only
+- **WHEN** agent `baku` has runs in branch `a` but not `b`
+- **THEN** `agentMatrix` has a zero cell for `baku`/`b` and the heatmap shows it empty
+
+#### Scenario: Stable agent ordering
+- **WHEN** `agentMatrix` is computed twice over the same data
+- **THEN** agents appear in the same order, highest total tokens first

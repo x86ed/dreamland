@@ -3,6 +3,7 @@ package zhougongdata
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -68,5 +69,34 @@ func TestCache_SlugCollision(t *testing.T) {
 	ea, _, _ = Read(root, "a/b")
 	if ea.HeadSha != "3" || len(ReadAll(root)) != 2 {
 		t.Errorf("rewrite after collision: %+v", ea)
+	}
+}
+
+func TestBuildAgentMatrix_OrderAndCells(t *testing.T) {
+	a := Dataset{Name: "a", Runs: []Run{
+		{Agent: "nyx", Commits: 1, Total: 10, Output: 5},
+		{Agent: "morpheus", Commits: 2, Total: 100, Output: 40},
+		{Agent: "nyx", Commits: 1, Total: 10, Output: 5},
+	}}
+	b := Dataset{Name: "b", Runs: []Run{{Agent: "baku", Commits: 1, Total: 20, Output: 8}}}
+	m := BuildAgentMatrix([]Dataset{a, b, NoData("c")})
+	if got := strings.Join(m.Agents, ","); got != "morpheus,baku,nyx" {
+		t.Fatalf("agent order = %s", got)
+	}
+	if len(m.Branches) != 3 || len(m.Cells) != 3 || len(m.Cells[0]) != 3 {
+		t.Fatalf("shape: %+v", m)
+	}
+	if c := m.Cells[2][0]; c.Commits != 2 || c.Total != 20 || c.Output != 10 {
+		t.Errorf("nyx/a = %+v", c)
+	}
+	if c := m.Cells[0][1]; c != (AgentCell{}) {
+		t.Errorf("morpheus/b should be zero, got %+v", c)
+	}
+}
+
+func TestBuildAgentMatrix_Empty(t *testing.T) {
+	m := BuildAgentMatrix(nil)
+	if m.Agents == nil || m.Cells == nil || m.Branches == nil {
+		t.Errorf("nil slices: %+v", m)
 	}
 }

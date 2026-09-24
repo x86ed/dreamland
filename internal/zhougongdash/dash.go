@@ -325,6 +325,7 @@ func (d *Dashboard) summary(w http.ResponseWriter, _ *http.Request) {
 		"collecting":     collecting,
 		"datasets":       entries,
 		"typicalFlow":    zhougongdata.TypicalFlow(all),
+		"agentMatrix":    zhougongdata.BuildAgentMatrix(all),
 		"exclusions":     zhougongdata.ExcludedCodeGlobs,
 		"attribution":    AttributionNote,
 		"maxCompare":     zhougongdata.MaxBranches,
