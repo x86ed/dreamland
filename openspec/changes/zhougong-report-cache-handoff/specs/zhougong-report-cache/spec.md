@@ -30,7 +30,17 @@ A cache entry SHALL be stale when the branch's current HEAD sha differs from `he
 
 ### Requirement: Snapshot tool returns cached source data
 
-`zhougong_snapshot(branches)` SHALL return, for each branch, its `headSha`, `collectedAt`, `stale`, per-branch summary (runs, tokens per agent, calls per agent, flow path) and per-run rows, read from the cache without recomputation. A branch with no cache entry SHALL be returned as `missing: true`.
+`zhougong_snapshot(branches, baseline)` SHALL accept any number of branches (an empty list means every cached branch) and SHALL return, for each branch, its `headSha`, `collectedAt`, `stale`, per-branch summary (runs, tokens per agent, calls per agent, flow path) and per-run rows, read from the cache without recomputation. It SHALL also return a `comparison` object with each metric per branch and the absolute and percent delta of each branch versus `baseline` (default: first branch), using the same function the dashboard's compare view uses. A branch with no cache entry SHALL be returned as `missing: true` and excluded from `comparison`.
+
+#### Scenario: Multi-branch comparison
+
+- **WHEN** the snapshot is requested for branches A, B and C with baseline A
+- **THEN** `comparison` has values for all three and deltas for B and C versus A, identical to the dashboard's `/api/compare` output
+
+#### Scenario: Empty list means all
+
+- **WHEN** `branches` is empty and three branches are cached
+- **THEN** all three are returned
 
 #### Scenario: Missing branch
 

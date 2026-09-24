@@ -10,6 +10,8 @@
 4. **Static embedded dashboard** reading `/api/*` JSON from the Go server; no build step, no CDN, so it works offline. Port 0 by default.
 5. **Token-to-code ratio** excludes `openspec/**` and `*.md` so spec-writing agents do not distort it; the exclusion list is a constant in `internal/zhougongdata` and shown on the dashboard.
 
+6. **N-way comparison with a baseline** instead of pairwise diff: a table with one column per branch scales to 8 and pairwise diffs can be derived by choosing any branch as baseline. The cap of 8 keeps charts legible. Metrics are normalised per run (per-run averages alongside totals) so branches with different run counts compare fairly.
+
 ## Risks
 
 - Squash merges lose per-agent attribution on main; runs are computed on feature branches.

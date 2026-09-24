@@ -47,16 +47,26 @@
 - **WHEN** `zhougong_dashboard_stop` is called
 - **THEN** the port is closed and a subsequent request fails to connect
 
-### Requirement: Dashboard compares two branches or features side by side
+### Requirement: Dashboard compares multiple branches or features side by side
 
-The dashboard SHALL provide a compare view for two selected branches or OpenSpec change slugs showing each metric for both, the absolute and percent delta, and a flow-path diff.
+The dashboard SHALL provide an all-branches overview of every collected branch, and a compare view for 2 to 8 selected branches or OpenSpec change slugs showing each metric in one column per branch, a selectable baseline (default: first selected), the absolute and percent delta of every other branch versus the baseline, grouped charts across all selected branches, and a flow-path comparison. `/api/compare` SHALL accept `branches=a,b,c&baseline=a`.
 
 #### Scenario: Delta shown
 
-- **WHEN** branch A has 10 runs and branch B has 15
-- **THEN** the compare view shows runs 10 vs 15, delta +5, +50%
+- **WHEN** baseline A has 10 runs, B has 15 and C has 5
+- **THEN** the compare view shows runs 10, 15, 5 with B at +5 / +50% and C at -5 / -50%
+
+#### Scenario: Selection limits
+
+- **WHEN** fewer than 2 or more than 8 branches are passed to `/api/compare`
+- **THEN** it responds 400 naming the allowed range
+
+#### Scenario: Overview lists all collected branches
+
+- **WHEN** three branches are in the cache
+- **THEN** `/api/summary` and the landing view list all three, each sortable by any metric
 
 #### Scenario: Feature slug resolves to a branch
 
 - **WHEN** the user selects change slug `foo` and a branch containing that slug exists
-- **THEN** the compare view uses that branch's dataset; if none exists it shows an explicit "no data" state
+- **THEN** the compare view uses that branch's dataset; if none exists it shows an explicit "no data" column
