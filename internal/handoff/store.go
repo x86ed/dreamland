@@ -386,3 +386,31 @@ func (s *Store) Sessions() []string {
 	}
 	return out
 }
+
+var uncheckedTask = regexp.MustCompile(`^\s*- \[ \]`)
+var anyTask = regexp.MustCompile(`^\s*- \[[ xX]\]`)
+
+// TasksRemaining counts unticked checkboxes in openspec/changes/<slug>/tasks.md;
+// -1 when the slug is invalid, the file is unreadable, or it has no checkboxes.
+func TasksRemaining(repoRoot, slug string) int {
+	if !ValidChange(slug) {
+		return -1
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot, "openspec", "changes", slug, "tasks.md"))
+	if err != nil {
+		return -1
+	}
+	total, open := 0, 0
+	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
+		if anyTask.MatchString(line) {
+			total++
+		}
+		if uncheckedTask.MatchString(line) {
+			open++
+		}
+	}
+	if total == 0 {
+		return -1
+	}
+	return open
+}

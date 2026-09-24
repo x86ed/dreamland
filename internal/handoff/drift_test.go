@@ -127,7 +127,7 @@ func TestDrift_SettingsPatchBindsAllModes(t *testing.T) {
 		{"PostToolUse", "Task|Agent", "dreamland handoff inject --hook"},
 		{"PreToolUse", "Task|Agent", "dreamland handoff enforce --hook"},
 		{"Stop", "", "dreamland handoff stop-check --hook"},
-		{"UserPromptSubmit", "", "dreamland handoff release --hook"},
+		{"UserPromptSubmit", "", "dreamland handoff prompt --hook"},
 	}
 	for _, w := range want {
 		found := false

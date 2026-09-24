@@ -1,5 +1,7 @@
 package handoff
 
+import "fmt"
+
 const (
 	KindDispatch = "dispatch"
 	KindReport   = "report"
@@ -43,7 +45,9 @@ func Targets() map[string][]string {
 
 // Next is the single decision function over the edge table. It returns the
 // directive and the counter after applying the outcome; it does no I/O.
-func Next(from string, tags Tags, c Counter) (Directive, Counter) {
+// tasksRemaining is the count of unticked tasks for tags.Change (-1 unknown); it
+// only matters for a phobetor pass.
+func Next(from string, tags Tags, c Counter, tasksRemaining int) (Directive, Counter) {
 	if target, ok := completeEdges[from]; ok {
 		if tags.Handoff == "blocked" {
 			return Directive{Kind: KindReport, Reason: from + " reported blocked; surface the blocker to Janus"}, c
@@ -57,7 +61,7 @@ func Next(from string, tags Tags, c Counter) (Directive, Counter) {
 	}
 	switch from {
 	case "phobetor":
-		return nextPhobetor(tags, c)
+		return nextPhobetor(tags, c, tasksRemaining)
 	case "phantasos":
 		return Directive{ClearCounter: true}, Counter{}
 	case "baku":
@@ -66,9 +70,17 @@ func Next(from string, tags Tags, c Counter) (Directive, Counter) {
 	return Directive{}, c
 }
 
-func nextPhobetor(tags Tags, c Counter) (Directive, Counter) {
+func nextPhobetor(tags Tags, c Counter, tasksRemaining int) (Directive, Counter) {
 	switch tags.Verdict {
 	case "pass":
+		if tasksRemaining > 0 {
+			return Directive{
+				Kind: KindReport,
+				Reason: fmt.Sprintf("partial pass: %d tasks of %s unticked; dispatch morpheus for the next task or stop (Janus/user decides); baku only after all tasks are ticked",
+					tasksRemaining, tags.Change),
+				ClearCounter: true,
+			}, Counter{}
+		}
 		return Directive{Kind: KindDispatch, Target: "baku", Reason: "phobetor verdict pass", ClearCounter: true}, Counter{}
 	case "fail":
 		c.VerdictRetries = 0

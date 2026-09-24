@@ -44,7 +44,7 @@ func TestInstall_ClaudeCode_HandoffBindings(t *testing.T) {
 		{"PostToolUse", "Task|Agent", "dreamland handoff inject --hook"},
 		{"PreToolUse", "Task|Agent", "dreamland handoff enforce --hook"},
 		{"Stop", "", "dreamland handoff stop-check --hook"},
-		{"UserPromptSubmit", "", "dreamland handoff release --hook"},
+		{"UserPromptSubmit", "", "dreamland handoff prompt --hook"},
 	}
 	for _, c := range cases {
 		if !containsCmd(commandsFor(t, root, c.event, c.matcher), c.cmd) {
@@ -52,6 +52,14 @@ func TestInstall_ClaudeCode_HandoffBindings(t *testing.T) {
 		}
 		if strings.ContainsAny(c.cmd, "&|;<>$`") {
 			t.Errorf("%q contains a shell operator", c.cmd)
+		}
+		for _, e := range hookEntries(t, root, c.event) {
+			raw, _ := e["hooks"].([]any)
+			for _, h := range raw {
+				if cmd, _ := h.(map[string]any)["command"].(string); cmd == c.cmd && len(raw) != 1 {
+					t.Errorf("%q shares an entry with %d other commands; each mode must be its own entry", c.cmd, len(raw)-1)
+				}
+			}
 		}
 	}
 	if !containsCmd(commandsFor(t, root, "PreToolUse", "Task|Agent"), "dreamland coauthor --hook") {

@@ -1,6 +1,10 @@
 package handoff
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestNext_Table(t *testing.T) {
 	cases := []struct {
@@ -34,7 +38,7 @@ func TestNext_Table(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			d, out := Next(c.from, c.tags, c.in)
+			d, out := Next(c.from, c.tags, c.in, -1)
 			if d.Kind != c.kind || d.Target != c.target {
 				t.Errorf("got kind=%q target=%q, want %q %q", d.Kind, d.Target, c.kind, c.target)
 			}
@@ -52,7 +56,7 @@ func TestNext_Table(t *testing.T) {
 }
 
 func TestNext_BlockedReportNamesJanus(t *testing.T) {
-	d, _ := Next("iktomi", Tags{Handoff: "blocked"}, Counter{})
+	d, _ := Next("iktomi", Tags{Handoff: "blocked"}, Counter{}, -1)
 	if d.Reason == "" || !contains(d.Reason, "Janus") {
 		t.Errorf("reason %q does not name Janus", d.Reason)
 	}
@@ -88,5 +92,42 @@ func TestParseTags(t *testing.T) {
 				t.Errorf("got %+v want %+v", got, c.want)
 			}
 		})
+	}
+}
+
+func TestNext_PartialPass(t *testing.T) {
+	for _, c := range []struct {
+		remaining int
+		kind      string
+		target    string
+	}{{0, KindDispatch, "baku"}, {-1, KindDispatch, "baku"}, {3, KindReport, ""}} {
+		d, out := Next("phobetor", Tags{Verdict: "pass", Change: "c1"}, Counter{PhobetorFailures: 1}, c.remaining)
+		if d.Kind != c.kind || d.Target != c.target || !d.ClearCounter || out != (Counter{}) {
+			t.Errorf("remaining=%d: %+v %+v", c.remaining, d, out)
+		}
+		if c.remaining > 0 && (!contains(d.Reason, "partial pass: 3 tasks of c1 unticked") || !contains(d.Reason, "baku only after")) {
+			t.Errorf("reason = %q", d.Reason)
+		}
+	}
+}
+
+func TestTasksRemaining(t *testing.T) {
+	repo := t.TempDir()
+	write := func(slug, body string) {
+		dir := filepath.Join(repo, "openspec", "changes", slug)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "tasks.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("a", "- [x] 1.1 x\r\n- [ ] 1.2 y\r\n  - [ ] 1.3 z\r\n")
+	write("done", "- [x] 1\n- [X] 2\n")
+	write("none", "just prose\n")
+	for slug, want := range map[string]int{"a": 2, "done": 0, "none": -1, "missing": -1, "": -1, "../x": -1} {
+		if got := TasksRemaining(repo, slug); got != want {
+			t.Errorf("TasksRemaining(%q) = %d, want %d", slug, got, want)
+		}
 	}
 }

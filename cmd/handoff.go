@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -43,7 +44,7 @@ func init() {
 		{"inject", "PostToolUse (Task|Agent): inject the required next step into the dispatcher's context", (*handoffEnv).inject},
 		{"enforce", "PreToolUse (Task|Agent): block dispatching anything but the required next agent", (*handoffEnv).enforce},
 		{"stop-check", "Stop: block ending the turn while a hand-off is pending", (*handoffEnv).stopCheck},
-		{"release", "UserPromptSubmit: release pending hand-offs", (*handoffEnv).release},
+		{"prompt", "UserPromptSubmit: release on a human prompt, inject on a system notification", (*handoffEnv).prompt},
 	} {
 		run := m.run
 		c := &cobra.Command{
@@ -93,6 +94,7 @@ type hookPayload struct {
 	AgentID              string `json:"agent_id"`
 	AgentType            string `json:"agent_type"`
 	ToolName             string `json:"tool_name"`
+	Prompt               string `json:"prompt"`
 	LastAssistantMessage string `json:"last_assistant_message"`
 	AgentTranscriptPath  string `json:"agent_transcript_path"`
 	ToolInput            struct {
@@ -187,27 +189,30 @@ func (e *handoffEnv) apply(agent string, tags handoff.Tags, session string) (han
 		return handoff.Directive{}, "", nil
 	}
 	if !handoff.TouchesCounter(agent) {
-		d, _ := handoff.Next(agent, tags, handoff.Counter{})
+		d, _ := handoff.Next(agent, tags, handoff.Counter{}, -1)
 		return d, tags.Change, nil
 	}
+	if agent != "phobetor" {
+		// phantasos/baku: reset the tagged change, else only this session's most
+		// recent counter (never another session's, and no openspec shell-out).
+		d, _ := handoff.Next(agent, tags, handoff.Counter{}, -1)
+		if handoff.ValidChange(tags.Change) {
+			return d, tags.Change, e.store.UpdateCounter(tags.Change, func(handoff.Counter) (handoff.Counter, bool) { return handoff.Counter{}, true })
+		}
+		k, err := e.store.ClearMostRecentForSession(session)
+		return d, k, err
+	}
 	key := handoff.ResolveChange(tags.Change, session, e.active)
+	remaining := -1
+	if tags.Verdict == "pass" {
+		remaining = handoff.TasksRemaining(e.repoRoot, tags.Change)
+	}
 	var d handoff.Directive
-	var found bool
 	err := e.store.UpdateCounterFor(key, session, func(c handoff.Counter) (handoff.Counter, bool) {
 		var nc handoff.Counter
-		found = c != handoff.Counter{}
-		d, nc = handoff.Next(agent, tags, c)
+		d, nc = handoff.Next(agent, tags, c, remaining)
 		return nc, d.ClearCounter
 	})
-	if err == nil && !found && d.ClearCounter && !handoff.ValidChange(tags.Change) && agent != "phobetor" {
-		// Untagged phantasos/baku completion: the resolved key may not be the one
-		// phobetor failed under, so reset the counter this session wrote last.
-		if k, cerr := e.store.ClearMostRecentForSession(session); cerr != nil {
-			err = cerr
-		} else if k != "" {
-			key = k
-		}
-	}
 	return d, key, err
 }
 
@@ -268,6 +273,13 @@ func trimSettled(es []handoff.Entry) []handoff.Entry {
 }
 
 func (e *handoffEnv) inject(p hookPayload) error {
+	return e.emitDirectives(p, "PostToolUse")
+}
+
+// emitDirectives is the read-only routine shared by inject (PostToolUse) and
+// prompt (UserPromptSubmit): it emits additionalContext for whatever entries
+// exist when it runs, so it does not depend on hook ordering.
+func (e *handoffEnv) emitDirectives(p hookPayload, event string) error {
 	if !p.isDispatcher() {
 		return nil
 	}
@@ -297,7 +309,7 @@ func (e *handoffEnv) inject(p hookPayload) error {
 	}
 	return json.NewEncoder(e.out).Encode(map[string]any{
 		"hookSpecificOutput": map[string]string{
-			"hookEventName":     "PostToolUse",
+			"hookEventName":     event,
 			"additionalContext": strings.Join(parts, "\n"),
 		},
 	})
@@ -446,6 +458,29 @@ func (e *handoffEnv) stopCheck(p hookPayload) error {
 	return e.applyBlock(p.SessionID, msg)
 }
 
+// systemEnvelope matches prompts the harness generates: background-completion
+// notifications, subagent hand-backs, banners, and any other <tag> envelope.
+var systemEnvelope = regexp.MustCompile(`^(?:<[A-Za-z]|\[SYSTEM NOTIFICATION)`)
+
+// isHumanPrompt is positive identification only: an empty prompt or any known or
+// unknown envelope is not human. Slash commands arrive raw and count as human.
+func isHumanPrompt(prompt string) bool {
+	t := strings.TrimSpace(prompt)
+	return t != "" && !systemEnvelope.MatchString(t)
+}
+
+// prompt (UserPromptSubmit): a human prompt releases pending entries; a system
+// prompt (notification) injects the directive and never releases.
+func (e *handoffEnv) prompt(p hookPayload) error {
+	if !p.isDispatcher() {
+		return nil
+	}
+	if isHumanPrompt(p.Prompt) {
+		return e.release(p)
+	}
+	return e.emitDirectives(p, "UserPromptSubmit")
+}
+
 func (e *handoffEnv) release(p hookPayload) error {
 	if !p.isDispatcher() {
 		return nil
@@ -551,8 +586,9 @@ func runHandoffNext(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	env := &handoffEnv{
-		store:  handoff.NewStore(repoRoot),
-		active: func() ([]string, error) { return activeChanges(repoRoot) },
+		store:    handoff.NewStore(repoRoot),
+		repoRoot: repoRoot,
+		active:   func() ([]string, error) { return activeChanges(repoRoot) },
 	}
 	session := "cli"
 	if s := os.Getenv("CLAUDE_SESSION_ID"); handoff.ValidSessionID(s) {
