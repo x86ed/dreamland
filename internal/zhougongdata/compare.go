@@ -2,6 +2,7 @@ package zhougongdata
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -240,4 +241,53 @@ func Compare(datasets []Dataset, baseline string) CompareResult {
 // NoData returns the placeholder dataset for a selection that resolves to nothing.
 func NoData(name string) Dataset {
 	return Dataset{Name: name, Branch: name, Source: "nodata", Runs: []Run{}, Untracked: []UntrackedCommit{}}
+}
+
+// MarkdownTable renders the cross-branch comparison as a markdown table (one row per
+// metric, one column per branch, delta columns for every non-baseline branch). It
+// enforces the MaxBranches cap.
+func MarkdownTable(datasets []Dataset, baseline string) (string, error) {
+	if err := CheckMaxBranches(len(datasets)); err != nil {
+		return "", err
+	}
+	res := Compare(datasets, baseline)
+	if len(res.Branches) == 0 {
+		return "", nil
+	}
+	num := func(v *float64) string {
+		if v == nil {
+			return "n/a"
+		}
+		return strconv.FormatFloat(*v, 'f', -1, 64)
+	}
+	var b strings.Builder
+	b.WriteString("| metric |")
+	sep := "|---|"
+	for _, s := range res.Branches {
+		b.WriteString(" " + s.Name + " |")
+		sep += "---|"
+		if s.Name != res.Baseline {
+			b.WriteString(" Δ " + s.Name + " vs " + res.Baseline + " |")
+			sep += "---|"
+		}
+	}
+	b.WriteString("\n" + sep + "\n")
+	for _, row := range res.Metrics {
+		b.WriteString("| " + row.Metric + " |")
+		for i, c := range row.Cells {
+			b.WriteString(" " + num(c.Value) + " |")
+			if res.Branches[i].Name != res.Baseline {
+				d := "n/a"
+				if c.Delta != nil {
+					d = strconv.FormatFloat(*c.Delta, 'f', -1, 64)
+					if c.DeltaPct != nil {
+						d += " (" + strconv.FormatFloat(*c.DeltaPct, 'f', 0, 64) + "%)"
+					}
+				}
+				b.WriteString(" " + d + " |")
+			}
+		}
+		b.WriteString("\n")
+	}
+	return b.String(), nil
 }

@@ -45,6 +45,18 @@ func (s *Store) Put(ds zhougongdata.Dataset) {
 	s.live = append(s.live, ds)
 }
 
+// Has reports whether a live dataset with the given name is already collected.
+func (s *Store) Has(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range s.live {
+		if d.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // All returns live datasets followed by archived records. An archived record whose
 // name collides with a live dataset is renamed "<name> (archived)".
 func (s *Store) All() []zhougongdata.Dataset {

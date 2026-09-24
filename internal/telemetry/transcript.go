@@ -78,10 +78,10 @@ func ParseAntigravityTranscript(path string) (TranscriptUsage, string, error) {
 	defer f.Close()
 
 	type usageMetadata struct {
-		PromptTokenCount          int64 `json:"promptTokenCount"`
-		CandidatesTokenCount      int64 `json:"candidatesTokenCount"`
-		CachedContentTokenCount   int64 `json:"cachedContentTokenCount"`
-		TotalTokenCount           int64 `json:"totalTokenCount"`
+		PromptTokenCount        int64 `json:"promptTokenCount"`
+		CandidatesTokenCount    int64 `json:"candidatesTokenCount"`
+		CachedContentTokenCount int64 `json:"cachedContentTokenCount"`
+		TotalTokenCount         int64 `json:"totalTokenCount"`
 	}
 	type aline struct {
 		Model         string        `json:"model"`
