@@ -433,43 +433,45 @@ func TestInstall_ClaudeCode_JanusDispatchGuardrailInstructions(t *testing.T) {
 	}
 }
 
-func TestInstall_ClaudeCode_IktomiRoutesCodeChangesToPhobetor(t *testing.T) {
-	root := fakeGitRepo(t)
-	if _, err := Install(Config{RepoRoot: root, CodingTool: "Claude Code"}); err != nil {
-		t.Fatalf("Install: %v", err)
+func TestInstall_IktomiAlwaysHandsOffToPhobetor(t *testing.T) {
+	cases := []struct {
+		tool string
+		path []string
+		tick string // backtick style around agent names in this platform's prose
+	}{
+		{"Claude Code", []string{".claude", "agents", "iktomi.md"}, "`"},
+		{"GitHub Copilot", []string{".github", "agents", "iktomi.agent.md"}, "`"},
+		{"Cursor", []string{".cursor", "rules", "iktomi.mdc"}, "`"},
+		{"Codex CLI", []string{".codex", "agents", "iktomi.toml"}, ""},
+		{"Kiro", []string{".kiro", "steering", "iktomi.md"}, "`"},
+		{"Antigravity", []string{".agents", "skills", "iktomi", "SKILL.md"}, "`"},
 	}
-
-	data, err := os.ReadFile(filepath.Join(root, ".claude", "agents", "iktomi.md"))
-	if err != nil {
-		t.Fatalf("missing iktomi.md: %v", err)
-	}
-	content := string(data)
-
-	if !strings.Contains(content, "hand off directly to `phobetor` for validation once complete") {
-		t.Error("iktomi.md missing the phobetor hand-off instruction for completed code changes")
-	}
-	if !strings.Contains(content, "report completion or blockers to Janus when done") {
-		t.Error("iktomi.md missing the no-file-changes fallback to reporting to Janus")
-	}
-}
-
-func TestInstall_GitHubCopilot_IktomiRoutesCodeChangesToPhobetor(t *testing.T) {
-	root := fakeGitRepo(t)
-	if _, err := Install(Config{RepoRoot: root, CodingTool: "GitHub Copilot"}); err != nil {
-		t.Fatalf("Install: %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(root, ".github", "agents", "iktomi.agent.md"))
-	if err != nil {
-		t.Fatalf("missing iktomi.agent.md: %v", err)
-	}
-	content := string(data)
-
-	if !strings.Contains(content, "hand off directly to `phobetor` for validation once complete") {
-		t.Error("iktomi.agent.md missing the phobetor hand-off instruction for completed code changes")
-	}
-	if !strings.Contains(content, "report completion or blockers to Janus when done") {
-		t.Error("iktomi.agent.md missing the no-file-changes fallback to reporting to Janus")
+	for _, c := range cases {
+		t.Run(c.tool, func(t *testing.T) {
+			root := fakeGitRepo(t)
+			if _, err := Install(Config{RepoRoot: root, CodingTool: c.tool}); err != nil {
+				t.Fatalf("Install: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(append([]string{root}, c.path...)...))
+			if err != nil {
+				t.Fatalf("missing iktomi file: %v", err)
+			}
+			content := string(data)
+			if !strings.Contains(content, "hand off directly to "+c.tick+"phobetor"+c.tick+" for validation") {
+				t.Error("iktomi missing the unconditional phobetor hand-off")
+			}
+			if !strings.Contains(content, "regardless of whether the work involved file changes") {
+				t.Error("iktomi hand-off is not unconditional")
+			}
+			if !strings.Contains(content, "[handoff: complete]") || !strings.Contains(content, "[handoff: blocked]") {
+				t.Error("iktomi missing the handoff tags")
+			}
+			for _, stale := range []string{"report completion or blockers to Janus when done", "If your work made no file changes", "If your work included editing"} {
+				if strings.Contains(content, stale) {
+					t.Errorf("iktomi still contains %q", stale)
+				}
+			}
+		})
 	}
 }
 
