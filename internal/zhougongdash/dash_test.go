@@ -286,3 +286,14 @@ func TestSummary_AgentMatrix(t *testing.T) {
 		t.Errorf("matrix = %+v", m)
 	}
 }
+
+func TestStoreHasReportsLiveDatasets(t *testing.T) {
+	s := NewStore(t.TempDir())
+	if s.Has("A") {
+		t.Fatal("empty store reports A")
+	}
+	s.Put(ds("A", 1))
+	if !s.Has("A") || s.Has("B") {
+		t.Errorf("Has(A)=%v Has(B)=%v, want true/false", s.Has("A"), s.Has("B"))
+	}
+}

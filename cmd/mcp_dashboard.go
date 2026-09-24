@@ -10,7 +10,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
-
 )
 
 const (
@@ -46,7 +45,6 @@ func init() {
 	mcpCmd.AddCommand(mcpDashboardCmd)
 	rootCmd.AddCommand(mcpCmd)
 }
-
 
 type dashboardStartInput struct {
 	Port int `json:"port,omitempty" description:"port to bind on 127.0.0.1; 0 picks a free port"`
