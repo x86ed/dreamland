@@ -2,7 +2,7 @@
 
 ### Requirement: A single edge table defines every fixed hand-off and is the only source the mechanism consults
 
-`internal/handoff/edges.go` SHALL hold the fixed hand-off edges as one Go table, and `handoff.Next(from, tags, counter)` SHALL be a pure function over it. The edges SHALL be: `nyx` complete -> dispatch `morpheus`; `morpheus` complete -> dispatch `phobetor`; `iktomi` complete -> dispatch `phobetor`, unconditionally, whether or not files changed; `nyx`/`morpheus`/`iktomi` blocked -> report (no dispatch); `phobetor` `pass` -> dispatch `baku`; `phobetor` `fail` -> dispatch `morpheus` when the change's failure counter is 0, otherwise dispatch `phantasos`; `phobetor` `spec-defect` -> dispatch `phantasos`; `phobetor` `unverified` -> report (no dispatch). An agent not in the table SHALL produce no directive. A directive SHALL be either kind `dispatch` (with a target agent) or kind `report` (no dispatch required).
+`internal/handoff/edges.go` SHALL hold the fixed hand-off edges as one Go table, and `handoff.Next(from, tags, counter, tasksRemaining)` SHALL be a pure function over it; `tasksRemaining` is the number of unticked checkboxes in the change's `tasks.md`, or -1 when unknown. The edges SHALL be: `nyx` complete -> dispatch `morpheus`; `morpheus` complete -> dispatch `phobetor`; `iktomi` complete -> dispatch `phobetor`, unconditionally, whether or not files changed; `nyx`/`morpheus`/`iktomi` blocked -> report (no dispatch); `phobetor` `pass` -> dispatch `baku` when `tasksRemaining` is 0 or -1 (unknown), otherwise a `report` directive stating a partial pass with the number of unticked tasks and leaving the choice (next task via `morpheus`, or stop) to the dispatcher and user; `phobetor` `fail` -> dispatch `morpheus` when the change's failure counter is 0, otherwise dispatch `phantasos`; `phobetor` `spec-defect` -> dispatch `phantasos`; `phobetor` `unverified` -> report (no dispatch). An agent not in the table SHALL produce no directive. A directive SHALL be either kind `dispatch` (with a target agent) or kind `report` (no dispatch required).
 
 #### Scenario: Morpheus completion requires Phobetor
 
@@ -24,6 +24,21 @@
 - **WHEN** `Next("phobetor", {verdict: "pass"}, counter=1)` is evaluated
 - **THEN** it returns kind `dispatch`, target `baku`, and the counter after the call is deleted
 
+#### Scenario: Partial pass does not close the change
+
+- **WHEN** `Next("phobetor", {verdict: "pass", change: "c1"}, counter=0, tasksRemaining=3)` is evaluated
+- **THEN** it returns kind `report` (no dispatch, no `baku`) whose text says 3 tasks of `c1` remain unticked, and the failure counter is deleted as for any pass
+
+#### Scenario: Fully ticked tasks go to Baku
+
+- **WHEN** `Next("phobetor", {verdict: "pass", change: "c1"}, counter=0, tasksRemaining=0)` is evaluated
+- **THEN** it returns kind `dispatch`, target `baku`
+
+#### Scenario: Unknown task state keeps the fixed edge
+
+- **WHEN** a `phobetor` `pass` has no `[change: <slug>]` tag or the change has no readable `tasks.md` with checkboxes (`tasksRemaining=-1`)
+- **THEN** it returns kind `dispatch`, target `baku`
+
 #### Scenario: An unlisted agent produces no directive
 
 - **WHEN** `Next("baku", ...)` or `Next("hypnos", ...)` is evaluated
@@ -31,7 +46,7 @@
 
 ### Requirement: Reports carry machine-readable tags and the mechanism never judges prose
 
-`morpheus`, `iktomi`, and `nyx` SHALL end their final report with an own-line tag `[handoff: complete]` or `[handoff: blocked]`. `phobetor` SHALL end its final report with exactly one own-line tag `[verdict: pass]`, `[verdict: fail]`, `[verdict: spec-defect]`, or `[verdict: unverified]`, and SHOULD add `[change: <slug>]`. Parsing SHALL match lines against `^\s*\[(handoff|verdict|change): ([a-z0-9-]+)\]\s*$` after normalizing `\r\n`; the last matching line per key wins; a value outside the closed set for its key is treated as absent. An absent `handoff` tag on `nyx`/`morpheus`/`iktomi` SHALL be treated as `complete`. An absent or malformed `verdict` from `phobetor` SHALL yield a `dispatch` directive to `phobetor` again with an instruction to emit the verdict tag, at most once per change until a valid verdict is seen; a second miss SHALL yield kind `report`. `phobetor` SHALL emit `unverified` and never `pass` when `dreamland test` could not be run.
+`morpheus`, `iktomi`, and `nyx` SHALL end their final report with an own-line tag `[handoff: complete]` or `[handoff: blocked]`. `phobetor` SHALL end its final report with exactly one own-line tag `[verdict: pass]`, `[verdict: fail]`, `[verdict: spec-defect]`, or `[verdict: unverified]`, and MUST add `[change: <slug>]` whenever it is working a change (the partial-pass guard reads it). `phantasos` and `baku` SHALL end their final report with `[change: <slug>]` when the turn concerns a change (they produce no directive; the tag only selects which counter to reset). Parsing SHALL match lines against `^\s*\[(handoff|verdict|change): ([a-z0-9-]+)\]\s*$` after normalizing `\r\n`; the last matching line per key wins; a value outside the closed set for its key is treated as absent. An absent `handoff` tag on `nyx`/`morpheus`/`iktomi` SHALL be treated as `complete`. An absent or malformed `verdict` from `phobetor` SHALL yield a `dispatch` directive to `phobetor` again with an instruction to emit the verdict tag, at most once per change until a valid verdict is seen; a second miss SHALL yield kind `report`. `phobetor` SHALL emit `unverified` and never `pass` when `dreamland test` could not be run.
 
 #### Scenario: Last tag wins and quoted tags are ignored
 
@@ -55,7 +70,7 @@
 
 ### Requirement: The failure counter is per change, stored per user, and survives across subagent turns and parallel sessions
 
-For each `phobetor` `fail` the mechanism SHALL consult a counter stored at `<root>/handoff/<repo-id>/<change>.json`, where `<root>` is `$DREAMLAND_STATE_DIR` if set, else `<os.UserCacheDir()>/dreamland`, else `<os.TempDir()>/dreamland`, and `<repo-id>` is the first 16 hexadecimal characters of the SHA-256 of the cleaned absolute repository root (lower-cased on Windows). `<change>` is the `[change: <slug>]` tag, else the sole active change from `openspec list --json`, else `_session-<session_id>`; slugs SHALL match `^[a-z0-9][a-z0-9-]{0,63}$`. With counter 0 a `fail` yields `dispatch` `morpheus` and sets the counter to 1; with counter of 1 or more a `fail` yields `dispatch` `phantasos` and sets it to 2. A `spec-defect` verdict yields `dispatch` `phantasos` and leaves the counter unchanged. The counter SHALL be deleted on `pass`, and reset to 0 when `phantasos` or `baku` completes; a `morpheus` turn SHALL NOT change it. Files older than 14 days SHALL be pruned on write. Every read-modify-write SHALL hold a lock file created with `O_CREATE|O_EXCL` (5 second acquire timeout, treated as stale after 30 seconds) and write via a temp file renamed over the target; a lock timeout SHALL fail open (no directive, stderr warning, exit 0).
+For each `phobetor` `fail` the mechanism SHALL consult a counter stored at `<root>/handoff/<repo-id>/<change>.json`, where `<root>` is `$DREAMLAND_STATE_DIR` if set, else `<os.UserCacheDir()>/dreamland`, else `<os.TempDir()>/dreamland`, and `<repo-id>` is the first 16 hexadecimal characters of the SHA-256 of the cleaned absolute repository root (lower-cased on Windows). `<change>` is the `[change: <slug>]` tag, else the sole active change from `openspec list --json`, else `_session-<session_id>`; slugs SHALL match `^[a-z0-9][a-z0-9-]{0,63}$`. With counter 0 a `fail` yields `dispatch` `morpheus` and sets the counter to 1; with counter of 1 or more a `fail` yields `dispatch` `phantasos` and sets it to 2. A `spec-defect` verdict yields `dispatch` `phantasos` and leaves the counter unchanged. The counter SHALL be deleted on `pass`, and reset to 0 when `phantasos` or `baku` completes; a `morpheus` turn SHALL NOT change it. Every counter file SHALL also record the `session_id` that last wrote it. A `phantasos` or `baku` completion with no `[change: <slug>]` tag SHALL reset the most recently updated counter file written by that same `session_id` (the sole-active-change fallback is not used for these two agents, because `baku` completes after the change has been archived); if that session wrote none, it is a no-op. Files older than 14 days SHALL be pruned on write. Every read-modify-write SHALL hold a lock file created with `O_CREATE|O_EXCL` (5 second acquire timeout, treated as stale after 30 seconds) and write via a temp file renamed over the target; a lock timeout SHALL fail open (no directive, stderr warning, exit 0).
 
 #### Scenario: First failure goes to Morpheus
 
@@ -76,6 +91,11 @@ For each `phobetor` `fail` the mechanism SHALL consult a counter stored at `<roo
 
 - **WHEN** `phantasos` completes a turn and `c1`'s counter is 2
 - **THEN** the counter for `c1` is 0 and the next `phobetor` failure yields `dispatch` `morpheus`
+
+#### Scenario: Untagged baku completion resets this session's counter
+
+- **WHEN** `baku` completes with no `[change: ...]` tag and the most recent counter file written by this session is for `c1`
+- **THEN** the counter for `c1` is reset and counters written by other sessions are untouched
 
 #### Scenario: Two parallel sessions do not lose a failure
 
