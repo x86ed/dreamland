@@ -1,0 +1,15 @@
+body{font:14px system-ui,sans-serif;margin:0;color:#222}
+header,main{padding:0 1.5rem}
+h1{font-size:1.4rem}h2{font-size:1.1rem;margin-top:2rem}
+.banner{background:#fff6d6;border:1px solid #e6d28a;padding:.4rem .8rem;border-radius:4px}
+.error{color:#b00020;margin:.4rem 0}
+table{border-collapse:collapse;margin:.5rem 0}
+th,td{border:1px solid #ddd;padding:.25rem .6rem;text-align:right}
+th{background:#f4f4f4;cursor:pointer}
+td:first-child,th:first-child{text-align:left}
+.bar{display:inline-block;height:.9rem;background:#4a7fd6;vertical-align:middle;margin-right:.4rem}
+.up{color:#0a7a2f}.down{color:#b00020}
+.tag{font-size:.75rem;background:#eee;border-radius:3px;padding:0 .3rem;margin-left:.3rem}
+.picker label{display:inline-block;margin-right:1rem}
+.flow span{background:#eef;padding:.1rem .5rem;border-radius:3px}
+footer{color:#666;margin:2rem 0}
